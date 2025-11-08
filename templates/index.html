@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบค้นหาข้อมูล Trade-In</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            min-height: 100vh;
+        }
+
+        .sidebar-logo {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .sidebar-menu {
+            list-style: none;
+        }
+
+        .sidebar-menu li {
+            margin-bottom: 10px;
+        }
+
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            color: #333;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .sidebar-menu a:hover {
+            background: #f0f0f0;
+            color: #667eea;
+        }
+
+        .sidebar-menu a.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .sidebar-menu a span {
+            margin-right: 10px;
+            font-size: 1.2em;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .page-section {
+            display: none;
+        }
+
+        .page-section.active {
+            display: block;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 2em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .search-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        input,
+        select {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.3);
+            background: #5568d3;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.secondary {
+            background: #6c757d;
+        }
+
+        button.secondary:hover {
+            background: #5a6268;
+        }
+
+        .data-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            min-height: 400px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #667eea;
+            font-size: 18px;
+        }
+
+        .error {
+            background: #fee;
+            border: 2px solid #fcc;
+            color: #c33;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 13px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .data-table th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        .data-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .summary {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .summary-item {
+            display: inline-block;
+            margin-right: 20px;
+            font-weight: 600;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            max-height: 600px;
+        }
+
+        .action-bar {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .action-bar button {
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+
+        .action-bar button.danger {
+            background: #dc3545;
+        }
+
+        .action-bar button.danger:hover {
+            background: #c82333;
+        }
+
+        .checkbox-cell {
+            text-align: center;
+            width: 40px;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .selected-row {
+            background: #e3f2fd !important;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+
+        .modal-header {
+            font-size: 1.5em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: #000;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #d63384;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-logo">📊 Trade-In</div>
+        <ul class="sidebar-menu">
+            <li><a href="#" class="active" onclick="showPage('search', event); return false;"><span>🔍</span> ค้นหาข้อมูล</a></li>
+            <li><a href="#" onclick="showPage('report', event); return false;"><span>📈</span> รายงานยอดเทรด</a></li>
+            <li><a href="#" onclick="openSettings(); return false;"><span>⚙️</span> ตั้งค่า</a></li>
+            <li><a href="#" onclick="showTelegramSetup(); return false;"><span>📱</span> ตั้งค่า Telegram</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Search Page -->
+        <div id="searchPage" class="page-section active">
+            <div class="container">
+                <h1>🔍 ระบบค้นหาข้อมูล Trade-In</h1>
+
+        <!-- Extension Banner -->
+        <div id="extensionBanner"
+            style="display: none; background: #fff3cd; border: 2px solid #ffc107; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="flex: 1;">
+                    <h3 style="margin: 0 0 5px 0; color: #856404;">🔌 ใช้งานง่ายขึ้นด้วย Extension!</h3>
+                    <p style="margin: 0 0 10px 0; color: #856404; font-size: 14px;">ไม่ต้องคัดลอก Session ID เอง -
+                        คลิกเพียง 2 ครั้ง</p>
+                    <button onclick="window.location.href='/install-extension'"
+                        style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                        📥 ติดตั้ง Extension
+                    </button>
+                    <button onclick="dismissBanner()"
+                        style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">
+                        ไว้ทีหลัง
+                    </button>
+                </div>
+                <button onclick="dismissBanner()"
+                    style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: #856404; padding: 0 10px;">×</button>
+            </div>
+        </div>
+
+        <div
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px;">
+            <div>
+                <button onclick="window.open('https://eve.techswop.com/TI/login.aspx', '_blank')"
+                    style="padding: 8px 20px; font-size: 14px; background: #28a745;">🔐 Login ระบบ</button>
+                <span id="statusText" style="margin-left: 10px; color: white; font-size: 14px;">⚠️ กรุณา login
+                    ก่อนยกเลิกรายการ</span>
+            </div>
+            <div>
+                <button onclick="openSettings()" class="secondary" style="padding: 8px 20px; font-size: 14px;">⚙️
+                    ตั้งค่าข้อมูลพนักงาน</button>
+            </div>
+        </div>
+
+        <div class="search-panel">
+            <form id="searchForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>รหัสพนักงาน</label>
+                        <input type="text" id="saleCode" placeholder="ระบุรหัสพนักงาน">
+                    </div>
+
+                    <div class="form-group">
+                        <label>วันที่คำสั่งเทรด (จาก)</label>
+                        <input type="date" id="dateStart" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>วันที่คำสั่งเทรด (ถึง)</label>
+                        <input type="date" id="dateEnd" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>สถานะคำสั่งเทรด</label>
+                        <select id="status">
+                            <option value="">รายการทั้งหมด</option>
+                            <option value="1">รอการประเมินราคา</option>
+                            <option value="2">อยู่ระหว่างผู้รับซื้อให้ราคา</option>
+                            <option value="3">รอผู้ขายยืนยันราคา</option>
+                            <option value="4">ยืนยันราคาแล้ว</option>
+                            <option value="5">สิ้นสุดการประเมินราคา</option>
+                            <option value="6">ยกเลิกรายการ</option>
+                            <option value="7">เอกสารอยู่ระหว่างแก้ไข</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>แบรนด์</label>
+                        <select id="brand" multiple size="1">
+                            <option value="">ทั้งหมด</option>
+                            <option value="TRUSCO">TRUSCO</option>
+                            <option value="Acer">Acer</option>
+                            <option value="Apple">Apple</option>
+                            <option value="Asus">Asus</option>
+                            <option value="Avita">Avita</option>
+                            <option value="BOX">BOX</option>
+                            <option value="COM7">COM7</option>
+                            <option value="Dell">Dell</option>
+                            <option value="Fujitsu">Fujitsu</option>
+                            <option value="Garmin">Garmin</option>
+                            <option value="Gigabyte">Gigabyte</option>
+                            <option value="Honor">Honor</option>
+                            <option value="HP">HP</option>
+                            <option value="Huawei">Huawei</option>
+                            <option value="Infinix">Infinix</option>
+                            <option value="Lenovo">Lenovo</option>
+                            <option value="LG">LG</option>
+                            <option value="Microsoft">Microsoft</option>
+                            <option value="MSI">MSI</option>
+                            <option value="Nintendo">Nintendo</option>
+                            <option value="Nothing">Nothing</option>
+                            <option value="OnePlus">OnePlus</option>
+                            <option value="Oppo">Oppo</option>
+                            <option value="Realme">Realme</option>
+                            <option value="Samsung">Samsung</option>
+                            <option value="Sony">Sony</option>
+                            <option value="Vivo">Vivo</option>
+                            <option value="Xiaomi">Xiaomi</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>รุ่น</label>
+                        <input type="text" id="series" placeholder="ระบุรุ่น">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>เลขที่เอกสารอ้างอิง</label>
+                        <select id="docRefType">
+                            <option value="">ทั้งหมด</option>
+                            <option value="1">ระบุ</option>
+                            <option value="0">ไม่ระบุ</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>ระบุเลขที่เอกสารอ้างอิง</label>
+                        <input type="text" id="docRefNumber" placeholder="ระบุเลขที่เอกสาร">
+                    </div>
+
+                    <div class="form-group">
+                        <label>โปรโมชั่นส่วนลด (แบรนด์)</label>
+                        <input type="text" id="promoCode" placeholder="ระบุโค้ดโปรโมชั่น">
+                    </div>
+
+                    <div class="form-group">
+                        <label>ลายเซ็นลูกค้า</label>
+                        <select id="customerSign">
+                            <option value="">ทั้งหมด</option>
+                            <option value="1">เซ็นแล้ว</option>
+                            <option value="2">ยังไม่เซ็น</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button type="submit">🔍 ค้นหา</button>
+                    <button type="button" class="secondary" onclick="resetForm()">🔄 ล้างค่า</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="data-container" id="dataContainer">
+            <p style="text-align: center; color: #999; padding: 50px;">
+                กรุณากรอกข้อมูลและกดปุ่ม "ค้นหา" เพื่อแสดงผล
+            </p>
+        </div>
+            </div>
+        </div>
+        <!-- End Search Page -->
+
+        <!-- Report Page -->
+        <div id="reportPage" class="page-section">
+            <div class="container">
+                <h1>📈 รายงานยอดเทรด</h1>
+
+                <div class="search-panel">
+                    <form id="reportForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>รหัสพนักงาน</label>
+                                <input type="text" id="reportSaleCode" placeholder="ระบุรหัสพนักงาน">
+                            </div>
+
+                            <div class="form-group">
+                                <label>วันที่เริ่มต้น</label>
+                                <input type="date" id="reportDateStart" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label>วันที่สิ้นสุด</label>
+                                <input type="date" id="reportDateEnd" required>
+                            </div>
+                        </div>
+
+                        <div class="btn-group">
+                            <button type="submit">📊 สร้างรายงาน</button>
+                            <button type="button" class="secondary" onclick="resetReportForm()">🔄 ล้างค่า</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="data-container" id="reportContainer">
+                    <p style="text-align: center; color: #999; padding: 50px;">
+                        กรุณากรอกข้อมูลและกดปุ่ม "สร้างรายงาน" เพื่อแสดงผล
+                    </p>
+                </div>
+            </div>
+        </div>
+        <!-- End Report Page -->
+    </div>
+
+    <!-- Modal ตั้งค่าข้อมูลพนักงาน -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeSettings()">&times;</span>
+                ⚙️ ตั้งค่าข้อมูลพนักงาน
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>รหัสพนักงาน</label>
+                    <input type="text" id="settingEmpCode" placeholder="ระบุรหัสพนักงาน">
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>ชื่อพนักงาน</label>
+                    <input type="text" id="settingEmpName" placeholder="ระบุชื่อพนักงาน">
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>เบอร์โทรศัพท์</label>
+                    <input type="text" id="settingEmpPhone" placeholder="เช่น 081-234-5678">
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>ประเภทการยกเลิกรายการ</label>
+                    <select id="settingCancelType">
+                        <option value="1">โดนยกเลิกจากผู้ขาย</option>
+                        <option value="2">อื่นๆ</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>สาเหตุการยกเลิกรายการ</label>
+                    <select id="settingReasonCancel">
+                        <option value="1">ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง</option>
+                        <option value="2">ราคาไม่ตรงตามที่ต้องการ</option>
+                        <option value="3">อื่นๆ</option>
+                    </select>
+                </div>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #667eea;">🍪 Session Cookie
+                    (สำหรับยกเลิกรายการ)</h3>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>ASP.NET_SessionId</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="settingSessionId" placeholder="คัดลอกจาก Browser DevTools" style="flex: 1;">
+                        <button onclick="autoFetchSession(event)" style="padding: 10px 20px; white-space: nowrap;">
+                            🔄 ดึงอัตโนมัติ
+                        </button>
+                    </div>
+                </div>
+                <p style="color: #666; font-size: 14px;">
+                    💡 <strong>วิธีที่ 1: ดึงอัตโนมัติ (แนะนำ)</strong><br>
+                    - กด "🔄 ดึงอัตโนมัติ" → เปิดหน้า eve.techswop.com → Login → Copy Session ID กลับมาวาง<br><br>
+                    
+                    💡 <strong>วิธีที่ 2: ดึงด้วย Console</strong><br>
+                    1. Login เข้าระบบ eve.techswop.com<br>
+                    2. กด F12 → Console<br>
+                    3. พิมพ์: <code>document.cookie.match(/ASP\.NET_SessionId=([^;]+)/)[1]</code><br>
+                    4. Copy ค่าที่ได้มาวางที่นี่
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeSettings()" class="secondary">ยกเลิก</button>
+                <button onclick="saveSettings()">💾 บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ตั้งค่าวันที่เริ่มต้น
+        window.addEventListener('load', () => {
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            document.getElementById('dateStart').valueAsDate = yesterday;
+            document.getElementById('dateEnd').valueAsDate = today;
+            document.getElementById('reportDateStart').valueAsDate = yesterday;
+            document.getElementById('reportDateEnd').valueAsDate = today;
+
+            // โหลดข้อมูลพนักงานจาก localStorage
+            loadEmployeeSettings();
+
+            // ตรวจสอบ Extension และ Session ID
+            checkExtensionAndSession();
+        });
+
+        // ฟังก์ชันสลับหน้า
+        function showPage(pageName, event) {
+            // ซ่อนทุกหน้า
+            document.querySelectorAll('.page-section').forEach(section => {
+                section.classList.remove('active');
+            });
+
+            // แสดงหน้าที่เลือก
+            if (pageName === 'search') {
+                document.getElementById('searchPage').classList.add('active');
+            } else if (pageName === 'report') {
+                document.getElementById('reportPage').classList.add('active');
+            }
+
+            // อัพเดทเมนู active
+            document.querySelectorAll('.sidebar-menu a').forEach(link => {
+                link.classList.remove('active');
+            });
+            if (event) {
+                event.target.closest('a').classList.add('active');
+            }
+        }
+
+        function checkExtensionAndSession() {
+            const sessionId = localStorage.getItem('sessionId');
+            const dismissed = localStorage.getItem('extensionBannerDismissed');
+            const statusText = document.getElementById('statusText');
+
+            if (sessionId) {
+                // มี Session ID แล้ว
+                statusText.textContent = '✅ พร้อมใช้งาน';
+                statusText.style.color = '#90EE90';
+            } else {
+                // ยังไม่มี Session ID
+                if (!dismissed) {
+                    // แสดง banner แนะนำติดตั้ง Extension
+                    document.getElementById('extensionBanner').style.display = 'block';
+                }
+                statusText.textContent = '⚠️ กรุณาตั้งค่า Session ID';
+            }
+        }
+
+        function dismissBanner() {
+            document.getElementById('extensionBanner').style.display = 'none';
+            localStorage.setItem('extensionBannerDismissed', 'true');
+        }
+
+        function openSettings() {
+            document.getElementById('settingsModal').classList.add('show');
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('show');
+        }
+
+        function saveSettings() {
+            const empCode = document.getElementById('settingEmpCode').value;
+            const empName = document.getElementById('settingEmpName').value;
+            const empPhone = document.getElementById('settingEmpPhone').value;
+            const cancelType = document.getElementById('settingCancelType').value;
+            const reasonCancel = document.getElementById('settingReasonCancel').value;
+            const sessionId = document.getElementById('settingSessionId').value;
+
+            if (!empCode || !empName || !empPhone) {
+                alert('⚠️ กรุณากรอกข้อมูลพนักงานให้ครบถ้วน');
+                return;
+            }
+
+            if (!sessionId) {
+                alert('⚠️ กรุณากรอก Session ID (ดูวิธีหาด้านล่าง)');
+                return;
+            }
+
+            // บันทึกลง localStorage
+            localStorage.setItem('empCode', empCode);
+            localStorage.setItem('empName', empName);
+            localStorage.setItem('empPhone', empPhone);
+            localStorage.setItem('cancelType', cancelType);
+            localStorage.setItem('reasonCancel', reasonCancel);
+            localStorage.setItem('sessionId', sessionId);
+
+            alert('✅ บันทึกข้อมูลเรียบร้อย');
+            closeSettings();
+        }
+
+        function loadEmployeeSettings() {
+            const empCode = localStorage.getItem('empCode') || '';
+            const empName = localStorage.getItem('empName') || '';
+            const empPhone = localStorage.getItem('empPhone') || '';
+            const cancelType = localStorage.getItem('cancelType') || '1';
+            const reasonCancel = localStorage.getItem('reasonCancel') || '1';
+            const sessionId = localStorage.getItem('sessionId') || '';
+
+            document.getElementById('settingEmpCode').value = empCode;
+            document.getElementById('settingEmpName').value = empName;
+            document.getElementById('settingEmpPhone').value = empPhone;
+            document.getElementById('settingCancelType').value = cancelType;
+            document.getElementById('settingReasonCancel').value = reasonCancel;
+            document.getElementById('settingSessionId').value = sessionId;
+        }
+
+        async function autoFetchSession(event) {
+            event.preventDefault();
+            const button = event.target;
+            const originalText = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '⏳ กำลังเปิดหน้า...';
+            
+            // เปิดหน้า eve.techswop.com ในแท็บใหม่
+            const eveWindow = window.open('https://eve.techswop.com/TI/login.aspx', '_blank');
+            
+            if (!eveWindow) {
+                alert('❌ ไม่สามารถเปิดหน้าต่างใหม่ได้\nกรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้');
+                button.disabled = false;
+                button.innerHTML = originalText;
+                return;
+            }
+            
+            button.innerHTML = '⏳ รอ Login...';
+            
+            // แสดงคำแนะนำ
+            const instructions = `
+📋 ขั้นตอนการดึง Session ID:
+
+1. ✅ Login เข้าระบบในแท็บที่เปิดขึ้นมา
+2. ✅ กด F12 เปิด DevTools
+3. ✅ ไปที่แท็บ Console
+4. ✅ พิมพ์คำสั่งนี้:
+
+document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
+
+5. ✅ Copy ค่าที่ได้
+6. ✅ กลับมาวางในช่อง Session ID ด้านบน
+
+💡 หรือใช้ Extension เพื่อดึงอัตโนมัติ!
+            `.trim();
+            
+            // แสดง modal คำแนะนำ
+            if (confirm(instructions + '\n\nกด OK เมื่ออ่านเข้าใจแล้ว')) {
+                // Copy คำสั่งไปยัง clipboard
+                try {
+                    await navigator.clipboard.writeText('document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]');
+                    alert('✅ คัดลอกคำสั่งไปยัง Clipboard แล้ว!\nวางใน Console ของแท็บที่เปิดขึ้นมา');
+                } catch (err) {
+                    console.log('Cannot copy to clipboard:', err);
+                }
+            }
+            
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+
+        // ปิด modal เมื่อคลิกนอก modal
+        window.onclick = function (event) {
+            const modal = document.getElementById('settingsModal');
+            if (event.target == modal) {
+                closeSettings();
+            }
+        }
+
+        async function loginToSystem() {
+            const username = localStorage.getItem('username') || '';
+            const password = localStorage.getItem('password') || '';
+
+            if (!username || !password) {
+                throw new Error('ไม่พบข้อมูล login กรุณาตั้งค่าก่อน');
+            }
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Login ไม่สำเร็จ');
+                }
+
+                return result.cookies;
+            } catch (error) {
+                throw new Error(`Login ล้มเหลว: ${error.message}`);
+            }
+        }
+
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await searchData();
+        });
+
+        function resetForm() {
+            document.getElementById('searchForm').reset();
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            document.getElementById('dateStart').valueAsDate = yesterday;
+            document.getElementById('dateEnd').valueAsDate = today;
+        }
+
+        function formatDateThai(dateStr) {
+            const date = new Date(dateStr);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear(); // ใช้ ค.ศ.
+            return `${day}/${month}/${year}`;
+        }
+
+        async function searchData() {
+            const container = document.getElementById('dataContainer');
+            const submitBtn = document.querySelector('button[type="submit"]');
+
+            container.innerHTML = '<div class="loading">⏳ กำลังค้นหาข้อมูล...</div>';
+            submitBtn.disabled = true;
+
+            // ดึง Session ID จาก localStorage
+            const sessionId = localStorage.getItem('sessionId') || '';
+            
+            const params = new URLSearchParams({
+                saleCode: document.getElementById('saleCode').value,
+                dateStart: formatDateThai(document.getElementById('dateStart').value),
+                dateEnd: formatDateThai(document.getElementById('dateEnd').value),
+                status: document.getElementById('status').value,
+                brand: document.getElementById('brand').value,
+                series: document.getElementById('series').value,
+                docRefType: document.getElementById('docRefType').value,
+                docRefNumber: document.getElementById('docRefNumber').value,
+                promoCode: document.getElementById('promoCode').value,
+                customerSign: document.getElementById('customerSign').value,
+                sessionId: sessionId
+            });
+
+            try {
+                const response = await fetch(`/api/data?${params}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    container.innerHTML = `
+                        <div class="error">
+                            <h3>❌ เกิดข้อผิดพลาด</h3>
+                            <p>${data.error}</p>
+                        </div>
+                    `;
+                } else {
+                    displayData(data);
+                }
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ เกิดข้อผิดพลาด</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        function displayData(data) {
+            const container = document.getElementById('dataContainer');
+
+            // แสดงสรุปข้อมูล
+            const recordsTotal = data.recordsTotal || 0;
+            const recordsFiltered = data.recordsFiltered || recordsTotal;
+            const dataArray = data.data || [];
+
+            let html = `
+                <div class="summary">
+                    <span class="summary-item">📊 จำนวนทั้งหมด: ${recordsTotal} รายการ</span>
+                    <span class="summary-item">🔍 ผลการค้นหา: ${recordsFiltered} รายการ</span>
+                    <span class="summary-item">📄 แสดง: ${dataArray.length} รายการ</span>
+                </div>
+            `;
+
+            if (dataArray.length === 0) {
+                html += '<p style="text-align: center; color: #999; padding: 50px;">ไม่พบข้อมูล</p>';
+            } else {
+                html += `
+                    <div class="action-bar">
+                        <div>
+                            <span id="selectedCount" style="font-weight: 600;">เลือก: 0 รายการ</span>
+                        </div>
+                        <div>
+                            <button onclick="selectAll()" class="secondary">✅ เลือกทั้งหมด</button>
+                            <button onclick="deselectAll()" class="secondary" style="margin-left: 10px;">❌ ยกเลิกการเลือก</button>
+                            <button onclick="cancelSelected()" class="danger" style="margin-left: 10px;">🗑️ ยกเลิกรายการที่เลือก</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                `;
+                html += createTable(dataArray);
+                html += '</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function createTable(dataArray) {
+            // กำหนดคอลัมน์ที่ต้องการแสดงและชื่อภาษาไทย
+            const columns = [
+                { key: 'document_no', label: 'เลขที่คำสั่งเทรด' },
+                { key: 'IS_SIGNED', label: 'ลายเซ็นลูกค้า', format: (v) => v === '1' ? '✅ เซ็นแล้ว' : '❌ ยังไม่เซ็น' },
+                { key: 'SIGN_DATE', label: 'วันที่ลูกค้าคืนเครื่อง' },
+                { key: 'document_date', label: 'วันที่คำสั่งเทรด' },
+                { key: 'series', label: 'สินค้า' },
+                { key: 'category_name', label: 'ประเภทสินค้า' },
+                { key: 'brand_name', label: 'แบรนด์' },
+                { key: 'part_number', label: 'อีมี่/ซีเรียล' },
+                { key: 'amount', label: 'ราคายืนยัน', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
+                { key: 'COUPON_TRADE_IN_CODE', label: 'คูปองส่วนลดค่าเครื่อง' },
+                { key: 'invoice_no', label: 'เลขที่บิลขาย' },
+                { key: 'CAMPAIGN_ON_TOP_NAME', label: 'โปรโมชั่นส่วนลดแบรนด์' },
+                { key: 'COUPON_ON_TOP_BRAND_CODE', label: 'คูปองส่วนลดแบรนด์' },
+                { key: 'COUPON_ON_TOP_BRAND_PRICE', label: 'มูลค่าส่วนลดแบรนด์', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
+                { key: 'COUPON_ON_TOP_COMPANY_CODE', label: 'คูปองส่วนลดบริษัท' },
+                { key: 'COUPON_ON_TOP_COMPANY_PRICE', label: 'มูลค่าส่วนลดบริษัท', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
+                { key: 'customer_name', label: 'ชื่อผู้ขาย' },
+                { key: 'customer_phone_number', label: 'เบอร์โทรศัพท์ผู้ขาย' },
+                { key: 'customer_email', label: 'อีเมล์ผู้ขาย' },
+                { key: 'buyer_name', label: 'ผู้รับซื้อ' },
+                { key: 'SALE_CODE', label: 'รหัสพนักงานขาย' },
+                { key: 'SALE_NAME', label: 'ชื่อพนักงานขาย' },
+                { key: 'DOCUMENT_REF_1', label: 'เลขที่เอกสารอ้างอิง' },
+                { key: 'BIDDING_STATUS_NAME', label: 'สถานะ' },
+                { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' }
+            ];
+
+            let table = '<table class="data-table"><thead><tr>';
+
+            // เพิ่มคอลัมน์ checkbox
+            table += '<th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"></th>';
+
+            // สร้าง header
+            columns.forEach(col => {
+                table += `<th>${col.label}</th>`;
+            });
+            table += '</tr></thead><tbody>';
+
+            // สร้าง rows
+            dataArray.forEach((item, index) => {
+                const tradeInId = item.trade_in_id || '';
+                const docNo = item.document_no || '';
+                table += `<tr id="row-${index}" data-tradein-id="${tradeInId}" data-doc-no="${docNo}">`;
+
+                // เพิ่ม checkbox
+                table += `<td class="checkbox-cell"><input type="checkbox" class="row-checkbox" onchange="updateSelectedCount()"></td>`;
+
+                columns.forEach(col => {
+                    const value = item[col.key];
+                    let displayValue = value === null || value === undefined || value === '' ? '-' : value;
+
+                    // ใช้ format function ถ้ามี
+                    if (col.format && value) {
+                        displayValue = col.format(value);
+                    }
+
+                    table += `<td>${displayValue}</td>`;
+                });
+                table += '</tr>';
+            });
+
+            table += '</tbody></table>';
+            return table;
+        }
+
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = selectAllCheckbox.checked;
+                const row = cb.closest('tr');
+                if (cb.checked) {
+                    row.classList.add('selected-row');
+                } else {
+                    row.classList.remove('selected-row');
+                }
+            });
+            updateSelectedCount();
+        }
+
+        function selectAll() {
+            document.getElementById('selectAllCheckbox').checked = true;
+            toggleSelectAll();
+        }
+
+        function deselectAll() {
+            document.getElementById('selectAllCheckbox').checked = false;
+            toggleSelectAll();
+        }
+
+        function updateSelectedCount() {
+            const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+            const count = checkboxes.length;
+            document.getElementById('selectedCount').textContent = `เลือก: ${count} รายการ`;
+
+            // อัพเดท highlight แถว
+            document.querySelectorAll('.row-checkbox').forEach(cb => {
+                const row = cb.closest('tr');
+                if (cb.checked) {
+                    row.classList.add('selected-row');
+                } else {
+                    row.classList.remove('selected-row');
+                }
+            });
+        }
+
+        async function cancelSelected() {
+            const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+
+            if (checkboxes.length === 0) {
+                alert('⚠️ กรุณาเลือกรายการที่ต้องการยกเลิก');
+                return;
+            }
+
+            // ดึงข้อมูลพนักงานจาก localStorage
+            const empCode = localStorage.getItem('empCode') || '';
+            const empName = localStorage.getItem('empName') || '';
+            const empPhone = localStorage.getItem('empPhone') || '';
+            const cancelType = localStorage.getItem('cancelType') || '1';
+            const reasonCancel = localStorage.getItem('reasonCancel') || '1';
+
+            if (!empCode || !empName || !empPhone) {
+                alert('⚠️ กรุณาตั้งค่าข้อมูลพนักงานก่อน (กดปุ่ม ⚙️ ตั้งค่าข้อมูลพนักงาน)');
+                return;
+            }
+
+            const tradeInIds = [];
+            const docNos = [];
+
+            checkboxes.forEach(cb => {
+                const row = cb.closest('tr');
+                const tradeInId = row.dataset.tradeinId;
+                const docNo = row.dataset.docNo;
+                if (tradeInId) tradeInIds.push(tradeInId);
+                if (docNo) docNos.push(docNo);
+            });
+
+            // แสดงข้อมูลที่จะใช้ยกเลิก
+            const cancelTypeText = cancelType === '1' ? 'โดนยกเลิกจากผู้ขาย' : 'อื่นๆ';
+            const reasonCancelText = reasonCancel === '1' ? 'ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง' :
+                reasonCancel === '2' ? 'ราคาไม่ตรงตามที่ต้องการ' : 'อื่นๆ';
+
+            const reason = prompt('เหตุผลเพิ่มเติม (ถ้ามี):', reasonCancelText);
+            if (reason === null) return;
+
+            const confirmMsg = `คุณต้องการยกเลิก ${checkboxes.length} รายการใช่หรือไม่?\n\nเลขที่คำสั่งเทรด:\n${docNos.slice(0, 5).join('\n')}${docNos.length > 5 ? '\n...' : ''}\n\nพนักงาน: ${empName} (${empCode})\nเบอร์: ${empPhone}\nประเภท: ${cancelTypeText}\nสาเหตุ: ${reasonCancelText}\nเหตุผลเพิ่มเติม: ${reason || '-'}`;
+
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            // แสดง loading
+            const originalBtn = event.target;
+            originalBtn.disabled = true;
+            originalBtn.textContent = '⏳ กำลังยกเลิก...';
+
+            let successCount = 0;
+            let failedCount = 0;
+            const errors = [];
+
+            // ดึง Session ID จาก localStorage
+            const sessionId = localStorage.getItem('sessionId') || '';
+            if (!sessionId) {
+                alert('⚠️ กรุณาตั้งค่า Session ID ก่อน (กดปุ่ม ⚙️ ตั้งค่าข้อมูลพนักงาน)');
+                originalBtn.disabled = false;
+                originalBtn.textContent = '🗑️ ยกเลิกรายการที่เลือก';
+                return;
+            }
+
+            const eveCookies = {
+                'ASP.NET_SessionId': sessionId
+            };
+
+            // ยกเลิกทีละรายการผ่าน backend
+            for (const tradeInId of tradeInIds) {
+                try {
+                    // ตรวจสอบก่อนว่ายกเลิกได้หรือไม่
+                    const checkResponse = await fetch('/api/check-cancel', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            tradeInId: tradeInId,
+                            cookies: eveCookies
+                        })
+                    });
+
+                    if (checkResponse.ok) {
+                        const checkResult = await checkResponse.json();
+                        const canCancel = checkResult.d?.is_success || checkResult.d?.allow_cancel || checkResult.d?.success;
+
+                        if (!canCancel) {
+                            failedCount++;
+                            const msg = checkResult.d?.message || 'ไม่สามารถยกเลิกได้';
+                            errors.push(`ID ${tradeInId}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
+                            continue;
+                        }
+
+                        // ยกเลิกจริง
+                        const cancelPayload = {
+                            param: {
+                                TRADE_IN_ID: tradeInId.toString(),
+                                EMP_CODE: empCode,
+                                EMP_FULL_NAME: empName,
+                                EMP_PHONE_NUMBER: empPhone,
+                                REASON: reason || reasonCancelText,
+                                CANCEL_STATUS: cancelType,
+                                REASON_CANCEL: reasonCancel,
+                                DESCRIPTION: reason || '-'
+                            }
+                        };
+
+                        const cancelResponse = await fetch('/api/cancel-data', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                payload: cancelPayload,
+                                cookies: eveCookies
+                            })
+                        });
+
+                        if (cancelResponse.ok) {
+                            const cancelResult = await cancelResponse.json();
+                            const isSuccess = cancelResult.d?.is_success || cancelResult.d?.success;
+
+                            if (isSuccess) {
+                                successCount++;
+                            } else {
+                                failedCount++;
+                                const msg = cancelResult.d?.message || 'ยกเลิกไม่สำเร็จ';
+                                errors.push(`ID ${tradeInId}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
+                            }
+                        } else {
+                            failedCount++;
+                            errors.push(`ID ${tradeInId}: HTTP ${cancelResponse.status}`);
+                        }
+                    } else {
+                        failedCount++;
+                        errors.push(`ID ${tradeInId}: ตรวจสอบไม่สำเร็จ HTTP ${checkResponse.status}`);
+                    }
+                } catch (error) {
+                    failedCount++;
+                    errors.push(`ID ${tradeInId}: ${error.message}`);
+                }
+            }
+
+            // แสดงผลลัพธ์
+            if (successCount > 0) {
+                let msg = `✅ ยกเลิกสำเร็จ ${successCount} รายการ`;
+                if (failedCount > 0) {
+                    msg += `\n❌ ล้มเหลว ${failedCount} รายการ`;
+                    if (errors.length > 0) {
+                        msg += '\n\nรายละเอียด:\n' + errors.slice(0, 5).join('\n');
+                    }
+                }
+                alert(msg);
+                await searchData();
+            } else {
+                let msg = `❌ ยกเลิกล้มเหลวทั้งหมด ${failedCount} รายการ`;
+                if (errors.length > 0) {
+                    msg += '\n\nรายละเอียด:\n' + errors.slice(0, 5).join('\n');
+                }
+                alert(msg);
+            }
+
+            originalBtn.disabled = false;
+            originalBtn.textContent = '🗑️ ยกเลิกรายการที่เลือก';
+        }
+
+        // ฟังก์ชันรายงาน
+        document.getElementById('reportForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await generateReport();
+        });
+
+        function resetReportForm() {
+            document.getElementById('reportForm').reset();
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            document.getElementById('reportDateStart').valueAsDate = yesterday;
+            document.getElementById('reportDateEnd').valueAsDate = today;
+        }
+
+        async function generateReport() {
+            const container = document.getElementById('reportContainer');
+            const submitBtn = document.querySelector('#reportForm button[type="submit"]');
+
+            container.innerHTML = '<div class="loading">⏳ กำลังสร้างรายงาน...</div>';
+            submitBtn.disabled = true;
+
+            // ดึง Session ID จาก localStorage
+            const sessionId = localStorage.getItem('sessionId') || '';
+            
+            const params = new URLSearchParams({
+                saleCode: document.getElementById('reportSaleCode').value,
+                dateStart: formatDateThai(document.getElementById('reportDateStart').value),
+                dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
+                sessionId: sessionId,
+                customerSign: ''  // ดึงทั้งหมด (เซ็นแล้ว + ยังไม่เซ็น)
+            });
+
+            try {
+                const response = await fetch(`/api/report?${params}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    container.innerHTML = `
+                        <div class="error">
+                            <h3>❌ เกิดข้อผิดพลาด</h3>
+                            <p>${data.error}</p>
+                        </div>
+                    `;
+                } else {
+                    displayReport(data);
+                }
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ เกิดข้อผิดพลาด</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        function displayReport(data) {
+            const container = document.getElementById('reportContainer');
+            const reportData = data.report || {};
+            
+            // เก็บข้อมูลไว้ใช้ copy
+            currentReportData = data;
+
+            let html = `
+                <div style="text-align: right; margin-bottom: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="copyReportText()" style="background: #28a745; padding: 10px 20px;">📋 Copy รายงาน</button>
+                    <button onclick="sendToTelegram()" style="background: #0088cc; padding: 10px 20px;">📤 ส่งไป Telegram</button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">📊 รายการทั้งหมด</div>
+                        <div style="font-size: 32px; font-weight: bold;">${reportData.totalCount || 0}</div>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">รายการ</div>
+                    </div>
+
+                    <div style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">💰 ยอดเทรดทั้งหมด</div>
+                        <div style="font-size: 28px; font-weight: bold;">${(reportData.totalAmount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">บาท</div>
+                    </div>
+
+                    <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">✅ ลูกค้าตกลงซื้อขาย</div>
+                        <div style="font-size: 28px; font-weight: bold;">${(reportData.confirmedAmount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">${reportData.confirmedCount || 0} รายการ (ยืนยัน+สิ้นสุด)</div>
+                    </div>
+
+                    <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">❌ ลูกค้าไม่ตกลง</div>
+                        <div style="font-size: 32px; font-weight: bold;">${reportData.notConfirmedCount || 0}</div>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">รายการ (สถานะอื่นๆ)</div>
+                    </div>
+                </div>
+
+                <div style="background: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">📅 สรุปยอดเทรดรายวัน</h3>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>วันที่</th>
+                                    <th style="text-align: right;">จำนวนรายการ</th>
+                                    <th style="text-align: right;">ยอดเทรดทั้งหมด (บาท)</th>
+                                    <th style="text-align: right;">ลูกค้าตกลง (บาท)</th>
+                                    <th style="text-align: right;">อัตราตกลง (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            const dailySummary = reportData.dailySummary || {};
+            for (const [date, info] of Object.entries(dailySummary)) {
+                const confirmedCount = info.confirmedCount || 0;
+                const totalCount = info.count || 0;
+                const rate = totalCount > 0 ? ((confirmedCount / totalCount) * 100).toFixed(1) : 0;
+                const notConfirmedCount = totalCount - confirmedCount;
+                html += `
+                    <tr>
+                        <td><strong>${date}</strong></td>
+                        <td style="text-align: right;">${totalCount} <span style="color: #999; font-size: 11px;">(✅${confirmedCount} ❌${notConfirmedCount})</span></td>
+                        <td style="text-align: right;">${(info.totalAmount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+                        <td style="text-align: right; color: #11998e; font-weight: 600;">${(info.confirmedAmount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+                        <td style="text-align: right;">${rate}%</td>
+                    </tr>
+                `;
+            }
+
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="background: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">👤 สรุปยอดเทรดตามพนักงานขาย</h3>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>รหัสพนักงาน</th>
+                                    <th style="text-align: right;">จำนวนรายการ</th>
+                                    <th style="text-align: right;">อัตราตกลง (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            const salesSummary = reportData.salesSummary || {};
+            for (const [saleCode, info] of Object.entries(salesSummary)) {
+                const confirmedCount = info.confirmedCount || 0;
+                const totalCount = info.count || 0;
+                const rate = totalCount > 0 ? ((confirmedCount / totalCount) * 100).toFixed(1) : 0;
+                const notConfirmedCount = totalCount - confirmedCount;
+                html += `
+                    <tr>
+                        <td><strong>${saleCode}</strong></td>
+                        <td style="text-align: right;">${totalCount} <span style="color: #999; font-size: 11px;">(✅${confirmedCount} ❌${notConfirmedCount})</span></td>
+                        <td style="text-align: right; font-weight: 600; color: ${rate >= 50 ? '#11998e' : '#f5576c'};">${rate}%</td>
+                    </tr>
+                `;
+            }
+
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="background: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">📋 สรุปตามสถานะ</h3>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>สถานะ</th>
+                                    <th style="text-align: right;">จำนวน</th>
+                                    <th style="text-align: right;">มูลค่า (บาท)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            const statusSummary = reportData.statusSummary || {};
+            for (const [status, info] of Object.entries(statusSummary)) {
+                html += `
+                    <tr>
+                        <td>${status}</td>
+                        <td style="text-align: right;">${info.count || 0}</td>
+                        <td style="text-align: right;">${(info.amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                `;
+            }
+
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="background: white; padding: 20px; border-radius: 15px;">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">📱 สรุปตามแบรนด์</h3>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>แบรนด์</th>
+                                    <th style="text-align: right;">จำนวน</th>
+                                    <th style="text-align: right;">มูลค่า (บาท)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            const brandSummary = reportData.brandSummary || {};
+            for (const [brand, info] of Object.entries(brandSummary)) {
+                html += `
+                    <tr>
+                        <td>${brand}</td>
+                        <td style="text-align: right;">${info.count || 0}</td>
+                        <td style="text-align: right;">${(info.amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                `;
+            }
+
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        // เก็บข้อมูลรายงานไว้ใช้ copy
+        let currentReportData = null;
+
+        async function sendToTelegram() {
+            if (!currentReportData) {
+                alert('❌ ไม่มีข้อมูลรายงาน');
+                return;
+            }
+
+            // ดึงการตั้งค่า Telegram จาก localStorage
+            const botToken = localStorage.getItem('telegramBotToken') || '';
+            const chatId = localStorage.getItem('telegramChatId') || '';
+
+            if (!botToken || !chatId) {
+                const setup = confirm('❌ ยังไม่ได้ตั้งค่า Telegram Bot\n\nต้องการตั้งค่าตอนนี้หรือไม่?');
+                if (setup) {
+                    showTelegramSetup();
+                }
+                return;
+            }
+
+            const report = currentReportData.report;
+            const dateStart = document.getElementById('reportDateStart').value;
+            const dateEnd = document.getElementById('reportDateEnd').value;
+
+            // สร้างข้อความรายงาน
+            let message = `📊 รายงานยอดเทรด\n`;
+            message += `📅 วันที่: ${dateStart} - ${dateEnd}\n`;
+            message += `━━━━━━━━━━━━\n\n`;
+            message += `📈 สรุปภาพรวม\n`;
+            message += `• รายการทั้งหมด: ${report.totalCount || 0} รายการ\n`;
+            message += `• ลูกค้าตกลง: ${report.confirmedCount || 0} รายการ\n`;
+            message += `• ลูกค้าไม่ตกลง: ${report.notConfirmedCount || 0} รายการ\n\n`;
+            message += `👤 สรุปตามพนักงาน\n`;
+            
+            const salesSummary = report.salesSummary || {};
+            for (const [saleCode, info] of Object.entries(salesSummary)) {
+                const confirmedCount = info.confirmedCount || 0;
+                const totalCount = info.count || 0;
+                const notConfirmedCount = totalCount - confirmedCount;
+                message += `${saleCode}: ${totalCount} รายการ (✅${confirmedCount} ❌${notConfirmedCount})\n`;
+            }
+            
+            message += `━━━━━━━━━━━━`;
+
+            // แสดง loading
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '⏳ กำลังส่ง...';
+
+            try {
+                const response = await fetch('/api/send-telegram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        botToken: botToken,
+                        chatId: chatId,
+                        message: message
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✅ ส่งรายงานไป Telegram สำเร็จ!');
+                } else {
+                    alert('❌ ส่งไม่สำเร็จ: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+
+        function showTelegramSetup() {
+            const botToken = prompt('กรุณาใส่ Telegram Bot Token:\n\n(ดูวิธีสร้างใน TELEGRAM-SETUP.md)', localStorage.getItem('telegramBotToken') || '');
+            if (!botToken) return;
+
+            const chatId = prompt('กรุณาใส่ Chat ID:\n\n(ดูวิธีหาใน TELEGRAM-SETUP.md)', localStorage.getItem('telegramChatId') || '');
+            if (!chatId) return;
+
+            localStorage.setItem('telegramBotToken', botToken);
+            localStorage.setItem('telegramChatId', chatId);
+
+            alert('✅ บันทึกการตั้งค่า Telegram สำเร็จ!\n\nสามารถส่งรายงานได้แล้ว');
+        }
+
+        function copyReportText() {
+            if (!currentReportData) {
+                alert('❌ ไม่มีข้อมูลรายงาน');
+                return;
+            }
+
+            const report = currentReportData.report;
+            const dateStart = document.getElementById('reportDateStart').value;
+            const dateEnd = document.getElementById('reportDateEnd').value;
+
+            // สร้างข้อความรายงาน
+            let text = `📊 รายงานยอดเทรด\n`;
+            text += `📅 วันที่: ${dateStart} - ${dateEnd}\n`;
+            text += `━━━━━━━━━━━━\n\n`;
+
+            // สรุปภาพรวม
+            text += `📈 สรุปภาพรวม\n`;
+            text += `• รายการทั้งหมด: ${report.totalCount || 0} รายการ\n`;
+            text += `• ลูกค้าตกลง: ${report.confirmedCount || 0} รายการ\n`;
+            text += `• ลูกค้าไม่ตกลง: ${report.notConfirmedCount || 0} รายการ\n\n`;
+
+            // สรุปตามพนักงาน
+            text += `👤 สรุปตามพนักงาน\n`;
+            const salesSummary = report.salesSummary || {};
+            for (const [saleCode, info] of Object.entries(salesSummary)) {
+                const confirmedCount = info.confirmedCount || 0;
+                const totalCount = info.count || 0;
+                const notConfirmedCount = totalCount - confirmedCount;
+                text += `${saleCode}: ${totalCount} รายการ (✅${confirmedCount} ❌${notConfirmedCount})\n`;
+            }
+            
+            text += `━━━━━━━━━━━━`;
+
+            // Copy to clipboard
+            navigator.clipboard.writeText(text).then(() => {
+                alert('✅ Copy รายงานสำเร็จ!\nสามารถนำไปวางใน LINE ได้เลย');
+            }).catch(err => {
+                // Fallback: แสดงใน modal
+                const modal = document.createElement('div');
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+                modal.innerHTML = `
+                    <div style="background: white; padding: 30px; border-radius: 15px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                        <h3 style="margin-bottom: 15px;">📋 รายงานยอดเทรด</h3>
+                        <textarea readonly style="width: 100%; height: 400px; padding: 10px; font-family: monospace; font-size: 13px; border: 1px solid #ddd; border-radius: 5px;">${text}</textarea>
+                        <div style="margin-top: 15px; text-align: right;">
+                            <button onclick="this.closest('div').parentElement.remove()" style="background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">ปิด</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.querySelector('textarea').select();
+            });
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ติดตั้ง Extension</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.2em;
+        }
+        
+        .step {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .step h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .step p {
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        
+        .step code {
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        
+        button {
+            flex: 1;
+            padding: 15px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .secondary:hover {
+            background: #5a6268;
+        }
+        
+        .success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .success:hover {
+            background: #218838;
+        }
+        
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+            border-radius: 10px;
+            margin: 20px 0;
+            background: #000;
+        }
+        
+        .video-container img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .alert {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .alert strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 ติดตั้ง Extension</h1>
+        <p class="subtitle">ทำให้การใช้งานง่ายขึ้น - ไม่ต้องคัดลอก Session ID เอง!</p>
+        
+        <div class="alert">
+            <strong>💡 ทำไมต้องใช้ Extension?</strong>
+            Extension จะช่วยดึง Session ID จาก eve.techswop.com อัตโนมัติและส่งมาให้ระบบ
+            คุณแค่คลิก 2 ครั้ง แทนที่จะต้องเปิด DevTools และคัดลอกเอง
+        </div>
+        
+        <div class="step">
+            <h3>ขั้นตอนที่ 1: เปิดหน้าจัดการ Extensions</h3>
+            <p>1. คลิกปุ่มด้านล่างเพื่อเปิดหน้า Extensions</p>
+            <p>2. หรือพิมพ์ <code>chrome://extensions/</code> ในแถบ Address Bar</p>
+            <button onclick="openExtensionsPage()" class="primary" style="margin-top: 10px;">
+                📂 เปิดหน้า Extensions
+            </button>
+        </div>
+        
+        <div class="step">
+            <h3>ขั้นตอนที่ 2: เปิด Developer Mode</h3>
+            <p>1. หาสวิตช์ "Developer mode" ที่มุมบนขวา</p>
+            <p>2. เปิดสวิตช์ให้เป็นสีน้ำเงิน</p>
+        </div>
+        
+        <div class="step">
+            <h3>ขั้นตอนที่ 3: โหลด Extension</h3>
+            <p>1. คลิกปุ่ม "Load unpacked"</p>
+            <p>2. เลือกโฟลเดอร์ <code>extension</code> ในโปรเจคนี้</p>
+            <p>3. Extension จะปรากฏในรายการ</p>
+            <button onclick="downloadExtension()" class="success" style="margin-top: 10px;">
+                📥 ดาวน์โหลดโฟลเดอร์ Extension
+            </button>
+        </div>
+        
+        <div class="step">
+            <h3>ขั้นตอนที่ 4: Pin Extension</h3>
+            <p>1. คลิกไอคอน Extensions (รูปจิ๊กซอว์) ในแถบเครื่องมือ</p>
+            <p>2. หา "Trade-In Session Helper"</p>
+            <p>3. คลิกปุ่ม Pin 📌</p>
+        </div>
+        
+        <div class="step">
+            <h3>✅ เสร็จสิ้น!</h3>
+            <p>ตอนนี้คุณสามารถใช้งาน Extension ได้แล้ว</p>
+            <p><strong>วิธีใช้:</strong></p>
+            <p>1. Login ที่ eve.techswop.com</p>
+            <p>2. คลิกไอคอน Extension 🍪</p>
+            <p>3. กดปุ่ม "ดึง Session ID"</p>
+            <p>4. กดปุ่ม "ส่งไปยังระบบ"</p>
+        </div>
+        
+        <div class="button-group">
+            <button onclick="window.location.href='/'" class="secondary">
+                ⬅️ กลับหน้าหลัก
+            </button>
+            <button onclick="testExtension()" class="primary">
+                🧪 ทดสอบ Extension
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        function openExtensionsPage() {
+            window.open('chrome://extensions/', '_blank');
+        }
+        
+        function downloadExtension() {
+            // สร้าง link ดาวน์โหลด
+            window.location.href = '/download-extension';
+        }
+        
+        function testExtension() {
+            // ตรวจสอบว่าติดตั้ง Extension แล้วหรือยัง
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                // ลองส่งข้อความไป Extension
+                try {
+                    window.postMessage({ type: 'CHECK_EXTENSION' }, '*');
+                    setTimeout(() => {
+                        alert('✅ Extension ทำงานปกติ!\n\nกลับไปหน้าหลักเพื่อใช้งานได้เลย');
+                    }, 500);
+                } catch (e) {
+                    alert('⚠️ ยังไม่พบ Extension\n\nกรุณาติดตั้งตามขั้นตอนด้านบน');
+                }
+            } else {
+                alert('⚠️ ยังไม่พบ Extension\n\nกรุณาติดตั้งตามขั้นตอนด้านบน');
+            }
+        }
+        
+        // ตรวจสอบอัตโนมัติเมื่อโหลดหน้า
+        window.addEventListener('load', () => {
+            const sessionId = localStorage.getItem('sessionId');
+            if (sessionId) {
+                const banner = document.createElement('div');
+                banner.style.cssText = 'background: #d4edda; border: 2px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 20px;';
+                banner.innerHTML = '<strong>✅ พบ Session ID แล้ว!</strong><br>คุณสามารถใช้งานระบบได้เลย';
+                document.querySelector('.container').insertBefore(banner, document.querySelector('.container').firstChild);
+            }
+        });
+    </script>
+</body>
+</html>
