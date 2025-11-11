@@ -549,8 +549,20 @@ def line_webhook():
                 reply_token = event['replyToken']
                 user_message = event['message']['text'].lower()
                 
+                # ตรวจสอบว่าเป็นกลุ่มหรือไม่
+                source_type = event['source']['type']
+                
+                # ทำให้ข้อความเป็นตัวพิมพ์เล็กและตัดช่องว่าง
+                clean_message = user_message.strip()
+                
+                # ถ้าเป็นกลุ่ม ต้องพิมพ์คำสั่งอย่างเดียว (ไม่มีคำอื่น)
+                if source_type == 'group':
+                    # ตอบเฉพาะเมื่อพิมพ์คำสั่งอย่างเดียว
+                    if clean_message not in ['รายงาน', 'report', 'สถานะ', 'status']:
+                        continue  # ไม่ตอบข้อความอื่นๆ ในกลุ่ม
+                
                 # ตรวจสอบคำสั่ง
-                if 'รายงาน' in user_message or 'report' in user_message:
+                if clean_message in ['รายงาน', 'report']:
                     # สร้างรายงานวันนี้
                     from datetime import datetime
                     from collections import defaultdict
@@ -621,7 +633,7 @@ def line_webhook():
                     
                     reply_line_message(reply_token, message)
                 
-                elif 'สถานะ' in user_message or 'status' in user_message:
+                elif clean_message in ['สถานะ', 'status']:
                     message = "✅ ระบบทำงานปกติ\n\n"
                     message += "📊 Trade-In System\n"
                     message += "🔗 https://tech-trade-i88v.vercel.app"
