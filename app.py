@@ -551,8 +551,10 @@ def line_webhook():
                 
                 # ตรวจสอบคำสั่ง
                 if 'รายงาน' in user_message or 'report' in user_message:
-                    # ส่งรายงานวันนี้
+                    # สร้างรายงานวันนี้
                     from datetime import datetime
+                    from collections import defaultdict
+                    
                     today = datetime.now().strftime('%d/%m/%Y')
                     
                     # ดึงข้อมูลรายงาน
@@ -564,25 +566,71 @@ def line_webhook():
                         'session_id': ''
                     }
                     
-                    # สร้างรายงาน (แบบย่อ)
-                    message = f"📊 รายงานยอดเทรดวันนี้\n📅 {today}\n━━━━━━━━━━━━\n\n"
-                    message += "กำลังดึงข้อมูล...\n\n"
-                    message += "💡 ใช้คำสั่ง:\n"
-                    message += "• 'รายงาน' - ดูรายงานวันนี้\n"
-                    message += "• 'สถานะ' - ดูสถานะระบบ"
+                    # ดึงข้อมูลจาก API
+                    length = 1000
+                    start = 0
+                    all_items = []
+                    
+                    data = fetch_data_from_api(start=start, length=length, **filters)
+                    
+                    if 'error' not in data:
+                        all_items = data.get('data', [])
+                    
+                    # วิเคราะห์ข้อมูล
+                    total_count = len(all_items)
+                    confirmed_count = 0
+                    not_confirmed_count = 0
+                    sales_summary = defaultdict(lambda: {'count': 0, 'confirmedCount': 0})
+                    
+                    for item in all_items:
+                        status = item.get('BIDDING_STATUS_NAME', '')
+                        is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+                        
+                        if is_confirmed:
+                            confirmed_count += 1
+                        else:
+                            not_confirmed_count += 1
+                        
+                        # สรุปตามพนักงาน
+                        sale_code = item.get('SALE_CODE', '')
+                        if sale_code:
+                            sales_summary[sale_code]['count'] += 1
+                            if is_confirmed:
+                                sales_summary[sale_code]['confirmedCount'] += 1
+                    
+                    # สร้างข้อความรายงาน
+                    message = f"📊 รายงานยอดเทรด\n"
+                    message += f"📅 วันที่: {today}\n"
+                    message += f"━━━━━━━━━━━━\n\n"
+                    message += f"📈 สรุปภาพรวม\n"
+                    message += f"• รายการทั้งหมด: {total_count} รายการ\n"
+                    message += f"• ลูกค้าตกลง: {confirmed_count} รายการ\n"
+                    message += f"• ลูกค้าไม่ตกลง: {not_confirmed_count} รายการ\n\n"
+                    
+                    if sales_summary:
+                        message += f"👤 สรุปตามพนักงาน\n"
+                        # เรียงตามจำนวนรายการ
+                        sorted_sales = sorted(sales_summary.items(), key=lambda x: x[1]['count'], reverse=True)
+                        for sale_code, info in sorted_sales[:10]:  # แสดงแค่ 10 คนแรก
+                            confirmed = info['confirmedCount']
+                            total = info['count']
+                            not_confirmed = total - confirmed
+                            message += f"{sale_code}: {total} รายการ (✅{confirmed} ❌{not_confirmed})\n"
+                    
+                    message += f"━━━━━━━━━━━━"
                     
                     reply_line_message(reply_token, message)
                 
                 elif 'สถานะ' in user_message or 'status' in user_message:
                     message = "✅ ระบบทำงานปกติ\n\n"
                     message += "📊 Trade-In System\n"
-                    message += "🔗 https://your-app.vercel.app"
+                    message += "🔗 https://tech-trade-i88v.vercel.app"
                     reply_line_message(reply_token, message)
                 
                 else:
                     message = "สวัสดีครับ! 👋\n\n"
                     message += "💡 คำสั่งที่ใช้ได้:\n"
-                    message += "• 'รายงาน' - ดูรายงานยอดเทรด\n"
+                    message += "• 'รายงาน' - ดูรายงานวันนี้\n"
                     message += "• 'สถานะ' - ตรวจสอบระบบ"
                     reply_line_message(reply_token, message)
         
