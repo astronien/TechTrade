@@ -537,6 +537,136 @@ def send_telegram():
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
 
+@app.route('/webhook/line', methods=['POST'])
+def line_webhook():
+    """Webhook สำหรับรับข้อความจาก LINE"""
+    try:
+        body = request.get_json()
+        events = body.get('events', [])
+        
+        for event in events:
+            if event['type'] == 'message' and event['message']['type'] == 'text':
+                reply_token = event['replyToken']
+                user_message = event['message']['text'].lower()
+                
+                # ตรวจสอบคำสั่ง
+                if 'รายงาน' in user_message or 'report' in user_message:
+                    # ส่งรายงานวันนี้
+                    from datetime import datetime
+                    today = datetime.now().strftime('%d/%m/%Y')
+                    
+                    # ดึงข้อมูลรายงาน
+                    filters = {
+                        'date_start': today,
+                        'date_end': today,
+                        'sale_code': '',
+                        'customer_sign': '',
+                        'session_id': ''
+                    }
+                    
+                    # สร้างรายงาน (แบบย่อ)
+                    message = f"📊 รายงานยอดเทรดวันนี้\n📅 {today}\n━━━━━━━━━━━━\n\n"
+                    message += "กำลังดึงข้อมูล...\n\n"
+                    message += "💡 ใช้คำสั่ง:\n"
+                    message += "• 'รายงาน' - ดูรายงานวันนี้\n"
+                    message += "• 'สถานะ' - ดูสถานะระบบ"
+                    
+                    reply_line_message(reply_token, message)
+                
+                elif 'สถานะ' in user_message or 'status' in user_message:
+                    message = "✅ ระบบทำงานปกติ\n\n"
+                    message += "📊 Trade-In System\n"
+                    message += "🔗 https://your-app.vercel.app"
+                    reply_line_message(reply_token, message)
+                
+                else:
+                    message = "สวัสดีครับ! 👋\n\n"
+                    message += "💡 คำสั่งที่ใช้ได้:\n"
+                    message += "• 'รายงาน' - ดูรายงานยอดเทรด\n"
+                    message += "• 'สถานะ' - ตรวจสอบระบบ"
+                    reply_line_message(reply_token, message)
+        
+        return jsonify({'status': 'ok'})
+    
+    except Exception as e:
+        print(f"LINE Webhook Error: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def reply_line_message(reply_token, message):
+    """ส่ง Reply Message ไปยัง LINE"""
+    import os
+    channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_CHANNEL_ACCESS_TOKEN')
+    
+    url = 'https://api.line.me/v2/bot/message/reply'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {channel_access_token}'
+    }
+    payload = {
+        'replyToken': reply_token,
+        'messages': [
+            {
+                'type': 'text',
+                'text': message
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        return response.json()
+    except Exception as e:
+        print(f"Error sending LINE message: {str(e)}")
+        return None
+
+@app.route('/api/send-line', methods=['POST'])
+def send_line():
+    """API endpoint สำหรับส่งรายงานไป LINE (Push Message)"""
+    data = request.get_json()
+    channel_access_token = data.get('channelAccessToken', '')
+    user_id = data.get('userId', '')
+    message = data.get('message', '')
+    
+    if not channel_access_token or not user_id or not message:
+        return jsonify({
+            'success': False,
+            'error': 'กรุณาระบุ Channel Access Token, User ID และข้อความ'
+        })
+    
+    try:
+        url = 'https://api.line.me/v2/bot/message/push'
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {channel_access_token}'
+        }
+        payload = {
+            'to': user_id,
+            'messages': [
+                {
+                    'type': 'text',
+                    'text': message
+                }
+            ]
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            return jsonify({
+                'success': True,
+                'message': 'ส่งรายงานไป LINE สำเร็จ!'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'HTTP {response.status_code}: {response.text}'
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'เกิดข้อผิดพลาด: {str(e)}'
+        })
+
 @app.route('/api/cancel', methods=['POST'])
 def cancel_orders():
     """API endpoint สำหรับยกเลิกรายการ"""
