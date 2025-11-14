@@ -896,13 +896,30 @@
             const zoneSelect = document.getElementById('zoneSelect');
             const reportZoneSelect = document.getElementById('reportZoneSelect');
             
-            if (typeof ZONES_DATA === 'undefined' || !ZONES_DATA) {
-                console.warn('⚠️ ไม่พบข้อมูล ZONES_DATA');
+            // ล้าง options เดิม (เว้น option แรก)
+            while (zoneSelect.options.length > 1) {
+                zoneSelect.remove(1);
+            }
+            while (reportZoneSelect.options.length > 1) {
+                reportZoneSelect.remove(1);
+            }
+            
+            // โหลด zones จาก localStorage (รวม custom zones)
+            const zones = loadZonesFromStorage();
+            
+            if (!zones || zones.length === 0) {
+                console.warn('⚠️ ไม่พบข้อมูล Zones');
                 return;
             }
             
+            // อัพเดท ZONES_DATA ใน memory
+            if (typeof ZONES_DATA !== 'undefined') {
+                ZONES_DATA.length = 0;
+                ZONES_DATA.push(...zones);
+            }
+            
             // เพิ่ม options
-            ZONES_DATA.forEach(zone => {
+            zones.forEach(zone => {
                 const option1 = document.createElement('option');
                 option1.value = zone.zone_id;
                 option1.textContent = `${zone.zone_name} (${zone.branch_ids.length} สาขา)`;
@@ -914,7 +931,7 @@
                 reportZoneSelect.appendChild(option2);
             });
             
-            console.log(`✅ โหลด ${ZONES_DATA.length} Zones`);
+            console.log(`✅ โหลด ${zones.length} Zones (รวม custom zones)`);
         }
 
         // ฟังก์ชันจัดการเมื่อเลือก Zone (Search Page)
@@ -1221,7 +1238,7 @@
         }
 
         // บันทึก Zone
-        function saveZone() {
+        async function saveZone() {
             const editingZoneId = document.getElementById('editingZoneId').value;
             const zoneName = document.getElementById('zoneName').value.trim();
             
@@ -1259,14 +1276,41 @@
             }
             
             saveZonesToStorage(zones);
+            
+            // Sync ไปยัง Backend สำหรับ LINE Bot
+            await syncZonesToBackend(zones);
+            
             closeZoneModal();
             loadZonesManagement();
             
             alert('✅ บันทึก Zone เรียบร้อย');
         }
 
+        // Sync Zones ไปยัง Backend
+        async function syncZonesToBackend(zones) {
+            try {
+                const response = await fetch('/api/zones', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ zones: zones })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('✅ Sync zones to backend:', result.message);
+                } else {
+                    console.error('❌ Failed to sync zones:', result);
+                }
+            } catch (error) {
+                console.error('❌ Error syncing zones:', error);
+            }
+        }
+
         // ลบ Zone
-        function deleteZone(zoneId) {
+        async function deleteZone(zoneId) {
             if (!confirm('คุณต้องการลบ Zone นี้ใช่หรือไม่?')) {
                 return;
             }
@@ -1275,6 +1319,10 @@
             const filtered = zones.filter(z => z.zone_id !== zoneId);
             
             saveZonesToStorage(filtered);
+            
+            // Sync ไปยัง Backend
+            await syncZonesToBackend(filtered);
+            
             loadZonesManagement();
             
             alert('✅ ลบ Zone เรียบร้อย');
@@ -1286,12 +1334,16 @@
         }
 
         // โหลด Zones จาก localStorage เมื่อเริ่มต้น
-        window.addEventListener('load', () => {
+        // โหลดและ sync zones เมื่อเริ่มต้น
+        window.addEventListener('load', async () => {
             // โหลด custom zones ถ้ามี
             const customZones = loadZonesFromStorage();
             if (customZones.length > 0 && typeof ZONES_DATA !== 'undefined') {
                 ZONES_DATA.length = 0;
                 ZONES_DATA.push(...customZones);
+                
+                // Sync ไปยัง Backend ทันทีเมื่อโหลดหน้า
+                await syncZonesToBackend(customZones);
             }
         });
 
