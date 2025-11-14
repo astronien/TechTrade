@@ -2,8 +2,57 @@ from flask import Flask, render_template, jsonify, request
 import requests
 import json
 from datetime import datetime, timedelta
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
+
+# Supabase Database Connection
+def get_db_connection():
+    """สร้าง connection ไปยัง Supabase PostgreSQL"""
+    try:
+        conn = psycopg2.connect(
+            os.environ.get('POSTGRES_URL_NON_POOLING'),
+            cursor_factory=RealDictCursor
+        )
+        return conn
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        return None
+
+# สร้างตาราง zones ถ้ายังไม่มี
+def init_database():
+    """สร้างตาราง zones ใน database"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS custom_zones (
+                id SERIAL PRIMARY KEY,
+                zone_id VARCHAR(255) UNIQUE NOT NULL,
+                zone_name VARCHAR(255) NOT NULL,
+                branch_ids JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Database initialized")
+        return True
+    except Exception as e:
+        print(f"❌ Error initializing database: {e}")
+        if conn:
+            conn.close()
+        return False
+
+# เรียก init เมื่อ start app
+init_database()
 
 # API Configuration
 API_URL = "https://eve.techswop.com/ti/index.aspx/Getdata"
@@ -546,32 +595,72 @@ def send_telegram():
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
 
-# ไฟล์สำหรับเก็บ custom zones
-CUSTOM_ZONES_FILE = 'custom_zones.json'
-
-# โหลด custom zones จากไฟล์
+# โหลด custom zones จาก Supabase
 def load_custom_zones_from_file():
-    """โหลด custom zones จากไฟล์"""
-    import os
-    if os.path.exists(CUSTOM_ZONES_FILE):
-        try:
-            with open(CUSTOM_ZONES_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading custom zones: {e}")
-            return []
-    return []
-
-# บันทึก custom zones ลงไฟล์
-def save_custom_zones_to_file(custom_zones):
-    """บันทึก custom zones ลงไฟล์"""
+    """โหลด custom zones จาก Supabase PostgreSQL"""
+    conn = get_db_connection()
+    if not conn:
+        return []
+    
     try:
-        with open(CUSTOM_ZONES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(custom_zones, f, ensure_ascii=False, indent=2)
-        print(f"✅ บันทึก {len(custom_zones)} custom zones ลงไฟล์")
+        cur = conn.cursor()
+        cur.execute("SELECT zone_id, zone_name, branch_ids FROM custom_zones ORDER BY created_at")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        zones = []
+        for row in rows:
+            zones.append({
+                'zone_id': row['zone_id'],
+                'zone_name': row['zone_name'],
+                'branch_ids': row['branch_ids']
+            })
+        
+        print(f"✅ โหลด {len(zones)} custom zones จาก database")
+        return zones
+    except Exception as e:
+        print(f"❌ Error loading custom zones: {e}")
+        if conn:
+            conn.close()
+        return []
+
+# บันทึก custom zones ลง Supabase
+def save_custom_zones_to_file(custom_zones):
+    """บันทึก custom zones ลง Supabase PostgreSQL"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        # ลบ zones เดิมทั้งหมด
+        cur.execute("DELETE FROM custom_zones")
+        
+        # เพิ่ม zones ใหม่
+        for zone in custom_zones:
+            cur.execute("""
+                INSERT INTO custom_zones (zone_id, zone_name, branch_ids)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (zone_id) 
+                DO UPDATE SET 
+                    zone_name = EXCLUDED.zone_name,
+                    branch_ids = EXCLUDED.branch_ids,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (zone['zone_id'], zone['zone_name'], json.dumps(zone['branch_ids'])))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        print(f"✅ บันทึก {len(custom_zones)} custom zones ลง database")
         return True
     except Exception as e:
         print(f"❌ Error saving custom zones: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
         return False
 
 # โหลด Zones data

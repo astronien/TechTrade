@@ -892,7 +892,7 @@
         }
 
         // ฟังก์ชันโหลด Zone dropdown
-        function loadZones() {
+        async function loadZones() {
             const zoneSelect = document.getElementById('zoneSelect');
             const reportZoneSelect = document.getElementById('reportZoneSelect');
             
@@ -904,8 +904,8 @@
                 reportZoneSelect.remove(1);
             }
             
-            // โหลด zones จาก localStorage (รวม custom zones)
-            const zones = loadZonesFromStorage();
+            // โหลด zones จาก server (รวม custom zones)
+            const zones = await loadZonesFromStorage();
             
             if (!zones || zones.length === 0) {
                 console.warn('⚠️ ไม่พบข้อมูล Zones');
@@ -1094,15 +1094,15 @@
             return typeof ZONES_DATA !== 'undefined' ? [...ZONES_DATA] : [];
         }
 
-        // บันทึก Zones (ไม่ใช้ localStorage อีกต่อไป)
-        function saveZonesToStorage(zones) {
+        // บันทึก Zones (อัพเดท memory และ dropdown)
+        async function saveZonesToStorage(zones) {
             // อัพเดท ZONES_DATA ใน memory
             if (typeof ZONES_DATA !== 'undefined') {
                 ZONES_DATA.length = 0;
                 ZONES_DATA.push(...zones);
             }
             // รีโหลด Zone dropdowns
-            loadZones();
+            await loadZones();
         }
 
         // แสดงรายการ Zones
@@ -1283,14 +1283,14 @@
                 });
             }
             
-            // Sync ไปยัง Backend (บันทึกลงไฟล์)
+            // Sync ไปยัง Backend (บันทึกลง memory)
             await syncZonesToBackend(zones);
             
             // อัพเดท local memory
-            saveZonesToStorage(zones);
+            await saveZonesToStorage(zones);
             
             closeZoneModal();
-            loadZonesManagement();
+            await loadZonesManagement();
             
             alert('✅ บันทึก Zone เรียบร้อย');
         }
@@ -1332,11 +1332,11 @@
             const zones = await loadZonesFromStorage();
             const filtered = zones.filter(z => z.zone_id !== zoneId);
             
-            // Sync ไปยัง Backend (บันทึกลงไฟล์)
+            // Sync ไปยัง Backend (บันทึกลง memory)
             await syncZonesToBackend(filtered);
             
             // อัพเดท local memory
-            saveZonesToStorage(filtered);
+            await saveZonesToStorage(filtered);
             
             await loadZonesManagement();
             
