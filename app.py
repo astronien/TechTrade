@@ -707,22 +707,29 @@ def find_zone_by_name(zone_name):
     
     return None
 
-def find_branch_by_id(branch_id_str):
-    """ค้นหาสาขาจาก branch_id (รหัสจาก branch_name เช่น 00009)"""
+def find_branch_by_id(branch_id_input):
+    """ค้นหาสาขาจาก ID number (เช่น 9 จาก ID9, 13 จาก ID13)"""
     import os
+    import re
     branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
     
     try:
+        # แปลงเป็นตัวเลข
+        search_id = int(branch_id_input)
+        
         with open(branches_file, 'r', encoding='utf-8') as f:
             branches_data = json.load(f)
             
         for branch in branches_data:
             branch_name = branch.get('branch_name', '')
-            # ดึงรหัสจาก branch_name (ส่วนแรกก่อน :)
-            if ' : ' in branch_name:
-                code = branch_name.split(' : ')[0].strip()
-                if code == branch_id_str:
+            # ดึงตัวเลขจาก ID (เช่น "00009 : ID9 : ..." -> 9)
+            match = re.search(r'ID(\d+)', branch_name)
+            if match:
+                id_number = int(match.group(1))
+                if id_number == search_id:
                     return branch
+    except ValueError:
+        print(f"Invalid branch_id: {branch_id_input}")
     except Exception as e:
         print(f"Error loading branches: {e}")
     
@@ -763,6 +770,9 @@ def get_month_date_range(month_number, year=None):
     
     return first_day.strftime('%d/%m/%Y'), last_day.strftime('%d/%m/%Y')
 
+# Import LINE Bot Handler
+from line_bot_handler import handle_line_message
+
 @app.route('/webhook/line', methods=['POST'])
 def line_webhook():
     """Webhook สำหรับรับข้อความจาก LINE"""
@@ -778,177 +788,25 @@ def line_webhook():
                 # ตรวจสอบว่าเป็นกลุ่มหรือไม่
                 source_type = event['source']['type']
                 
-                # ทำให้ข้อความเป็นตัวพิมพ์เล็กและตัดช่องว่าง
-                clean_message = user_message.strip()
-                
                 # ถ้าเป็นกลุ่ม ต้องขึ้นต้นด้วย "รายงาน"
                 if source_type == 'group':
-                    if not clean_message.startswith('รายงาน'):
+                    if not user_message.strip().startswith('รายงาน'):
                         continue  # ไม่ตอบข้อความอื่นๆ ในกลุ่ม
                 
-                # ตรวจสอบคำสั่ง
-                if clean_message.startswith('รายงาน'):
-                    from datetime import datetime
-                    from collections import defaultdict
-                    
-                    today = datetime.now().strftime('%d/%m/%Y')
-                    
-                    # แยกคำสั่ง
-                    parts = clean_message.split(maxsplit=1)
-                    zone_name = parts[1] if len(parts) > 1 else None
-                    
-                    # ถ้าระบุ Zone
-                    if zone_name:
-                        zone = find_zone_by_name(zone_name)
-                        
-                        if not zone:
-                            reply_line_message(reply_token, f"❌ ไม่พบ Zone: {zone_name}\n\nZone ที่มี:\n" + 
-                                             "\n".join([f"• {z['zone_name']}" for z in load_zones_data()]))
-                            continue
-                        
-                        # โหลดข้อมูลสาขาทั้งหมด
-                        import os
-                        branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
-                        branches_map = {}
-                        
-                        try:
-                            with open(branches_file, 'r', encoding='utf-8') as f:
-                                branches_data = json.load(f)
-                                branches_map = {b['branch_id']: b['branch_name'] for b in branches_data}
-                        except Exception as e:
-                            print(f"Warning: Could not load branches data: {e}")
-                        
-                        # สร้างรายงานแยกตามสาขาใน Zone
-                        branch_ids = zone['branch_ids']
-                        
-                        message = f"📊 รายงานยอดเทรด\n"
-                        message += f"📅 วันที่: {today}\n"
-                        message += f"🗺️ Zone: {zone['zone_name']}\n"
-                        message += f"🏢 จำนวนสาขา: {len(branch_ids)} สาขา\n"
-                        message += f"━━━━━━━━━━━━\n\n"
-                        
-                        total_all = 0
-                        confirmed_all = 0
-                        not_confirmed_all = 0
-                        
-                        # ดึงข้อมูลแต่ละสาขา
-                        for branch_id in branch_ids:
-                            filters = {
-                                'date_start': today,
-                                'date_end': today,
-                                'sale_code': '',
-                                'customer_sign': '',
-                                'session_id': '',
-                                'branch_id': str(branch_id)
-                            }
-                            
-                            data = fetch_data_from_api(start=0, length=1000, **filters)
-                            
-                            # ดึงชื่อสาขา
-                            branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
-                            # ตัดเอาเฉพาะส่วนแรก (รหัสสาขา : ID : ชื่อ)
-                            if ' : ' in branch_name:
-                                branch_name = branch_name.split(' : ', 2)[-1]  # เอาส่วนชื่อสาขา
-                            
-                            if 'error' not in data:
-                                items = data.get('data', [])
-                                total_count = len(items)
-                                confirmed_count = sum(1 for item in items 
-                                                     if item.get('BIDDING_STATUS_NAME', '') in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'])
-                                not_confirmed_count = total_count - confirmed_count
-                                
-                                total_all += total_count
-                                confirmed_all += confirmed_count
-                                not_confirmed_all += not_confirmed_count
-                            else:
-                                # ถ้า error ให้ตั้งค่าเป็น 0
-                                total_count = 0
-                                confirmed_count = 0
-                                not_confirmed_count = 0
-                            
-                            # แสดงทุกสาขา (รวมสาขาที่ยอด 0)
-                            message += f"🏪 {branch_name}\n"
-                            message += f"  • ทั้งหมด: {total_count} รายการ\n"
-                            message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
-                        
-                        # สรุปรวม
-                        message += f"━━━━━━━━━━━━\n"
-                        message += f"📈 สรุปรวมทั้ง Zone\n"
-                        message += f"• รายการทั้งหมด: {total_all} รายการ\n"
-                        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
-                        message += f"• ลูกค้าไม่ตกลง: {not_confirmed_all} รายการ\n"
-                        
-                        reply_line_message(reply_token, message)
-                    
-                    else:
-                        # รายงานสาขาเดียว (แบบเดิม)
-                        global BRANCH_ID
-                        branch_id = BRANCH_ID
-                        
-                        filters = {
-                            'date_start': today,
-                            'date_end': today,
-                            'sale_code': '',
-                            'customer_sign': '',
-                            'session_id': '',
-                            'branch_id': branch_id
-                        }
-                        
-                        data = fetch_data_from_api(start=0, length=1000, **filters)
-                        
-                        if 'error' not in data:
-                            all_items = data.get('data', [])
-                        else:
-                            all_items = []
-                        
-                        # วิเคราะห์ข้อมูล
-                        total_count = len(all_items)
-                        confirmed_count = 0
-                        not_confirmed_count = 0
-                        sales_summary = defaultdict(lambda: {'count': 0, 'confirmedCount': 0})
-                        
-                        for item in all_items:
-                            status = item.get('BIDDING_STATUS_NAME', '')
-                            is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
-                            
-                            if is_confirmed:
-                                confirmed_count += 1
-                            else:
-                                not_confirmed_count += 1
-                            
-                            # สรุปตามพนักงาน
-                            sale_code = item.get('SALE_CODE', '')
-                            if sale_code:
-                                sales_summary[sale_code]['count'] += 1
-                                if is_confirmed:
-                                    sales_summary[sale_code]['confirmedCount'] += 1
-                        
-                        # สร้างข้อความรายงาน
-                        message = f"📊 รายงานยอดเทรด\n"
-                        message += f"📅 วันที่: {today}\n"
-                        message += f"🏢 สาขา: {branch_id}\n"
-                        message += f"━━━━━━━━━━━━\n\n"
-                        message += f"📈 สรุปภาพรวม\n"
-                        message += f"• รายการทั้งหมด: {total_count} รายการ\n"
-                        message += f"• ลูกค้าตกลง: {confirmed_count} รายการ\n"
-                        message += f"• ลูกค้าไม่ตกลง: {not_confirmed_count} รายการ\n\n"
-                        
-                        if sales_summary:
-                            message += f"👤 สรุปตามพนักงาน\n"
-                            sorted_sales = sorted(sales_summary.items(), key=lambda x: x[1]['count'], reverse=True)
-                            for sale_code, info in sorted_sales[:10]:
-                                confirmed = info['confirmedCount']
-                                total = info['count']
-                                not_confirmed = total - confirmed
-                                message += f"{sale_code}: {total} รายการ (✅{confirmed} ❌{not_confirmed})\n"
-                        
-                        message += f"━━━━━━━━━━━━"
-                        
-                        reply_line_message(reply_token, message)
+                # ใช้ handler จัดการข้อความ
+                response_message = handle_line_message(
+                    user_message,
+                    fetch_data_from_api,
+                    load_zones_data,
+                    find_zone_by_name,
+                    find_branch_by_id,
+                    parse_thai_month,
+                    get_month_date_range
+                )
                 
-                else:
-                    # ไม่ตอบข้อความอื่นๆ
-                    pass
+                # ถ้ามี response ให้ส่งกลับ
+                if response_message:
+                    reply_line_message(reply_token, response_message)
         
         return jsonify({'status': 'ok'})
     

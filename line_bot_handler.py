@@ -24,7 +24,7 @@ def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zon
     command = clean_message[7:].strip()  # ตัดคำว่า "รายงาน " (7 ตัวอักษร)
     
     if not command:
-        return "❌ กรุณาระบุคำสั่ง\n\nตัวอย่าง:\n• รายงาน zone พี่โอ๊ค\n• รายงาน 00009 รายวัน\n• รายงาน 00009 พฤศจิกายน\n• รายงาน พฤศจิกายน zone พี่โอ๊ค"
+        return "❌ กรุณาระบุคำสั่ง\n\nตัวอย่าง:\n• รายงาน zone พี่โอ๊ค\n• รายงาน 9 รายวัน (สาขา ID9)\n• รายงาน 13 พฤศจิกายน (สาขา ID13)\n• รายงาน พฤศจิกายน zone พี่โอ๊ค"
     
     # แยกคำสั่ง
     parts = command.split()
@@ -56,7 +56,7 @@ def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zon
         return generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetch_data_func, parse_month_func, get_date_range_func)
     
     else:
-        return "❌ คำสั่งไม่ถูกต้อง\n\nตัวอย่าง:\n• รายงาน zone พี่โอ๊ค\n• รายงาน 00009 รายวัน\n• รายงาน 00009 พฤศจิกายน\n• รายงาน พฤศจิกายน zone พี่โอ๊ค"
+        return "❌ คำสั่งไม่ถูกต้อง\n\nตัวอย่าง:\n• รายงาน zone พี่โอ๊ค\n• รายงาน 9 รายวัน (สาขา ID9)\n• รายงาน 13 พฤศจิกายน (สาขา ID13)\n• รายงาน พฤศจิกายน zone พี่โอ๊ค"
 
 
 def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
@@ -125,12 +125,12 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     return message
 
 
-def generate_branch_daily_report(branch_id, find_branch_func, fetch_data_func):
+def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_func):
     """สร้างรายงานวันนี้ของสาขา (แยกตามพนักงาน)"""
-    branch = find_branch_func(branch_id)
+    branch = find_branch_func(branch_id_input)
     
     if not branch:
-        return f"❌ ไม่พบสาขา: {branch_id}"
+        return f"❌ ไม่พบสาขา ID: {branch_id_input}\n\nตัวอย่าง: รายงาน 9 รายวัน (สำหรับสาขา ID9)"
     
     today = datetime.now().strftime('%d/%m/%Y')
     thai_date = format_thai_date(datetime.now())
@@ -185,10 +185,15 @@ def generate_branch_daily_report(branch_id, find_branch_func, fetch_data_func):
             sales_summary[sale_code]['not_confirmed'] += 1
     
     # สร้างข้อความ
+    import re
     branch_name = branch['branch_name'].split(' : ', 2)[-1] if ' : ' in branch['branch_name'] else branch['branch_name']
     
+    # ดึง ID number จาก branch_name (เช่น ID9 -> 9)
+    id_match = re.search(r'ID(\d+)', branch['branch_name'])
+    id_display = f"ID{id_match.group(1)}" if id_match else branch_id_input
+    
     message = f"📊 รายงานรายวัน\n"
-    message += f"🏪 สาขา: {branch_name} ({branch_id})\n"
+    message += f"🏪 สาขา: {branch_name} ({id_display})\n"
     message += f"📅 วันที่: {thai_date}\n"
     message += f"━━━━━━━━━━━━\n\n"
     
@@ -299,11 +304,16 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
             sales_summary[sale_code]['not_confirmed'] += 1
     
     # สร้างข้อความ
+    import re
     branch_name = branch['branch_name'].split(' : ', 2)[-1] if ' : ' in branch['branch_name'] else branch['branch_name']
     year = datetime.now().year + 543  # แปลงเป็น พ.ศ.
     
+    # ดึง ID number จาก branch_name (เช่น ID9 -> 9)
+    id_match = re.search(r'ID(\d+)', branch['branch_name'])
+    id_display = f"ID{id_match.group(1)}" if id_match else branch_id
+    
     message = f"📊 รายงานรายเดือน\n"
-    message += f"🏪 สาขา: {branch_name} ({branch_id})\n"
+    message += f"🏪 สาขา: {branch_name} ({id_display})\n"
     message += f"📅 เดือน: {month_name} {year}\n"
     message += f"━━━━━━━━━━━━\n\n"
     
