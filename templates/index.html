@@ -351,6 +351,34 @@
             font-size: 13px;
             color: #d63384;
         }
+
+        .form-text {
+            font-size: 12px;
+            margin-top: 5px;
+            display: block;
+        }
+
+        .text-muted {
+            color: #6c757d;
+        }
+
+        .text-success {
+            color: #28a745;
+        }
+
+        .text-danger {
+            color: #dc3545;
+        }
+
+        .text-warning {
+            color: #ffc107;
+        }
+
+        select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
     </style>
 </head>
 
@@ -361,6 +389,7 @@
         <ul class="sidebar-menu">
             <li><a href="#" class="active" onclick="showPage('search', event); return false;"><span>🔍</span> ค้นหาข้อมูล</a></li>
             <li><a href="#" onclick="showPage('report', event); return false;"><span>📈</span> รายงานยอดเทรด</a></li>
+            <li><a href="#" onclick="showPage('zones', event); return false;"><span>🗺️</span> จัดการ Zone</a></li>
             <li><a href="#" onclick="openSettings(); return false;"><span>⚙️</span> ตั้งค่า</a></li>
             <li><a href="#" onclick="showTelegramSetup(); return false;"><span>📱</span> ตั้งค่า Telegram</a></li>
         </ul>
@@ -412,6 +441,22 @@
         <div class="search-panel">
             <form id="searchForm">
                 <div class="form-row">
+                    <div class="form-group">
+                        <label for="zoneSelect">🗺️ เลือก Zone (สำหรับ Area Manager):</label>
+                        <select id="zoneSelect" class="form-control" onchange="handleZoneChange()">
+                            <option value="">-- เลือกทีละสาขา --</option>
+                        </select>
+                        <small class="form-text text-muted">เลือก Zone เพื่อค้นหาหลายสาขาพร้อมกัน</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="branchSelect">เลือกสาขา:</label>
+                        <select id="branchSelect" class="form-control" onchange="handleBranchChange()">
+                            <option value="">กำลังโหลด...</option>
+                        </select>
+                        <small id="branchStatus" class="form-text text-muted"></small>
+                    </div>
+
                     <div class="form-group">
                         <label>รหัสพนักงาน</label>
                         <input type="text" id="saleCode" placeholder="ระบุรหัสพนักงาน">
@@ -539,6 +584,22 @@
                     <form id="reportForm">
                         <div class="form-row">
                             <div class="form-group">
+                                <label for="reportZoneSelect">🗺️ เลือก Zone (สำหรับ Area Manager):</label>
+                                <select id="reportZoneSelect" class="form-control" onchange="handleReportZoneChange()">
+                                    <option value="">-- เลือกทีละสาขา --</option>
+                                </select>
+                                <small class="form-text text-muted">เลือก Zone เพื่อดูรายงานหลายสาขาพร้อมกัน</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="reportBranchSelect">เลือกสาขา:</label>
+                                <select id="reportBranchSelect" class="form-control" onchange="handleReportBranchChange()">
+                                    <option value="">กำลังโหลด...</option>
+                                </select>
+                                <small id="reportBranchStatus" class="form-text text-muted"></small>
+                            </div>
+
+                            <div class="form-group">
                                 <label>รหัสพนักงาน</label>
                                 <input type="text" id="reportSaleCode" placeholder="ระบุรหัสพนักงาน">
                             </div>
@@ -569,6 +630,64 @@
             </div>
         </div>
         <!-- End Report Page -->
+
+        <!-- Zone Management Page -->
+        <div id="zonesPage" class="page-section">
+            <div class="container">
+                <h1>🗺️ จัดการ Zone (สำหรับ Area Manager)</h1>
+
+                <div class="search-panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="margin: 0;">รายการ Zone ทั้งหมด</h3>
+                        <button onclick="openAddZoneModal()" style="padding: 10px 20px;">➕ เพิ่ม Zone ใหม่</button>
+                    </div>
+
+                    <div id="zonesList"></div>
+                </div>
+            </div>
+        </div>
+        <!-- End Zone Management Page -->
+    </div>
+
+    <!-- Modal เพิ่ม/แก้ไข Zone -->
+    <div id="zoneModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <span class="close" onclick="closeZoneModal()">&times;</span>
+                <span id="zoneModalTitle">➕ เพิ่ม Zone ใหม่</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editingZoneId">
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>ชื่อ Zone</label>
+                    <input type="text" id="zoneName" placeholder="เช่น กรุงเทพ - ใจกลางเมือง">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>เลือกสาขาใน Zone</label>
+                    <div style="border: 1px solid #ddd; border-radius: 8px; padding: 15px; max-height: 400px; overflow-y: auto; background: #f9f9f9;">
+                        <div style="margin-bottom: 10px;">
+                            <input type="text" id="branchSearchInput" placeholder="🔍 ค้นหาสาขา..." 
+                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;"
+                                   onkeyup="filterBranchList()">
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <button onclick="selectAllBranches()" class="secondary" style="padding: 6px 12px; font-size: 13px; margin-right: 5px;">✅ เลือกทั้งหมด</button>
+                            <button onclick="deselectAllBranches()" class="secondary" style="padding: 6px 12px; font-size: 13px;">❌ ยกเลิกทั้งหมด</button>
+                        </div>
+                        <div id="branchCheckboxList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px;">
+                            <!-- จะถูกสร้างด้วย JavaScript -->
+                        </div>
+                    </div>
+                    <small class="form-text text-muted">เลือกสาขาที่อยู่ใน Zone นี้ (เลือกได้หลายสาขา)</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeZoneModal()" class="secondary">ยกเลิก</button>
+                <button onclick="saveZone()">💾 บันทึก Zone</button>
+            </div>
+        </div>
     </div>
 
     <!-- Modal ตั้งค่าข้อมูลพนักงาน -->
@@ -636,6 +755,8 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='branches-data.js') }}"></script>
+    <script src="{{ url_for('static', filename='zones-data.js') }}"></script>
     <script>
         // ตั้งค่าวันที่เริ่มต้น
         window.addEventListener('load', () => {
@@ -653,6 +774,261 @@
 
             // ตรวจสอบ Extension และ Session ID
             checkExtensionAndSession();
+
+            // โหลดรายการสาขา
+            loadBranches();
+        });
+
+        // ฟังก์ชันโหลดค่าสาขาที่บันทึกไว้จาก localStorage
+        function loadSavedBranch() {
+            return localStorage.getItem('selected_branch_id') || '231';
+        }
+
+        // ฟังก์ชันบันทึกสาขาที่เลือก
+        function saveBranchSelection() {
+            const branchSelect = document.getElementById('branchSelect');
+            const reportBranchSelect = document.getElementById('reportBranchSelect');
+            
+            if (branchSelect && branchSelect.value) {
+                const selectedOption = branchSelect.options[branchSelect.selectedIndex];
+                const branchId = branchSelect.value;
+                const branchName = selectedOption ? selectedOption.textContent : branchId;
+                
+                localStorage.setItem('selected_branch_id', branchId);
+                localStorage.setItem('selected_branch_name', branchName);
+                
+                console.log(`💾 บันทึกสาขา: ${branchId} - ${branchName}`);
+            }
+            
+            // Sync กับ report dropdown
+            if (reportBranchSelect && branchSelect) {
+                reportBranchSelect.value = branchSelect.value;
+            }
+        }
+
+        // ฟังก์ชันแสดงรายการสาขาใน dropdown
+        function populateBranchDropdown(branches) {
+            const branchSelect = document.getElementById('branchSelect');
+            const reportBranchSelect = document.getElementById('reportBranchSelect');
+            const branchStatus = document.getElementById('branchStatus');
+            const reportBranchStatus = document.getElementById('reportBranchStatus');
+            
+            // Clear options เดิม
+            branchSelect.innerHTML = '';
+            reportBranchSelect.innerHTML = '';
+
+            // สร้าง option elements จาก branches array
+            branches.forEach(branch => {
+                const option1 = document.createElement('option');
+                const option2 = document.createElement('option');
+                
+                // รองรับโครงสร้างข้อมูลที่อาจแตกต่างกัน
+                const branchId = branch.BRANCH_ID || branch.branch_id || branch.id || branch.value;
+                const branchName = branch.BRANCH_NAME || branch.branch_name || branch.name || branch.text || branchId;
+                
+                option1.value = branchId;
+                option1.textContent = `${branchId} - ${branchName}`;
+                option2.value = branchId;
+                option2.textContent = `${branchId} - ${branchName}`;
+                
+                branchSelect.appendChild(option1);
+                reportBranchSelect.appendChild(option2);
+            });
+
+            // แสดงจำนวนสาขาที่พบ
+            branchStatus.textContent = `✅ พบ ${branches.length} สาขา`;
+            branchStatus.className = 'form-text text-success';
+            reportBranchStatus.textContent = `✅ พบ ${branches.length} สาขา`;
+            reportBranchStatus.className = 'form-text text-success';
+
+            // โหลดค่าสาขาที่เลือกไว้จาก localStorage
+            const savedBranchId = loadSavedBranch();
+            
+            // Set selected option ตามค่าที่โหลด
+            branchSelect.value = savedBranchId;
+            reportBranchSelect.value = savedBranchId;
+            
+            // ถ้าไม่มีค่าที่เลือกใน dropdown ให้เลือกตัวแรก
+            if (!branchSelect.value && branches.length > 0) {
+                const firstBranchId = branches[0].BRANCH_ID || branches[0].branch_id || branches[0].id || branches[0].value;
+                branchSelect.value = firstBranchId;
+                reportBranchSelect.value = firstBranchId;
+            }
+
+            console.log(`✅ โหลดสาขาสำเร็จ: ${branches.length} สาขา, เลือก: ${branchSelect.value}`);
+        }
+
+        // ฟังก์ชันดึงรายการสาขา
+        // ฟังก์ชันดึงรายการสาขา (ใช้ข้อมูล Hardcode จาก branches-data.js)
+        function loadBranches() {
+            const branchSelect = document.getElementById('branchSelect');
+            const reportBranchSelect = document.getElementById('reportBranchSelect');
+            const branchStatus = document.getElementById('branchStatus');
+            const reportBranchStatus = document.getElementById('reportBranchStatus');
+            
+            // ตรวจสอบว่ามีข้อมูล BRANCHES_DATA หรือไม่
+            if (typeof BRANCHES_DATA === 'undefined' || !BRANCHES_DATA || BRANCHES_DATA.length === 0) {
+                console.error('❌ ไม่พบข้อมูล BRANCHES_DATA');
+                branchStatus.textContent = '❌ ไม่พบข้อมูลสาขา';
+                branchStatus.className = 'form-text text-danger';
+                reportBranchStatus.textContent = '❌ ไม่พบข้อมูลสาขา';
+                reportBranchStatus.className = 'form-text text-danger';
+                return;
+            }
+            
+            // แสดงข้อมูลใน dropdown
+            populateBranchDropdown(BRANCHES_DATA);
+            
+            // อัพเดทสถานะ
+            branchStatus.textContent = `✅ โหลด ${BRANCHES_DATA.length} สาขา`;
+            branchStatus.className = 'form-text text-success';
+            reportBranchStatus.textContent = `✅ โหลด ${BRANCHES_DATA.length} สาขา`;
+            reportBranchStatus.className = 'form-text text-success';
+            
+            console.log(`✅ โหลดสาขาสำเร็จ: ${BRANCHES_DATA.length} สาขา`);
+            
+            // โหลด Zone dropdown
+            loadZones();
+        }
+
+        // ฟังก์ชันโหลด Zone dropdown
+        function loadZones() {
+            const zoneSelect = document.getElementById('zoneSelect');
+            const reportZoneSelect = document.getElementById('reportZoneSelect');
+            
+            if (typeof ZONES_DATA === 'undefined' || !ZONES_DATA) {
+                console.warn('⚠️ ไม่พบข้อมูล ZONES_DATA');
+                return;
+            }
+            
+            // เพิ่ม options
+            ZONES_DATA.forEach(zone => {
+                const option1 = document.createElement('option');
+                option1.value = zone.zone_id;
+                option1.textContent = `${zone.zone_name} (${zone.branch_ids.length} สาขา)`;
+                zoneSelect.appendChild(option1);
+                
+                const option2 = document.createElement('option');
+                option2.value = zone.zone_id;
+                option2.textContent = `${zone.zone_name} (${zone.branch_ids.length} สาขา)`;
+                reportZoneSelect.appendChild(option2);
+            });
+            
+            console.log(`✅ โหลด ${ZONES_DATA.length} Zones`);
+        }
+
+        // ฟังก์ชันจัดการเมื่อเลือก Zone (Search Page)
+        function handleZoneChange() {
+            const zoneSelect = document.getElementById('zoneSelect');
+            const branchSelect = document.getElementById('branchSelect');
+            const selectedZone = zoneSelect.value;
+            
+            if (!selectedZone) {
+                // ถ้าไม่เลือก Zone ให้แสดงสาขาทั้งหมด
+                populateBranchDropdown(BRANCHES_DATA);
+                branchSelect.disabled = false;
+                return;
+            }
+            
+            // ดึงสาขาใน Zone ที่เลือก
+            const branches = ZoneHelper.getBranchesByZone(selectedZone);
+            populateBranchDropdown(branches);
+            
+            // ปิดการเลือกสาขา (จะค้นหาทั้ง Zone)
+            branchSelect.value = '';
+            branchSelect.disabled = true;
+            
+            const zone = ZONES_DATA.find(z => z.zone_id === selectedZone);
+            document.getElementById('branchStatus').textContent = 
+                `🗺️ เลือก Zone: ${zone.zone_name} (${branches.length} สาขา)`;
+            document.getElementById('branchStatus').className = 'form-text text-success';
+            
+            console.log(`🗺️ เลือก Zone: ${selectedZone}, สาขา: ${branches.length}`);
+        }
+
+        // ฟังก์ชันจัดการเมื่อเลือกสาขา (Search Page)
+        function handleBranchChange() {
+            const zoneSelect = document.getElementById('zoneSelect');
+            const branchSelect = document.getElementById('branchSelect');
+            
+            if (branchSelect.value) {
+                // ถ้าเลือกสาขา ให้ล้างการเลือก Zone
+                zoneSelect.value = '';
+            }
+        }
+
+        // ฟังก์ชันจัดการเมื่อเลือก Zone (Report Page)
+        function handleReportZoneChange() {
+            const zoneSelect = document.getElementById('reportZoneSelect');
+            const branchSelect = document.getElementById('reportBranchSelect');
+            const selectedZone = zoneSelect.value;
+            
+            if (!selectedZone) {
+                populateBranchDropdown(BRANCHES_DATA);
+                branchSelect.disabled = false;
+                return;
+            }
+            
+            const branches = ZoneHelper.getBranchesByZone(selectedZone);
+            populateBranchDropdown(branches);
+            
+            branchSelect.value = '';
+            branchSelect.disabled = true;
+            
+            const zone = ZONES_DATA.find(z => z.zone_id === selectedZone);
+            document.getElementById('reportBranchStatus').textContent = 
+                `🗺️ เลือก Zone: ${zone.zone_name} (${branches.length} สาขา)`;
+            document.getElementById('reportBranchStatus').className = 'form-text text-success';
+        }
+
+        // ฟังก์ชันจัดการเมื่อเลือกสาขา (Report Page)
+        function handleReportBranchChange() {
+            const zoneSelect = document.getElementById('reportZoneSelect');
+            const branchSelect = document.getElementById('reportBranchSelect');
+            
+            if (branchSelect.value) {
+                zoneSelect.value = '';
+            }
+        }
+
+
+
+        // เพิ่ม event handler สำหรับ dropdown change
+        document.addEventListener('DOMContentLoaded', () => {
+            const branchSelect = document.getElementById('branchSelect');
+            const reportBranchSelect = document.getElementById('reportBranchSelect');
+            
+            if (branchSelect) {
+                branchSelect.addEventListener('change', (e) => {
+                    // เรียก saveBranchSelection() เมื่อมีการเปลี่ยนแปลง
+                    saveBranchSelection();
+                    
+                    // อัพเดทข้อมูล Trade-In ด้วย BRANCH_ID ใหม่ (ถ้ามีข้อมูลแสดงอยู่)
+                    const dataContainer = document.getElementById('dataContainer');
+                    if (dataContainer && dataContainer.querySelector('.data-table')) {
+                        // มีข้อมูลแสดงอยู่ ให้ค้นหาใหม่
+                        console.log('🔄 อัพเดทข้อมูลด้วยสาขาใหม่:', e.target.value);
+                        searchData();
+                    }
+                });
+            }
+            
+            if (reportBranchSelect) {
+                reportBranchSelect.addEventListener('change', (e) => {
+                    // Sync กับ search dropdown
+                    if (branchSelect) {
+                        branchSelect.value = e.target.value;
+                    }
+                    saveBranchSelection();
+                    
+                    // อัพเดทรายงานถ้ามีข้อมูลแสดงอยู่
+                    const reportContainer = document.getElementById('reportContainer');
+                    if (reportContainer && reportContainer.querySelector('.data-table')) {
+                        console.log('🔄 อัพเดทรายงานด้วยสาขาใหม่:', e.target.value);
+                        generateReport();
+                    }
+                });
+            }
         });
 
         // ฟังก์ชันสลับหน้า
@@ -667,6 +1043,9 @@
                 document.getElementById('searchPage').classList.add('active');
             } else if (pageName === 'report') {
                 document.getElementById('reportPage').classList.add('active');
+            } else if (pageName === 'zones') {
+                document.getElementById('zonesPage').classList.add('active');
+                loadZonesManagement();
             }
 
             // อัพเดทเมนู active
@@ -677,6 +1056,246 @@
                 event.target.closest('a').classList.add('active');
             }
         }
+
+        // ==================== Zone Management Functions ====================
+        
+        // โหลด Zones จาก localStorage
+        function loadZonesFromStorage() {
+            const saved = localStorage.getItem('custom_zones');
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch (e) {
+                    console.error('Error loading zones:', e);
+                }
+            }
+            // ถ้าไม่มีใน localStorage ให้ใช้ค่าเริ่มต้นจาก zones-data.js
+            return typeof ZONES_DATA !== 'undefined' ? [...ZONES_DATA] : [];
+        }
+
+        // บันทึก Zones ลง localStorage
+        function saveZonesToStorage(zones) {
+            localStorage.setItem('custom_zones', JSON.stringify(zones));
+            // อัพเดท ZONES_DATA ใน memory
+            if (typeof ZONES_DATA !== 'undefined') {
+                ZONES_DATA.length = 0;
+                ZONES_DATA.push(...zones);
+            }
+            // รีโหลด Zone dropdowns
+            loadZones();
+        }
+
+        // แสดงรายการ Zones
+        function loadZonesManagement() {
+            const zones = loadZonesFromStorage();
+            const container = document.getElementById('zonesList');
+            
+            if (zones.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #999; padding: 50px;">ยังไม่มี Zone<br>กดปุ่ม "➕ เพิ่ม Zone ใหม่" เพื่อเริ่มต้น</p>';
+                return;
+            }
+            
+            let html = '<div style="display: grid; gap: 15px;">';
+            
+            zones.forEach((zone, index) => {
+                const branchNames = zone.branch_ids.map(id => {
+                    const branch = BRANCHES_DATA.find(b => b.branch_id == id);
+                    return branch ? branch.branch_name.split(' : ')[0] : id;
+                }).join(', ');
+                
+                html += `
+                    <div style="background: white; border: 2px solid #e0e0e0; border-radius: 10px; padding: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <h3 style="margin: 0 0 10px 0; color: #667eea;">🗺️ ${zone.zone_name}</h3>
+                                <p style="margin: 0 0 5px 0; color: #666;">
+                                    <strong>จำนวนสาขา:</strong> ${zone.branch_ids.length} สาขา
+                                </p>
+                                <p style="margin: 0; color: #999; font-size: 13px;">
+                                    ${branchNames.substring(0, 100)}${branchNames.length > 100 ? '...' : ''}
+                                </p>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button onclick="editZone('${zone.zone_id}')" class="secondary" 
+                                        style="padding: 8px 16px; font-size: 14px;">✏️ แก้ไข</button>
+                                <button onclick="deleteZone('${zone.zone_id}')" class="danger" 
+                                        style="padding: 8px 16px; font-size: 14px; background: #dc3545;">🗑️ ลบ</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // เปิด Modal เพิ่ม Zone
+        function openAddZoneModal() {
+            document.getElementById('zoneModalTitle').textContent = '➕ เพิ่ม Zone ใหม่';
+            document.getElementById('editingZoneId').value = '';
+            document.getElementById('zoneName').value = '';
+            
+            // สร้างรายการ checkbox สาขา
+            createBranchCheckboxList([]);
+            
+            document.getElementById('zoneModal').classList.add('show');
+        }
+
+        // แก้ไข Zone
+        function editZone(zoneId) {
+            const zones = loadZonesFromStorage();
+            const zone = zones.find(z => z.zone_id === zoneId);
+            
+            if (!zone) {
+                alert('ไม่พบ Zone นี้');
+                return;
+            }
+            
+            document.getElementById('zoneModalTitle').textContent = '✏️ แก้ไข Zone';
+            document.getElementById('editingZoneId').value = zoneId;
+            document.getElementById('zoneName').value = zone.zone_name;
+            
+            // สร้างรายการ checkbox สาขา พร้อมเลือกสาขาที่มีอยู่
+            createBranchCheckboxList(zone.branch_ids);
+            
+            document.getElementById('zoneModal').classList.add('show');
+        }
+
+        // สร้างรายการ checkbox สาขา
+        function createBranchCheckboxList(selectedBranchIds) {
+            const container = document.getElementById('branchCheckboxList');
+            
+            if (typeof BRANCHES_DATA === 'undefined' || !BRANCHES_DATA) {
+                container.innerHTML = '<p style="color: #999;">ไม่พบข้อมูลสาขา</p>';
+                return;
+            }
+            
+            let html = '';
+            BRANCHES_DATA.forEach(branch => {
+                const isChecked = selectedBranchIds.includes(branch.branch_id);
+                html += `
+                    <label style="display: flex; align-items: center; padding: 8px; background: white; border: 1px solid #e0e0e0; border-radius: 5px; cursor: pointer; font-size: 13px;" 
+                           class="branch-checkbox-item">
+                        <input type="checkbox" value="${branch.branch_id}" ${isChecked ? 'checked' : ''} 
+                               style="margin-right: 8px; width: 16px; height: 16px;">
+                        <span>${branch.branch_name}</span>
+                    </label>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        // กรองรายการสาขา
+        function filterBranchList() {
+            const searchText = document.getElementById('branchSearchInput').value.toLowerCase();
+            const items = document.querySelectorAll('.branch-checkbox-item');
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                if (text.includes(searchText)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // เลือกสาขาทั้งหมด
+        function selectAllBranches() {
+            const checkboxes = document.querySelectorAll('#branchCheckboxList input[type="checkbox"]');
+            const visibleCheckboxes = Array.from(checkboxes).filter(cb => 
+                cb.closest('.branch-checkbox-item').style.display !== 'none'
+            );
+            visibleCheckboxes.forEach(cb => cb.checked = true);
+        }
+
+        // ยกเลิกการเลือกทั้งหมด
+        function deselectAllBranches() {
+            const checkboxes = document.querySelectorAll('#branchCheckboxList input[type="checkbox"]');
+            const visibleCheckboxes = Array.from(checkboxes).filter(cb => 
+                cb.closest('.branch-checkbox-item').style.display !== 'none'
+            );
+            visibleCheckboxes.forEach(cb => cb.checked = false);
+        }
+
+        // บันทึก Zone
+        function saveZone() {
+            const editingZoneId = document.getElementById('editingZoneId').value;
+            const zoneName = document.getElementById('zoneName').value.trim();
+            
+            if (!zoneName) {
+                alert('⚠️ กรุณาระบุชื่อ Zone');
+                return;
+            }
+            
+            // ดึงสาขาที่เลือก
+            const checkboxes = document.querySelectorAll('#branchCheckboxList input[type="checkbox"]:checked');
+            const branchIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            
+            if (branchIds.length === 0) {
+                alert('⚠️ กรุณาเลือกสาขาอย่างน้อย 1 สาขา');
+                return;
+            }
+            
+            const zones = loadZonesFromStorage();
+            
+            if (editingZoneId) {
+                // แก้ไข Zone เดิม
+                const index = zones.findIndex(z => z.zone_id === editingZoneId);
+                if (index !== -1) {
+                    zones[index].zone_name = zoneName;
+                    zones[index].branch_ids = branchIds;
+                }
+            } else {
+                // เพิ่ม Zone ใหม่
+                const newZoneId = 'ZONE_CUSTOM_' + Date.now();
+                zones.push({
+                    zone_id: newZoneId,
+                    zone_name: zoneName,
+                    branch_ids: branchIds
+                });
+            }
+            
+            saveZonesToStorage(zones);
+            closeZoneModal();
+            loadZonesManagement();
+            
+            alert('✅ บันทึก Zone เรียบร้อย');
+        }
+
+        // ลบ Zone
+        function deleteZone(zoneId) {
+            if (!confirm('คุณต้องการลบ Zone นี้ใช่หรือไม่?')) {
+                return;
+            }
+            
+            const zones = loadZonesFromStorage();
+            const filtered = zones.filter(z => z.zone_id !== zoneId);
+            
+            saveZonesToStorage(filtered);
+            loadZonesManagement();
+            
+            alert('✅ ลบ Zone เรียบร้อย');
+        }
+
+        // ปิด Modal
+        function closeZoneModal() {
+            document.getElementById('zoneModal').classList.remove('show');
+        }
+
+        // โหลด Zones จาก localStorage เมื่อเริ่มต้น
+        window.addEventListener('load', () => {
+            // โหลด custom zones ถ้ามี
+            const customZones = loadZonesFromStorage();
+            if (customZones.length > 0 && typeof ZONES_DATA !== 'undefined') {
+                ZONES_DATA.length = 0;
+                ZONES_DATA.push(...customZones);
+            }
+        });
+
+        // ==================== End Zone Management Functions ====================
 
         function checkExtensionAndSession() {
             const sessionId = localStorage.getItem('sessionId');
@@ -880,7 +1499,35 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             // ดึง Session ID จาก localStorage
             const sessionId = localStorage.getItem('sessionId') || '';
             
+            // ตรวจสอบว่าเลือก Zone หรือสาขาเดี่ยว
+            const zoneSelect = document.getElementById('zoneSelect');
+            const branchSelect = document.getElementById('branchSelect');
+            const selectedZone = zoneSelect.value;
+            
+            let branchIds = [];
+            if (selectedZone) {
+                // ถ้าเลือก Zone ให้ดึงสาขาทั้งหมดใน Zone
+                branchIds = ZoneHelper.getBranchIdsByZone(selectedZone);
+                console.log(`🗺️ ค้นหา Zone: ${selectedZone}, สาขา: ${branchIds.join(', ')}`);
+            } else {
+                // ถ้าเลือกสาขาเดี่ยว
+                const branchId = branchSelect.value || loadSavedBranch();
+                branchIds = [branchId];
+            }
+            
+            // ถ้าเป็น Zone (หลายสาขา) ให้ดึงข้อมูลทีละสาขาแล้วรวมกัน
+            if (branchIds.length > 1) {
+                await searchMultipleBranches(branchIds, sessionId, container, submitBtn);
+            } else {
+                // ค้นหาสาขาเดียว (แบบเดิม)
+                await searchSingleBranch(branchIds[0], sessionId, container, submitBtn);
+            }
+        }
+
+        // ฟังก์ชันค้นหาสาขาเดียว
+        async function searchSingleBranch(branchId, sessionId, container, submitBtn) {
             const params = new URLSearchParams({
+                branchId: branchId,
                 saleCode: document.getElementById('saleCode').value,
                 dateStart: formatDateThai(document.getElementById('dateStart').value),
                 dateEnd: formatDateThai(document.getElementById('dateEnd').value),
@@ -908,6 +1555,63 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                 } else {
                     displayData(data);
                 }
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ เกิดข้อผิดพลาด</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        // ฟังก์ชันค้นหาหลายสาขา (Zone)
+        async function searchMultipleBranches(branchIds, sessionId, container, submitBtn) {
+            try {
+                let allData = [];
+                let totalRecords = 0;
+                
+                // ดึงข้อมูลทีละสาขา
+                for (let i = 0; i < branchIds.length; i++) {
+                    const branchId = branchIds[i];
+                    container.innerHTML = `<div class="loading">⏳ กำลังค้นหาข้อมูล... (${i + 1}/${branchIds.length} สาขา)</div>`;
+                    
+                    const params = new URLSearchParams({
+                        branchId: branchId,
+                        saleCode: document.getElementById('saleCode').value,
+                        dateStart: formatDateThai(document.getElementById('dateStart').value),
+                        dateEnd: formatDateThai(document.getElementById('dateEnd').value),
+                        status: document.getElementById('status').value,
+                        brand: document.getElementById('brand').value,
+                        series: document.getElementById('series').value,
+                        docRefType: document.getElementById('docRefType').value,
+                        docRefNumber: document.getElementById('docRefNumber').value,
+                        promoCode: document.getElementById('promoCode').value,
+                        customerSign: document.getElementById('customerSign').value,
+                        sessionId: sessionId
+                    });
+
+                    const response = await fetch(`/api/data?${params}`);
+                    const data = await response.json();
+
+                    if (data.error) {
+                        console.error(`❌ สาขา ${branchId}: ${data.error}`);
+                    } else {
+                        allData = allData.concat(data.data || []);
+                        totalRecords += data.recordsTotal || 0;
+                    }
+                }
+                
+                // แสดงผลรวม
+                displayData({
+                    data: allData,
+                    recordsTotal: totalRecords,
+                    recordsFiltered: allData.length
+                });
+                
+                console.log(`✅ ค้นหา ${branchIds.length} สาขาเสร็จสิ้น, พบ ${allData.length} รายการ`);
             } catch (error) {
                 container.innerHTML = `
                     <div class="error">
@@ -1259,12 +1963,53 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             // ดึง Session ID จาก localStorage
             const sessionId = localStorage.getItem('sessionId') || '';
             
+            // ตรวจสอบว่าเลือก Zone หรือสาขาเดี่ยว
+            const zoneSelect = document.getElementById('reportZoneSelect');
+            const branchSelect = document.getElementById('reportBranchSelect');
+            const selectedZone = zoneSelect.value;
+            
+            let branchIds = [];
+            let reportTitle = '';
+            
+            if (selectedZone) {
+                // ถ้าเลือก Zone
+                branchIds = ZoneHelper.getBranchIdsByZone(selectedZone);
+                const zone = ZONES_DATA.find(z => z.zone_id === selectedZone);
+                reportTitle = `🗺️ ${zone.zone_name} (${branchIds.length} สาขา)`;
+                console.log(`🗺️ สร้างรายงาน Zone: ${selectedZone}, สาขา: ${branchIds.join(', ')}`);
+            } else {
+                // ถ้าเลือกสาขาเดี่ยว
+                const branchId = branchSelect.value || localStorage.getItem('selected_branch_id') || '231';
+                branchIds = [branchId];
+                const selectedOption = branchSelect.options[branchSelect.selectedIndex];
+                reportTitle = selectedOption ? selectedOption.textContent : branchId;
+            }
+            
+            // เก็บข้อมูลไว้ใช้แสดงในรายงาน
+            window.currentReportBranch = {
+                ids: branchIds,
+                title: reportTitle,
+                isZone: branchIds.length > 1
+            };
+            
+            // ถ้าเป็น Zone (หลายสาขา) ให้ดึงข้อมูลทีละสาขาแล้วรวมกัน
+            if (branchIds.length > 1) {
+                await generateMultiBranchReport(branchIds, sessionId, container, submitBtn);
+            } else {
+                // สร้างรายงานสาขาเดียว (แบบเดิม)
+                await generateSingleBranchReport(branchIds[0], sessionId, container, submitBtn);
+            }
+        }
+
+        // ฟังก์ชันสร้างรายงานสาขาเดียว
+        async function generateSingleBranchReport(branchId, sessionId, container, submitBtn) {
             const params = new URLSearchParams({
+                branchId: branchId,
                 saleCode: document.getElementById('reportSaleCode').value,
                 dateStart: formatDateThai(document.getElementById('reportDateStart').value),
                 dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
                 sessionId: sessionId,
-                customerSign: ''  // ดึงทั้งหมด (เซ็นแล้ว + ยังไม่เซ็น)
+                customerSign: ''
             });
 
             try {
@@ -1293,6 +2038,121 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             }
         }
 
+        // ฟังก์ชันสร้างรายงานหลายสาขา (Zone)
+        async function generateMultiBranchReport(branchIds, sessionId, container, submitBtn) {
+            try {
+                let allDetails = [];
+                let combinedReport = {
+                    totalCount: 0,
+                    confirmedCount: 0,
+                    notConfirmedCount: 0,
+                    cancelledCount: 0,
+                    totalAmount: 0,
+                    confirmedAmount: 0,
+                    statusSummary: {},
+                    brandSummary: {},
+                    dailySummary: {},
+                    salesSummary: {}
+                };
+                
+                // ดึงข้อมูลทีละสาขา
+                for (let i = 0; i < branchIds.length; i++) {
+                    const branchId = branchIds[i];
+                    container.innerHTML = `<div class="loading">⏳ กำลังสร้างรายงาน... (${i + 1}/${branchIds.length} สาขา)</div>`;
+                    
+                    const params = new URLSearchParams({
+                        branchId: branchId,
+                        saleCode: document.getElementById('reportSaleCode').value,
+                        dateStart: formatDateThai(document.getElementById('reportDateStart').value),
+                        dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
+                        sessionId: sessionId,
+                        customerSign: ''
+                    });
+
+                    const response = await fetch(`/api/report?${params}`);
+                    const data = await response.json();
+
+                    if (data.error) {
+                        console.error(`❌ สาขา ${branchId}: ${data.error}`);
+                    } else {
+                        // รวมข้อมูล
+                        const report = data.report;
+                        allDetails = allDetails.concat(data.details || []);
+                        
+                        combinedReport.totalCount += report.totalCount || 0;
+                        combinedReport.confirmedCount += report.confirmedCount || 0;
+                        combinedReport.notConfirmedCount += report.notConfirmedCount || 0;
+                        combinedReport.cancelledCount += report.cancelledCount || 0;
+                        combinedReport.totalAmount += report.totalAmount || 0;
+                        combinedReport.confirmedAmount += report.confirmedAmount || 0;
+                        
+                        // รวม statusSummary
+                        for (const [status, info] of Object.entries(report.statusSummary || {})) {
+                            if (!combinedReport.statusSummary[status]) {
+                                combinedReport.statusSummary[status] = { count: 0, amount: 0 };
+                            }
+                            combinedReport.statusSummary[status].count += info.count;
+                            combinedReport.statusSummary[status].amount += info.amount;
+                        }
+                        
+                        // รวม brandSummary
+                        for (const [brand, info] of Object.entries(report.brandSummary || {})) {
+                            if (!combinedReport.brandSummary[brand]) {
+                                combinedReport.brandSummary[brand] = { count: 0, amount: 0 };
+                            }
+                            combinedReport.brandSummary[brand].count += info.count;
+                            combinedReport.brandSummary[brand].amount += info.amount;
+                        }
+                        
+                        // รวม dailySummary
+                        for (const [date, info] of Object.entries(report.dailySummary || {})) {
+                            if (!combinedReport.dailySummary[date]) {
+                                combinedReport.dailySummary[date] = { count: 0, confirmedCount: 0, totalAmount: 0, confirmedAmount: 0 };
+                            }
+                            combinedReport.dailySummary[date].count += info.count;
+                            combinedReport.dailySummary[date].confirmedCount += info.confirmedCount;
+                            combinedReport.dailySummary[date].totalAmount += info.totalAmount;
+                            combinedReport.dailySummary[date].confirmedAmount += info.confirmedAmount;
+                        }
+                        
+                        // รวม salesSummary
+                        for (const [saleCode, info] of Object.entries(report.salesSummary || {})) {
+                            if (!combinedReport.salesSummary[saleCode]) {
+                                combinedReport.salesSummary[saleCode] = { 
+                                    name: info.name, 
+                                    count: 0, 
+                                    confirmedCount: 0, 
+                                    totalAmount: 0, 
+                                    confirmedAmount: 0 
+                                };
+                            }
+                            combinedReport.salesSummary[saleCode].count += info.count;
+                            combinedReport.salesSummary[saleCode].confirmedCount += info.confirmedCount;
+                            combinedReport.salesSummary[saleCode].totalAmount += info.totalAmount;
+                            combinedReport.salesSummary[saleCode].confirmedAmount += info.confirmedAmount;
+                        }
+                    }
+                }
+                
+                // แสดงผลรวม
+                displayReport({
+                    report: combinedReport,
+                    details: allDetails
+                });
+                
+                console.log(`✅ สร้างรายงาน ${branchIds.length} สาขาเสร็จสิ้น`);
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ เกิดข้อผิดพลาด</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
         function displayReport(data) {
             const container = document.getElementById('reportContainer');
             const reportData = data.report || {};
@@ -1300,7 +2160,14 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             // เก็บข้อมูลไว้ใช้ copy
             currentReportData = data;
 
+            // แสดงชื่อสาขาในหน้ารายงาน
+            const branchInfo = window.currentReportBranch || { id: '231', name: '231' };
+            const branchDisplay = `<div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
+                <strong style="color: #667eea;">🏢 สาขา:</strong> ${branchInfo.name}
+            </div>`;
+
             let html = `
+                ${branchDisplay}
                 <div style="text-align: right; margin-bottom: 15px; display: flex; gap: 10px; justify-content: flex-end;">
                     <button onclick="copyReportText()" style="background: #28a745; padding: 10px 20px;">📋 Copy รายงาน</button>
                     <button onclick="sendToTelegram()" style="background: #0088cc; padding: 10px 20px;">📤 ส่งไป Telegram</button>

@@ -11,7 +11,7 @@ BRANCH_ID = "231"  # สาขาเดิมที่ใช้ได้
 
 def get_datatables_payload(start=0, length=50, date_start=None, date_end=None, 
                           sale_code="", status="", brands=None, series="", 
-                          doc_ref_number="", promo_code="", customer_sign="0"):
+                          doc_ref_number="", promo_code="", customer_sign="0", branch_id=None):
     """สร้าง DataTables payload"""
     
     # ถ้าไม่ระบุวันที่ ใช้วันนี้
@@ -22,6 +22,10 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
     
     if brands is None:
         brands = []
+    
+    # ใช้ branch_id ที่ส่งมา หรือใช้ค่า default
+    if branch_id is None:
+        branch_id = BRANCH_ID
     
     columns = [
         {"data": "document_no", "name": "document_no", "searchable": True, "orderable": False, "search": {"value": "", "regex": False, "fixed": []}},
@@ -67,7 +71,7 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
         "series": [series] if series else [],
         "brands": brands if brands else [],
         "saleCode": sale_code,
-        "branchID": BRANCH_ID,
+        "branchID": branch_id,
         "txtSearchRef1": doc_ref_number,
         "txtSearchCOTN": promo_code,
         "DocumentRef1": "",
@@ -92,12 +96,15 @@ def fetch_data_from_api(start=0, length=50, **filters):
         cookies['ASP.NET_SessionId'] = session_id
         print(f"🔐 Using Session ID: {session_id[:10]}...")
     
-    payload = get_datatables_payload(start, length, **filters)
+    # ดึง branch_id ออกจาก filters
+    branch_id = filters.pop('branch_id', BRANCH_ID)
+    
+    payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
     
     # Debug: แสดง payload ที่ส่งไป
     print(f"📤 Sending to API:")
     print(f"   Date: {filters.get('date_start')} to {filters.get('date_end')}")
-    print(f"   Branch ID: {BRANCH_ID}")
+    print(f"   Branch ID: {branch_id}")
     print(f"   Sale Code: {filters.get('sale_code', 'N/A')}")
     
     try:
@@ -180,6 +187,7 @@ def get_data():
         'doc_ref_number': request.args.get('docRefNumber', ''),
         'promo_code': request.args.get('promoCode', ''),
         'customer_sign': request.args.get('customerSign', '0'),
+        'branch_id': request.args.get('branchId', BRANCH_ID),
         'session_id': session_id
     }
     
@@ -236,6 +244,7 @@ def get_report():
         'date_end': request.args.get('dateEnd', ''),
         'sale_code': request.args.get('saleCode', ''),
         'customer_sign': request.args.get('customerSign', ''),  # เพิ่ม customerSign
+        'branch_id': request.args.get('branchId', BRANCH_ID),
         'session_id': session_id
     }
     
@@ -537,6 +546,69 @@ def send_telegram():
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
 
+# โหลด Zones data
+def load_zones_data():
+    """โหลดข้อมูล Zones จากไฟล์"""
+    import os
+    zones_file = os.path.join(os.path.dirname(__file__), 'static', 'zones-data.js')
+    
+    # ค่า default zones
+    default_zones = [
+        {
+            "zone_id": "ZONE_BKK_CENTRAL",
+            "zone_name": "กรุงเทพ - ใจกลางเมือง",
+            "branch_ids": [1, 2, 3, 8, 9, 12, 19, 22]
+        },
+        {
+            "zone_id": "ZONE_BKK_EAST",
+            "zone_name": "กรุงเทพ - ฝั่งตะวันออก",
+            "branch_ids": [9, 18]
+        },
+        {
+            "zone_id": "ZONE_BKK_WEST",
+            "zone_name": "กรุงเทพ - ฝั่งตะวันตก",
+            "branch_ids": [16, 17, 23]
+        },
+        {
+            "zone_id": "ZONE_BKK_NORTH",
+            "zone_name": "กรุงเทพ - ฝั่งเหนือ/ปริมณฑล",
+            "branch_ids": [1, 3, 6, 12, 20, 22]
+        },
+        {
+            "zone_id": "ZONE_EAST",
+            "zone_name": "ภาคตะวันออก",
+            "branch_ids": [4, 5, 11, 25]
+        },
+        {
+            "zone_id": "ZONE_CENTRAL",
+            "zone_name": "ภาคกลาง",
+            "branch_ids": [7]
+        },
+        {
+            "zone_id": "ZONE_SOUTH",
+            "zone_name": "ภาคใต้",
+            "branch_ids": [10]
+        },
+        {
+            "zone_id": "ZONE_NORTHEAST",
+            "zone_name": "ภาคตะวันออกเฉียงเหนือ",
+            "branch_ids": [14, 15]
+        }
+    ]
+    
+    return default_zones
+
+def find_zone_by_name(zone_name):
+    """ค้นหา Zone จากชื่อ (รองรับการค้นหาแบบไม่ตรงทั้งหมด)"""
+    zones = load_zones_data()
+    zone_name_lower = zone_name.lower()
+    
+    for zone in zones:
+        if zone_name_lower in zone['zone_name'].lower():
+            return zone
+    
+    return None
+
 @app.route('/webhook/line', methods=['POST'])
 def line_webhook():
     """Webhook สำหรับรับข้อความจาก LINE"""
@@ -547,7 +619,7 @@ def line_webhook():
         for event in events:
             if event['type'] == 'message' and event['message']['type'] == 'text':
                 reply_token = event['replyToken']
-                user_message = event['message']['text'].lower()
+                user_message = event['message']['text']
                 
                 # ตรวจสอบว่าเป็นกลุ่มหรือไม่
                 source_type = event['source']['type']
@@ -555,83 +627,148 @@ def line_webhook():
                 # ทำให้ข้อความเป็นตัวพิมพ์เล็กและตัดช่องว่าง
                 clean_message = user_message.strip()
                 
-                # ถ้าเป็นกลุ่ม ต้องพิมพ์คำสั่งอย่างเดียว (ไม่มีคำอื่น)
+                # ถ้าเป็นกลุ่ม ต้องขึ้นต้นด้วย "รายงาน"
                 if source_type == 'group':
-                    # ตอบเฉพาะเมื่อพิมพ์ "รายงาน" อย่างเดียว
-                    if clean_message != 'รายงาน':
+                    if not clean_message.startswith('รายงาน'):
                         continue  # ไม่ตอบข้อความอื่นๆ ในกลุ่ม
                 
                 # ตรวจสอบคำสั่ง
-                if clean_message == 'รายงาน':
-                    # สร้างรายงานวันนี้
+                if clean_message.startswith('รายงาน'):
                     from datetime import datetime
                     from collections import defaultdict
                     
                     today = datetime.now().strftime('%d/%m/%Y')
                     
-                    # ดึงข้อมูลรายงาน
-                    filters = {
-                        'date_start': today,
-                        'date_end': today,
-                        'sale_code': '',
-                        'customer_sign': '',
-                        'session_id': ''
-                    }
+                    # แยกคำสั่ง
+                    parts = clean_message.split(maxsplit=1)
+                    zone_name = parts[1] if len(parts) > 1 else None
                     
-                    # ดึงข้อมูลจาก API
-                    length = 1000
-                    start = 0
-                    all_items = []
-                    
-                    data = fetch_data_from_api(start=start, length=length, **filters)
-                    
-                    if 'error' not in data:
-                        all_items = data.get('data', [])
-                    
-                    # วิเคราะห์ข้อมูล
-                    total_count = len(all_items)
-                    confirmed_count = 0
-                    not_confirmed_count = 0
-                    sales_summary = defaultdict(lambda: {'count': 0, 'confirmedCount': 0})
-                    
-                    for item in all_items:
-                        status = item.get('BIDDING_STATUS_NAME', '')
-                        is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+                    # ถ้าระบุ Zone
+                    if zone_name:
+                        zone = find_zone_by_name(zone_name)
                         
-                        if is_confirmed:
-                            confirmed_count += 1
+                        if not zone:
+                            reply_line_message(reply_token, f"❌ ไม่พบ Zone: {zone_name}\n\nZone ที่มี:\n" + 
+                                             "\n".join([f"• {z['zone_name']}" for z in load_zones_data()]))
+                            continue
+                        
+                        # สร้างรายงานแยกตามสาขาใน Zone
+                        branch_ids = zone['branch_ids']
+                        
+                        message = f"📊 รายงานยอดเทรด\n"
+                        message += f"📅 วันที่: {today}\n"
+                        message += f"🗺️ Zone: {zone['zone_name']}\n"
+                        message += f"🏢 จำนวนสาขา: {len(branch_ids)} สาขา\n"
+                        message += f"━━━━━━━━━━━━\n\n"
+                        
+                        total_all = 0
+                        confirmed_all = 0
+                        not_confirmed_all = 0
+                        
+                        # ดึงข้อมูลแต่ละสาขา
+                        for branch_id in branch_ids:
+                            filters = {
+                                'date_start': today,
+                                'date_end': today,
+                                'sale_code': '',
+                                'customer_sign': '',
+                                'session_id': '',
+                                'branch_id': str(branch_id)
+                            }
+                            
+                            data = fetch_data_from_api(start=0, length=1000, **filters)
+                            
+                            if 'error' not in data:
+                                items = data.get('data', [])
+                                total_count = len(items)
+                                confirmed_count = sum(1 for item in items 
+                                                     if item.get('BIDDING_STATUS_NAME', '') in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'])
+                                not_confirmed_count = total_count - confirmed_count
+                                
+                                total_all += total_count
+                                confirmed_all += confirmed_count
+                                not_confirmed_all += not_confirmed_count
+                                
+                                # แสดงเฉพาะสาขาที่มีข้อมูล
+                                if total_count > 0:
+                                    message += f"🏪 สาขา {branch_id}\n"
+                                    message += f"  • ทั้งหมด: {total_count} รายการ\n"
+                                    message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
+                        
+                        # สรุปรวม
+                        message += f"━━━━━━━━━━━━\n"
+                        message += f"📈 สรุปรวมทั้ง Zone\n"
+                        message += f"• รายการทั้งหมด: {total_all} รายการ\n"
+                        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
+                        message += f"• ลูกค้าไม่ตกลง: {not_confirmed_all} รายการ\n"
+                        
+                        reply_line_message(reply_token, message)
+                    
+                    else:
+                        # รายงานสาขาเดียว (แบบเดิม)
+                        global BRANCH_ID
+                        branch_id = BRANCH_ID
+                        
+                        filters = {
+                            'date_start': today,
+                            'date_end': today,
+                            'sale_code': '',
+                            'customer_sign': '',
+                            'session_id': '',
+                            'branch_id': branch_id
+                        }
+                        
+                        data = fetch_data_from_api(start=0, length=1000, **filters)
+                        
+                        if 'error' not in data:
+                            all_items = data.get('data', [])
                         else:
-                            not_confirmed_count += 1
+                            all_items = []
                         
-                        # สรุปตามพนักงาน
-                        sale_code = item.get('SALE_CODE', '')
-                        if sale_code:
-                            sales_summary[sale_code]['count'] += 1
+                        # วิเคราะห์ข้อมูล
+                        total_count = len(all_items)
+                        confirmed_count = 0
+                        not_confirmed_count = 0
+                        sales_summary = defaultdict(lambda: {'count': 0, 'confirmedCount': 0})
+                        
+                        for item in all_items:
+                            status = item.get('BIDDING_STATUS_NAME', '')
+                            is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+                            
                             if is_confirmed:
-                                sales_summary[sale_code]['confirmedCount'] += 1
-                    
-                    # สร้างข้อความรายงาน
-                    message = f"📊 รายงานยอดเทรด\n"
-                    message += f"📅 วันที่: {today}\n"
-                    message += f"━━━━━━━━━━━━\n\n"
-                    message += f"📈 สรุปภาพรวม\n"
-                    message += f"• รายการทั้งหมด: {total_count} รายการ\n"
-                    message += f"• ลูกค้าตกลง: {confirmed_count} รายการ\n"
-                    message += f"• ลูกค้าไม่ตกลง: {not_confirmed_count} รายการ\n\n"
-                    
-                    if sales_summary:
-                        message += f"👤 สรุปตามพนักงาน\n"
-                        # เรียงตามจำนวนรายการ
-                        sorted_sales = sorted(sales_summary.items(), key=lambda x: x[1]['count'], reverse=True)
-                        for sale_code, info in sorted_sales[:10]:  # แสดงแค่ 10 คนแรก
-                            confirmed = info['confirmedCount']
-                            total = info['count']
-                            not_confirmed = total - confirmed
-                            message += f"{sale_code}: {total} รายการ (✅{confirmed} ❌{not_confirmed})\n"
-                    
-                    message += f"━━━━━━━━━━━━"
-                    
-                    reply_line_message(reply_token, message)
+                                confirmed_count += 1
+                            else:
+                                not_confirmed_count += 1
+                            
+                            # สรุปตามพนักงาน
+                            sale_code = item.get('SALE_CODE', '')
+                            if sale_code:
+                                sales_summary[sale_code]['count'] += 1
+                                if is_confirmed:
+                                    sales_summary[sale_code]['confirmedCount'] += 1
+                        
+                        # สร้างข้อความรายงาน
+                        message = f"📊 รายงานยอดเทรด\n"
+                        message += f"📅 วันที่: {today}\n"
+                        message += f"🏢 สาขา: {branch_id}\n"
+                        message += f"━━━━━━━━━━━━\n\n"
+                        message += f"📈 สรุปภาพรวม\n"
+                        message += f"• รายการทั้งหมด: {total_count} รายการ\n"
+                        message += f"• ลูกค้าตกลง: {confirmed_count} รายการ\n"
+                        message += f"• ลูกค้าไม่ตกลง: {not_confirmed_count} รายการ\n\n"
+                        
+                        if sales_summary:
+                            message += f"👤 สรุปตามพนักงาน\n"
+                            sorted_sales = sorted(sales_summary.items(), key=lambda x: x[1]['count'], reverse=True)
+                            for sale_code, info in sorted_sales[:10]:
+                                confirmed = info['confirmedCount']
+                                total = info['count']
+                                not_confirmed = total - confirmed
+                                message += f"{sale_code}: {total} รายการ (✅{confirmed} ❌{not_confirmed})\n"
+                        
+                        message += f"━━━━━━━━━━━━"
+                        
+                        reply_line_message(reply_token, message)
                 
                 else:
                     # ไม่ตอบข้อความอื่นๆ
@@ -717,6 +854,9 @@ def send_line():
             'success': False,
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
+
+# API endpoint /api/branches ถูกลบออกแล้ว
+# เนื่องจากใช้ข้อมูล hardcode ใน static/branches.js แทน
 
 @app.route('/api/cancel', methods=['POST'])
 def cancel_orders():
@@ -867,4 +1007,4 @@ def cancel_orders():
     })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)
