@@ -1136,9 +1136,9 @@
                                 </p>
                             </div>
                             <div style="display: flex; gap: 10px;">
-                                <button onclick="editZone('${zone.zone_id}')" class="secondary" 
+                                <button onclick="handleEditZone('${zone.zone_id}')" class="secondary" 
                                         style="padding: 8px 16px; font-size: 14px;">✏️ แก้ไข</button>
-                                <button onclick="deleteZone('${zone.zone_id}')" class="danger" 
+                                <button onclick="handleDeleteZone('${zone.zone_id}')" class="danger" 
                                         style="padding: 8px 16px; font-size: 14px; background: #dc3545;">🗑️ ลบ</button>
                             </div>
                         </div>
@@ -1160,6 +1160,11 @@
             createBranchCheckboxList([]);
             
             document.getElementById('zoneModal').classList.add('show');
+        }
+
+        // Wrapper สำหรับ editZone (เพื่อให้ใช้กับ onclick ได้)
+        function handleEditZone(zoneId) {
+            editZone(zoneId);
         }
 
         // แก้ไข Zone
@@ -1311,6 +1316,11 @@
             } catch (error) {
                 console.error('❌ Error syncing zones:', error);
             }
+        }
+
+        // Wrapper สำหรับ deleteZone (เพื่อให้ใช้กับ onclick ได้)
+        function handleDeleteZone(zoneId) {
+            deleteZone(zoneId);
         }
 
         // ลบ Zone
