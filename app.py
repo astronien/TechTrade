@@ -656,6 +656,18 @@ def line_webhook():
                                              "\n".join([f"• {z['zone_name']}" for z in load_zones_data()]))
                             continue
                         
+                        # โหลดข้อมูลสาขาทั้งหมด
+                        import os
+                        branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+                        branches_map = {}
+                        
+                        try:
+                            with open(branches_file, 'r', encoding='utf-8') as f:
+                                branches_data = json.load(f)
+                                branches_map = {b['branch_id']: b['branch_name'] for b in branches_data}
+                        except Exception as e:
+                            print(f"Warning: Could not load branches data: {e}")
+                        
                         # สร้างรายงานแยกตามสาขาใน Zone
                         branch_ids = zone['branch_ids']
                         
@@ -682,6 +694,12 @@ def line_webhook():
                             
                             data = fetch_data_from_api(start=0, length=1000, **filters)
                             
+                            # ดึงชื่อสาขา
+                            branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
+                            # ตัดเอาเฉพาะส่วนแรก (รหัสสาขา : ID : ชื่อ)
+                            if ' : ' in branch_name:
+                                branch_name = branch_name.split(' : ', 2)[-1]  # เอาส่วนชื่อสาขา
+                            
                             if 'error' not in data:
                                 items = data.get('data', [])
                                 total_count = len(items)
@@ -692,12 +710,16 @@ def line_webhook():
                                 total_all += total_count
                                 confirmed_all += confirmed_count
                                 not_confirmed_all += not_confirmed_count
-                                
-                                # แสดงเฉพาะสาขาที่มีข้อมูล
-                                if total_count > 0:
-                                    message += f"🏪 สาขา {branch_id}\n"
-                                    message += f"  • ทั้งหมด: {total_count} รายการ\n"
-                                    message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
+                            else:
+                                # ถ้า error ให้ตั้งค่าเป็น 0
+                                total_count = 0
+                                confirmed_count = 0
+                                not_confirmed_count = 0
+                            
+                            # แสดงทุกสาขา (รวมสาขาที่ยอด 0)
+                            message += f"🏪 {branch_name}\n"
+                            message += f"  • ทั้งหมด: {total_count} รายการ\n"
+                            message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
                         
                         # สรุปรวม
                         message += f"━━━━━━━━━━━━\n"
