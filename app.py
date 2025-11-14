@@ -546,12 +546,12 @@ def send_telegram():
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
 
+# เก็บ Zones ใน memory (จะถูกอัพเดทจาก API)
+CUSTOM_ZONES = []
+
 # โหลด Zones data
 def load_zones_data():
-    """โหลดข้อมูล Zones จากไฟล์"""
-    import os
-    zones_file = os.path.join(os.path.dirname(__file__), 'static', 'zones-data.js')
-    
+    """โหลดข้อมูล Zones (รวม custom zones ที่ผู้ใช้สร้าง)"""
     # ค่า default zones
     default_zones = [
         {
@@ -596,7 +596,11 @@ def load_zones_data():
         }
     ]
     
-    return default_zones
+    # รวมกับ custom zones
+    global CUSTOM_ZONES
+    all_zones = default_zones + CUSTOM_ZONES
+    
+    return all_zones
 
 def find_zone_by_name(zone_name):
     """ค้นหา Zone จากชื่อ (รองรับการค้นหาแบบไม่ตรงทั้งหมด)"""
@@ -1004,6 +1008,42 @@ def cancel_orders():
         'failedCount': failed_count,
         'message': f'ยกเลิกสำเร็จ {success_count} รายการ' + (f', ล้มเหลว {failed_count} รายการ' if failed_count > 0 else ''),
         'errors': errors if failed_count > 0 else []
+    })
+
+@app.route('/api/zones', methods=['GET'])
+def get_zones():
+    """API endpoint สำหรับดึงรายการ Zones ทั้งหมด"""
+    zones = load_zones_data()
+    return jsonify({
+        'success': True,
+        'zones': zones
+    })
+
+@app.route('/api/zones', methods=['POST'])
+def save_zones():
+    """API endpoint สำหรับบันทึก custom zones"""
+    global CUSTOM_ZONES
+    
+    data = request.get_json()
+    custom_zones = data.get('zones', [])
+    
+    # กรองเฉพาะ custom zones (ที่ไม่ใช่ default)
+    default_zone_ids = [
+        'ZONE_BKK_CENTRAL', 'ZONE_BKK_EAST', 'ZONE_BKK_WEST', 
+        'ZONE_BKK_NORTH', 'ZONE_EAST', 'ZONE_CENTRAL', 
+        'ZONE_SOUTH', 'ZONE_NORTHEAST'
+    ]
+    
+    CUSTOM_ZONES = [z for z in custom_zones if z.get('zone_id') not in default_zone_ids]
+    
+    print(f"✅ บันทึก {len(CUSTOM_ZONES)} custom zones")
+    for zone in CUSTOM_ZONES:
+        print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
+    
+    return jsonify({
+        'success': True,
+        'message': f'บันทึก {len(CUSTOM_ZONES)} custom zones',
+        'custom_zones': CUSTOM_ZONES
     })
 
 if __name__ == '__main__':
