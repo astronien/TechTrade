@@ -546,8 +546,33 @@ def send_telegram():
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         })
 
-# เก็บ Zones ใน memory (จะถูกอัพเดทจาก API)
-CUSTOM_ZONES = []
+# ไฟล์สำหรับเก็บ custom zones
+CUSTOM_ZONES_FILE = 'custom_zones.json'
+
+# โหลด custom zones จากไฟล์
+def load_custom_zones_from_file():
+    """โหลด custom zones จากไฟล์"""
+    import os
+    if os.path.exists(CUSTOM_ZONES_FILE):
+        try:
+            with open(CUSTOM_ZONES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading custom zones: {e}")
+            return []
+    return []
+
+# บันทึก custom zones ลงไฟล์
+def save_custom_zones_to_file(custom_zones):
+    """บันทึก custom zones ลงไฟล์"""
+    try:
+        with open(CUSTOM_ZONES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(custom_zones, f, ensure_ascii=False, indent=2)
+        print(f"✅ บันทึก {len(custom_zones)} custom zones ลงไฟล์")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving custom zones: {e}")
+        return False
 
 # โหลด Zones data
 def load_zones_data():
@@ -596,9 +621,9 @@ def load_zones_data():
         }
     ]
     
-    # รวมกับ custom zones
-    global CUSTOM_ZONES
-    all_zones = default_zones + CUSTOM_ZONES
+    # รวมกับ custom zones จากไฟล์
+    custom_zones = load_custom_zones_from_file()
+    all_zones = default_zones + custom_zones
     
     return all_zones
 
@@ -1044,10 +1069,8 @@ def get_zones():
 @app.route('/api/zones', methods=['POST'])
 def save_zones():
     """API endpoint สำหรับบันทึก custom zones"""
-    global CUSTOM_ZONES
-    
     data = request.get_json()
-    custom_zones = data.get('zones', [])
+    all_zones = data.get('zones', [])
     
     # กรองเฉพาะ custom zones (ที่ไม่ใช่ default)
     default_zone_ids = [
@@ -1056,17 +1079,26 @@ def save_zones():
         'ZONE_SOUTH', 'ZONE_NORTHEAST'
     ]
     
-    CUSTOM_ZONES = [z for z in custom_zones if z.get('zone_id') not in default_zone_ids]
+    custom_zones = [z for z in all_zones if z.get('zone_id') not in default_zone_ids]
     
-    print(f"✅ บันทึก {len(CUSTOM_ZONES)} custom zones")
-    for zone in CUSTOM_ZONES:
-        print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
+    # บันทึกลงไฟล์
+    success = save_custom_zones_to_file(custom_zones)
     
-    return jsonify({
-        'success': True,
-        'message': f'บันทึก {len(CUSTOM_ZONES)} custom zones',
-        'custom_zones': CUSTOM_ZONES
-    })
+    if success:
+        print(f"✅ บันทึก {len(custom_zones)} custom zones ลงไฟล์")
+        for zone in custom_zones:
+            print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
+        
+        return jsonify({
+            'success': True,
+            'message': f'บันทึก {len(custom_zones)} custom zones',
+            'custom_zones': custom_zones
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': 'ไม่สามารถบันทึก zones ลงไฟล์ได้'
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
