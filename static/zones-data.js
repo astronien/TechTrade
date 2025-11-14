@@ -1,48 +1,7 @@
-// ข้อมูล Zone และสาขาที่อยู่ใน Zone (ตัวอย่าง)
-// Area Manager สามารถแก้ไขไฟล์นี้เพื่อกำหนด Zone ของตัวเอง
+// ข้อมูล Zone (เริ่มต้นเป็น array ว่าง)
+// Area Manager สามารถสร้าง Zone ผ่านหน้าเว็บได้
 
-const ZONES_DATA = [
-    {
-        zone_id: "ZONE_BKK_CENTRAL",
-        zone_name: "กรุงเทพ - ใจกลางเมือง",
-        branch_ids: [1, 2, 3, 8, 9, 12, 19, 22] // ตัวอย่าง: สาขาในกรุงเทพกลาง
-    },
-    {
-        zone_id: "ZONE_BKK_EAST",
-        zone_name: "กรุงเทพ - ฝั่งตะวันออก",
-        branch_ids: [9, 18] // Paradise Park, Central Bangna
-    },
-    {
-        zone_id: "ZONE_BKK_WEST",
-        zone_name: "กรุงเทพ - ฝั่งตะวันตก",
-        branch_ids: [16, 17, 23] // Central Rama2, The Mall Bangkae, The Mall Thapra
-    },
-    {
-        zone_id: "ZONE_BKK_NORTH",
-        zone_name: "กรุงเทพ - ฝั่งเหนือ/ปริมณฑล",
-        branch_ids: [1, 3, 6, 12, 20, 22] // Rangsit, Laksi, Future Park, Chaengwattana
-    },
-    {
-        zone_id: "ZONE_EAST",
-        zone_name: "ภาคตะวันออก",
-        branch_ids: [4, 5, 11, 25] // Chonburi, Rayong, Bangsaen, Pattaya
-    },
-    {
-        zone_id: "ZONE_CENTRAL",
-        zone_name: "ภาคกลาง",
-        branch_ids: [7] // Huahin
-    },
-    {
-        zone_id: "ZONE_SOUTH",
-        zone_name: "ภาคใต้",
-        branch_ids: [10] // Samui
-    },
-    {
-        zone_id: "ZONE_NORTHEAST",
-        zone_name: "ภาคตะวันออกเฉียงเหนือ",
-        branch_ids: [14, 15] // Khonkaen
-    }
-];
+const ZONES_DATA = [];
 
 // ฟังก์ชันช่วยเหลือ
 const ZoneHelper = {

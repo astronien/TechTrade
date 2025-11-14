@@ -690,56 +690,11 @@ def save_custom_zones_to_file(custom_zones):
 
 # โหลด Zones data
 def load_zones_data():
-    """โหลดข้อมูล Zones (รวม custom zones ที่ผู้ใช้สร้าง)"""
-    # ค่า default zones
-    default_zones = [
-        {
-            "zone_id": "ZONE_BKK_CENTRAL",
-            "zone_name": "กรุงเทพ - ใจกลางเมือง",
-            "branch_ids": [1, 2, 3, 8, 9, 12, 19, 22]
-        },
-        {
-            "zone_id": "ZONE_BKK_EAST",
-            "zone_name": "กรุงเทพ - ฝั่งตะวันออก",
-            "branch_ids": [9, 18]
-        },
-        {
-            "zone_id": "ZONE_BKK_WEST",
-            "zone_name": "กรุงเทพ - ฝั่งตะวันตก",
-            "branch_ids": [16, 17, 23]
-        },
-        {
-            "zone_id": "ZONE_BKK_NORTH",
-            "zone_name": "กรุงเทพ - ฝั่งเหนือ/ปริมณฑล",
-            "branch_ids": [1, 3, 6, 12, 20, 22]
-        },
-        {
-            "zone_id": "ZONE_EAST",
-            "zone_name": "ภาคตะวันออก",
-            "branch_ids": [4, 5, 11, 25]
-        },
-        {
-            "zone_id": "ZONE_CENTRAL",
-            "zone_name": "ภาคกลาง",
-            "branch_ids": [7]
-        },
-        {
-            "zone_id": "ZONE_SOUTH",
-            "zone_name": "ภาคใต้",
-            "branch_ids": [10]
-        },
-        {
-            "zone_id": "ZONE_NORTHEAST",
-            "zone_name": "ภาคตะวันออกเฉียงเหนือ",
-            "branch_ids": [14, 15]
-        }
-    ]
-    
-    # รวมกับ custom zones จากไฟล์
+    """โหลดข้อมูล Zones (เฉพาะ custom zones ที่ผู้ใช้สร้าง)"""
+    # โหลด custom zones จาก database
     custom_zones = load_custom_zones_from_file()
-    all_zones = default_zones + custom_zones
     
-    return all_zones
+    return custom_zones
 
 def find_zone_by_name(zone_name):
     """ค้นหา Zone จากชื่อ (รองรับการค้นหาแบบไม่ตรงทั้งหมด)"""
@@ -1185,29 +1140,20 @@ def save_zones():
     """API endpoint สำหรับบันทึก custom zones"""
     try:
         data = request.get_json()
-        all_zones = data.get('zones', [])
+        zones = data.get('zones', [])
         
-        # กรองเฉพาะ custom zones (ที่ไม่ใช่ default)
-        default_zone_ids = [
-            'ZONE_BKK_CENTRAL', 'ZONE_BKK_EAST', 'ZONE_BKK_WEST', 
-            'ZONE_BKK_NORTH', 'ZONE_EAST', 'ZONE_CENTRAL', 
-            'ZONE_SOUTH', 'ZONE_NORTHEAST'
-        ]
-        
-        custom_zones = [z for z in all_zones if z.get('zone_id') not in default_zone_ids]
-        
-        # บันทึกลง database
-        success = save_custom_zones_to_file(custom_zones)
+        # บันทึกทุก zones ที่ส่งมา (ไม่มี default zones อีกต่อไป)
+        success = save_custom_zones_to_file(zones)
         
         if success:
-            print(f"✅ บันทึก {len(custom_zones)} custom zones")
-            for zone in custom_zones:
+            print(f"✅ บันทึก {len(zones)} zones")
+            for zone in zones:
                 print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
             
             return jsonify({
                 'success': True,
-                'message': f'บันทึก {len(custom_zones)} custom zones',
-                'custom_zones': custom_zones
+                'message': f'บันทึก {len(zones)} zones',
+                'zones': zones
             })
         else:
             return jsonify({
