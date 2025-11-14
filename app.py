@@ -707,6 +707,62 @@ def find_zone_by_name(zone_name):
     
     return None
 
+def find_branch_by_id(branch_id_str):
+    """ค้นหาสาขาจาก branch_id (รหัสจาก branch_name เช่น 00009)"""
+    import os
+    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+    
+    try:
+        with open(branches_file, 'r', encoding='utf-8') as f:
+            branches_data = json.load(f)
+            
+        for branch in branches_data:
+            branch_name = branch.get('branch_name', '')
+            # ดึงรหัสจาก branch_name (ส่วนแรกก่อน :)
+            if ' : ' in branch_name:
+                code = branch_name.split(' : ')[0].strip()
+                if code == branch_id_str:
+                    return branch
+    except Exception as e:
+        print(f"Error loading branches: {e}")
+    
+    return None
+
+def parse_thai_month(month_name):
+    """แปลงชื่อเดือนภาษาไทยเป็นเลขเดือน"""
+    months = {
+        'มกราคม': 1, 'ม.ค.': 1,
+        'กุมภาพันธ์': 2, 'ก.พ.': 2,
+        'มีนาคม': 3, 'มี.ค.': 3,
+        'เมษายน': 4, 'เม.ย.': 4,
+        'พฤษภาคม': 5, 'พ.ค.': 5,
+        'มิถุนายน': 6, 'มิ.ย.': 6,
+        'กรกฎาคม': 7, 'ก.ค.': 7,
+        'สิงหาคม': 8, 'ส.ค.': 8,
+        'กันยายน': 9, 'ก.ย.': 9,
+        'ตุลาคม': 10, 'ต.ค.': 10,
+        'พฤศจิกายน': 11, 'พ.ย.': 11,
+        'ธันวาคม': 12, 'ธ.ค.': 12
+    }
+    return months.get(month_name.strip(), None)
+
+def get_month_date_range(month_number, year=None):
+    """คำนวณวันแรกและวันสุดท้ายของเดือน"""
+    from datetime import datetime
+    import calendar
+    
+    if year is None:
+        year = datetime.now().year
+    
+    # วันแรกของเดือน
+    first_day = datetime(year, month_number, 1)
+    
+    # วันสุดท้ายของเดือน
+    last_day_num = calendar.monthrange(year, month_number)[1]
+    last_day = datetime(year, month_number, last_day_num)
+    
+    return first_day.strftime('%d/%m/%Y'), last_day.strftime('%d/%m/%Y')
+
 @app.route('/webhook/line', methods=['POST'])
 def line_webhook():
     """Webhook สำหรับรับข้อความจาก LINE"""
