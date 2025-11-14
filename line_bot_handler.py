@@ -119,8 +119,14 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     message += f"━━━━━━━━━━━━\n"
     message += f"📈 สรุปรวมทั้ง Zone\n"
     message += f"• รายการทั้งหมด: {total_all} รายการ\n"
-    message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
-    message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
+    
+    if total_all > 0:
+        confirm_percent = (confirmed_all / total_all) * 100
+        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ ({confirm_percent:.0f}%)\n"
+        message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ ({100-confirm_percent:.0f}%)"
+    else:
+        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
+        message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
     
     return message
 
@@ -209,13 +215,9 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     total_amount = 0.0
     
     for sale_code, info in sorted_sales:
-        message += f"👤 {sale_code}"
-        if info['name']:
-            message += f" - {info['name']}"
-        message += f"\n"
+        message += f"👤 {sale_code}\n"
         message += f"  • ทั้งหมด: {info['count']} รายการ\n"
-        message += f"  • ตกลง: ✅{info['confirmed']} ❌{info['not_confirmed']}\n"
-        message += f"  • มูลค่า: {info['amount']:,.0f} บาท\n\n"
+        message += f"  • ตกลง: ✅{info['confirmed']} ❌{info['not_confirmed']}\n\n"
         
         total_count += info['count']
         total_confirmed += info['confirmed']
@@ -228,17 +230,85 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     if total_count > 0:
         confirm_percent = (total_confirmed / total_count) * 100
         message += f"• ลูกค้าตกลง: {total_confirmed} รายการ ({confirm_percent:.0f}%)\n"
-        message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)\n"
-    
-    message += f"• มูลค่ารวม: {total_amount:,.0f} บาท"
+        message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)"
     
     return message
 
 
 def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func):
-    """สร้างรายงานทั้งเดือนของ Zone"""
-    # TODO: Implement monthly zone report
-    return "🚧 ฟีเจอร์นี้กำลังพัฒนา"
+    """สร้างรายงานทั้งเดือนของ Zone (แยกตามสาขา)"""
+    zone = find_zone_func(zone_name)
+    
+    if not zone:
+        return f"❌ ไม่พบ Zone: {zone_name}"
+    
+    month_number = parse_month_func(month_name)
+    if not month_number:
+        return f"❌ ไม่รู้จักเดือน: {month_name}\n\nตัวอย่าง: มกราคม, กุมภาพันธ์, มีนาคม"
+    
+    date_start, date_end = get_date_range_func(month_number)
+    branch_ids = zone['branch_ids']
+    year = datetime.now().year + 543  # แปลงเป็น พ.ศ.
+    
+    # โหลดข้อมูลสาขา
+    branches_map = load_branches_map()
+    
+    message = f"📊 รายงานยอดเทรด\n"
+    message += f"📅 เดือน: {month_name} {year}\n"
+    message += f"🗺️ Zone: {zone['zone_name']}\n"
+    message += f"🏢 จำนวนสาขา: {len(branch_ids)} สาขา\n"
+    message += f"━━━━━━━━━━━━\n\n"
+    
+    total_all = 0
+    confirmed_all = 0
+    
+    for branch_id in branch_ids:
+        filters = {
+            'date_start': date_start,
+            'date_end': date_end,
+            'sale_code': '',
+            'customer_sign': '',
+            'session_id': '',
+            'branch_id': str(branch_id)
+        }
+        
+        data = fetch_data_func(start=0, length=5000, **filters)
+        
+        branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
+        if ' : ' in branch_name:
+            branch_name = branch_name.split(' : ', 2)[-1]
+        
+        if 'error' not in data:
+            items = data.get('data', [])
+            total_count = len(items)
+            confirmed_count = sum(1 for item in items 
+                                 if item.get('BIDDING_STATUS_NAME', '') in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'])
+            not_confirmed_count = total_count - confirmed_count
+            
+            total_all += total_count
+            confirmed_all += confirmed_count
+        else:
+            total_count = 0
+            confirmed_count = 0
+            not_confirmed_count = 0
+        
+        message += f"🏪 {branch_name}\n"
+        message += f"  • ทั้งหมด: {total_count} รายการ\n"
+        message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
+    
+    message += f"━━━━━━━━━━━━\n"
+    message += f"📈 สรุปรวมทั้ง Zone ({month_name[:3]}.)\n"
+    message += f"• รายการทั้งหมด: {total_all} รายการ\n"
+    
+    if total_all > 0:
+        confirm_percent = (confirmed_all / total_all) * 100
+        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ ({confirm_percent:.0f}%)\n"
+        message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ ({100-confirm_percent:.0f}%)"
+    else:
+        message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
+        message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
+    
+    return message
 
 
 def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetch_data_func, parse_month_func, get_date_range_func):
@@ -329,13 +399,9 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     total_amount = 0.0
     
     for sale_code, info in sorted_sales:
-        message += f"👤 {sale_code}"
-        if info['name']:
-            message += f" - {info['name']}"
-        message += f"\n"
+        message += f"👤 {sale_code}\n"
         message += f"  • ทั้งหมด: {info['count']} รายการ\n"
-        message += f"  • ตกลง: ✅{info['confirmed']} ❌{info['not_confirmed']}\n"
-        message += f"  • มูลค่า: {info['amount']:,.0f} บาท\n\n"
+        message += f"  • ตกลง: ✅{info['confirmed']} ❌{info['not_confirmed']}\n\n"
         
         total_count += info['count']
         total_confirmed += info['confirmed']
@@ -348,9 +414,7 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     if total_count > 0:
         confirm_percent = (total_confirmed / total_count) * 100
         message += f"• ลูกค้าตกลง: {total_confirmed} รายการ ({confirm_percent:.0f}%)\n"
-        message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)\n"
-    
-    message += f"• มูลค่ารวม: {total_amount:,.0f} บาท"
+        message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)"
     
     return message
 
