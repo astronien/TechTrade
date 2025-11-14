@@ -12,20 +12,31 @@ app = Flask(__name__)
 def get_db_connection():
     """สร้าง connection ไปยัง Supabase PostgreSQL"""
     try:
+        db_url = os.environ.get('POSTGRES_URL_NON_POOLING')
+        if not db_url:
+            print("❌ POSTGRES_URL_NON_POOLING not found in environment variables")
+            return None
+        
+        print(f"🔌 Connecting to database...")
         conn = psycopg2.connect(
-            os.environ.get('POSTGRES_URL_NON_POOLING'),
+            db_url,
             cursor_factory=RealDictCursor
         )
+        print("✅ Database connected successfully")
         return conn
     except Exception as e:
         print(f"❌ Database connection error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # สร้างตาราง zones ถ้ายังไม่มี
 def init_database():
     """สร้างตาราง zones ใน database"""
+    print("🔧 Initializing database...")
     conn = get_db_connection()
     if not conn:
+        print("⚠️ Database connection failed, skipping initialization")
         return False
     
     try:
@@ -43,16 +54,22 @@ def init_database():
         conn.commit()
         cur.close()
         conn.close()
-        print("✅ Database initialized")
+        print("✅ Database table 'custom_zones' ready")
         return True
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
+        import traceback
+        traceback.print_exc()
         if conn:
             conn.close()
         return False
 
 # เรียก init เมื่อ start app
-init_database()
+try:
+    init_database()
+except Exception as e:
+    print(f"⚠️ Database initialization failed: {e}")
+    print("⚠️ App will continue without database support")
 
 # API Configuration
 API_URL = "https://eve.techswop.com/ti/index.aspx/Getdata"
@@ -598,11 +615,12 @@ def send_telegram():
 # โหลด custom zones จาก Supabase
 def load_custom_zones_from_file():
     """โหลด custom zones จาก Supabase PostgreSQL"""
-    conn = get_db_connection()
-    if not conn:
-        return []
-    
     try:
+        conn = get_db_connection()
+        if not conn:
+            print("⚠️ No database connection, returning empty zones")
+            return []
+        
         cur = conn.cursor()
         cur.execute("SELECT zone_id, zone_name, branch_ids FROM custom_zones ORDER BY created_at")
         rows = cur.fetchall()
@@ -621,22 +639,26 @@ def load_custom_zones_from_file():
         return zones
     except Exception as e:
         print(f"❌ Error loading custom zones: {e}")
-        if conn:
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals() and conn:
             conn.close()
         return []
 
 # บันทึก custom zones ลง Supabase
 def save_custom_zones_to_file(custom_zones):
     """บันทึก custom zones ลง Supabase PostgreSQL"""
-    conn = get_db_connection()
-    if not conn:
-        return False
-    
     try:
+        conn = get_db_connection()
+        if not conn:
+            print("❌ No database connection, cannot save zones")
+            return False
+        
         cur = conn.cursor()
         
         # ลบ zones เดิมทั้งหมด
         cur.execute("DELETE FROM custom_zones")
+        print(f"🗑️ Deleted old zones")
         
         # เพิ่ม zones ใหม่
         for zone in custom_zones:
@@ -649,16 +671,19 @@ def save_custom_zones_to_file(custom_zones):
                     branch_ids = EXCLUDED.branch_ids,
                     updated_at = CURRENT_TIMESTAMP
             """, (zone['zone_id'], zone['zone_name'], json.dumps(zone['branch_ids'])))
+            print(f"💾 Saved zone: {zone['zone_name']}")
         
         conn.commit()
         cur.close()
         conn.close()
         
-        print(f"✅ บันทึก {len(custom_zones)} custom zones ลง database")
+        print(f"✅ บันทึก {len(custom_zones)} custom zones ลง database สำเร็จ")
         return True
     except Exception as e:
         print(f"❌ Error saving custom zones: {e}")
-        if conn:
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals() and conn:
             conn.rollback()
             conn.close()
         return False
@@ -1158,35 +1183,44 @@ def get_zones():
 @app.route('/api/zones', methods=['POST'])
 def save_zones():
     """API endpoint สำหรับบันทึก custom zones"""
-    data = request.get_json()
-    all_zones = data.get('zones', [])
-    
-    # กรองเฉพาะ custom zones (ที่ไม่ใช่ default)
-    default_zone_ids = [
-        'ZONE_BKK_CENTRAL', 'ZONE_BKK_EAST', 'ZONE_BKK_WEST', 
-        'ZONE_BKK_NORTH', 'ZONE_EAST', 'ZONE_CENTRAL', 
-        'ZONE_SOUTH', 'ZONE_NORTHEAST'
-    ]
-    
-    custom_zones = [z for z in all_zones if z.get('zone_id') not in default_zone_ids]
-    
-    # บันทึกลงไฟล์
-    success = save_custom_zones_to_file(custom_zones)
-    
-    if success:
-        print(f"✅ บันทึก {len(custom_zones)} custom zones ลงไฟล์")
-        for zone in custom_zones:
-            print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
+    try:
+        data = request.get_json()
+        all_zones = data.get('zones', [])
         
-        return jsonify({
-            'success': True,
-            'message': f'บันทึก {len(custom_zones)} custom zones',
-            'custom_zones': custom_zones
-        })
-    else:
+        # กรองเฉพาะ custom zones (ที่ไม่ใช่ default)
+        default_zone_ids = [
+            'ZONE_BKK_CENTRAL', 'ZONE_BKK_EAST', 'ZONE_BKK_WEST', 
+            'ZONE_BKK_NORTH', 'ZONE_EAST', 'ZONE_CENTRAL', 
+            'ZONE_SOUTH', 'ZONE_NORTHEAST'
+        ]
+        
+        custom_zones = [z for z in all_zones if z.get('zone_id') not in default_zone_ids]
+        
+        # บันทึกลง database
+        success = save_custom_zones_to_file(custom_zones)
+        
+        if success:
+            print(f"✅ บันทึก {len(custom_zones)} custom zones")
+            for zone in custom_zones:
+                print(f"   - {zone['zone_name']} ({len(zone['branch_ids'])} สาขา)")
+            
+            return jsonify({
+                'success': True,
+                'message': f'บันทึก {len(custom_zones)} custom zones',
+                'custom_zones': custom_zones
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'ไม่สามารถบันทึก zones ลง database ได้'
+            }), 500
+    except Exception as e:
+        print(f"❌ Error in save_zones: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
-            'error': 'ไม่สามารถบันทึก zones ลงไฟล์ได้'
+            'error': f'เกิดข้อผิดพลาด: {str(e)}'
         }), 500
 
 if __name__ == '__main__':
