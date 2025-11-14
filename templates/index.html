@@ -1076,23 +1076,26 @@
 
         // ==================== Zone Management Functions ====================
         
-        // โหลด Zones จาก localStorage
-        function loadZonesFromStorage() {
-            const saved = localStorage.getItem('custom_zones');
-            if (saved) {
-                try {
-                    return JSON.parse(saved);
-                } catch (e) {
-                    console.error('Error loading zones:', e);
+        // โหลด Zones จาก Backend (Server)
+        async function loadZonesFromStorage() {
+            try {
+                const response = await fetch('/api/zones');
+                const result = await response.json();
+                
+                if (result.success && result.zones) {
+                    console.log(`✅ โหลด ${result.zones.length} zones จาก server`);
+                    return result.zones;
                 }
+            } catch (error) {
+                console.error('❌ Error loading zones from server:', error);
             }
-            // ถ้าไม่มีใน localStorage ให้ใช้ค่าเริ่มต้นจาก zones-data.js
+            
+            // ถ้าโหลดจาก server ไม่ได้ ใช้ค่าเริ่มต้นจาก zones-data.js
             return typeof ZONES_DATA !== 'undefined' ? [...ZONES_DATA] : [];
         }
 
-        // บันทึก Zones ลง localStorage
+        // บันทึก Zones (ไม่ใช้ localStorage อีกต่อไป)
         function saveZonesToStorage(zones) {
-            localStorage.setItem('custom_zones', JSON.stringify(zones));
             // อัพเดท ZONES_DATA ใน memory
             if (typeof ZONES_DATA !== 'undefined') {
                 ZONES_DATA.length = 0;
@@ -1103,8 +1106,8 @@
         }
 
         // แสดงรายการ Zones
-        function loadZonesManagement() {
-            const zones = loadZonesFromStorage();
+        async function loadZonesManagement() {
+            const zones = await loadZonesFromStorage();
             const container = document.getElementById('zonesList');
             
             if (zones.length === 0) {
@@ -1160,8 +1163,8 @@
         }
 
         // แก้ไข Zone
-        function editZone(zoneId) {
-            const zones = loadZonesFromStorage();
+        async function editZone(zoneId) {
+            const zones = await loadZonesFromStorage();
             const zone = zones.find(z => z.zone_id === zoneId);
             
             if (!zone) {
@@ -1256,7 +1259,7 @@
                 return;
             }
             
-            const zones = loadZonesFromStorage();
+            const zones = await loadZonesFromStorage();
             
             if (editingZoneId) {
                 // แก้ไข Zone เดิม
@@ -1275,10 +1278,11 @@
                 });
             }
             
-            saveZonesToStorage(zones);
-            
-            // Sync ไปยัง Backend สำหรับ LINE Bot
+            // Sync ไปยัง Backend (บันทึกลงไฟล์)
             await syncZonesToBackend(zones);
+            
+            // อัพเดท local memory
+            saveZonesToStorage(zones);
             
             closeZoneModal();
             loadZonesManagement();
@@ -1315,15 +1319,16 @@
                 return;
             }
             
-            const zones = loadZonesFromStorage();
+            const zones = await loadZonesFromStorage();
             const filtered = zones.filter(z => z.zone_id !== zoneId);
             
-            saveZonesToStorage(filtered);
-            
-            // Sync ไปยัง Backend
+            // Sync ไปยัง Backend (บันทึกลงไฟล์)
             await syncZonesToBackend(filtered);
             
-            loadZonesManagement();
+            // อัพเดท local memory
+            saveZonesToStorage(filtered);
+            
+            await loadZonesManagement();
             
             alert('✅ ลบ Zone เรียบร้อย');
         }
@@ -1337,13 +1342,12 @@
         // โหลดและ sync zones เมื่อเริ่มต้น
         window.addEventListener('load', async () => {
             // โหลด custom zones ถ้ามี
-            const customZones = loadZonesFromStorage();
-            if (customZones.length > 0 && typeof ZONES_DATA !== 'undefined') {
+            // โหลด zones จาก Backend (Server)
+            const zones = await loadZonesFromStorage();
+            if (zones.length > 0 && typeof ZONES_DATA !== 'undefined') {
                 ZONES_DATA.length = 0;
-                ZONES_DATA.push(...customZones);
-                
-                // Sync ไปยัง Backend ทันทีเมื่อโหลดหน้า
-                await syncZonesToBackend(customZones);
+                ZONES_DATA.push(...zones);
+                console.log(`✅ โหลด ${zones.length} zones จาก server เมื่อเริ่มต้น`);
             }
         });
 
