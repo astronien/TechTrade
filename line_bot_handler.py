@@ -117,14 +117,15 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
             not_confirmed_count = 0
         
         # คำนวณเปอร์เซ็นต์ของสาขา
-        branch_percent = (confirmed_count / total_count * 100) if total_count > 0 else 0
+        confirmed_percent = (confirmed_count / total_count * 100) if total_count > 0 else 0
+        not_confirmed_percent = (not_confirmed_count / total_count * 100) if total_count > 0 else 0
         
         message += f"🏪 {branch_name}\n"
         message += f"  • ทั้งหมด: {total_count} รายการ\n"
-        message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}"
         if total_count > 0:
-            message += f" ({branch_percent:.0f}%)"
-        message += f"\n\n"
+            message += f"  • ตกลง: ✅{confirmed_count} ({confirmed_percent:.0f}%) ❌{not_confirmed_count} ({not_confirmed_percent:.0f}%)\n\n"
+        else:
+            message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
     
     message += f"━━━━━━━━━━━━\n"
     message += f"📈 สรุปรวมทั้ง Zone\n"
@@ -303,14 +304,15 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
             not_confirmed_count = 0
         
         # คำนวณเปอร์เซ็นต์ของสาขา
-        branch_percent = (confirmed_count / total_count * 100) if total_count > 0 else 0
+        confirmed_percent = (confirmed_count / total_count * 100) if total_count > 0 else 0
+        not_confirmed_percent = (not_confirmed_count / total_count * 100) if total_count > 0 else 0
         
         message += f"🏪 {branch_name}\n"
         message += f"  • ทั้งหมด: {total_count} รายการ\n"
-        message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}"
         if total_count > 0:
-            message += f" ({branch_percent:.0f}%)"
-        message += f"\n\n"
+            message += f"  • ตกลง: ✅{confirmed_count} ({confirmed_percent:.0f}%) ❌{not_confirmed_count} ({not_confirmed_percent:.0f}%)\n\n"
+        else:
+            message += f"  • ตกลง: ✅{confirmed_count} ❌{not_confirmed_count}\n\n"
     
     message += f"━━━━━━━━━━━━\n"
     message += f"📈 สรุปรวมทั้ง Zone ({month_name[:3]}.)\n"
