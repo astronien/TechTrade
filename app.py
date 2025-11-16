@@ -247,6 +247,8 @@ def login():
         username = data.get('username', '')
         password = data.get('password', '')
         
+        print(f"🔐 Login attempt - Username: {username}")
+        
         if not username or not password:
             return jsonify({'success': False, 'error': 'กรุณากรอก Username และ Password'})
         
@@ -259,26 +261,44 @@ def login():
             cur = conn.cursor()
             password_hash = hashlib.sha256(password.encode()).hexdigest()
             
+            print(f"🔑 Password hash: {password_hash}")
+            
             cur.execute("""
-                SELECT id, username FROM admin_users 
-                WHERE username = %s AND password_hash = %s
-            """, (username, password_hash))
+                SELECT id, username, password_hash FROM admin_users 
+                WHERE username = %s
+            """, (username,))
             
             user = cur.fetchone()
-            cur.close()
-            conn.close()
             
             if user:
-                session['user_id'] = user['id']
-                session['username'] = user['username']
-                return jsonify({'success': True, 'message': 'เข้าสู่ระบบสำเร็จ'})
+                print(f"✅ User found: {user['username']}")
+                print(f"📝 Stored hash: {user['password_hash']}")
+                print(f"🔍 Match: {user['password_hash'] == password_hash}")
+                
+                if user['password_hash'] == password_hash:
+                    session['user_id'] = user['id']
+                    session['username'] = user['username']
+                    print(f"✅ Login successful for {username}")
+                    cur.close()
+                    conn.close()
+                    return jsonify({'success': True, 'message': 'เข้าสู่ระบบสำเร็จ'})
+                else:
+                    print(f"❌ Password mismatch for {username}")
+                    cur.close()
+                    conn.close()
+                    return jsonify({'success': False, 'error': 'Username หรือ Password ไม่ถูกต้อง'})
             else:
+                print(f"❌ User not found: {username}")
+                cur.close()
+                conn.close()
                 return jsonify({'success': False, 'error': 'Username หรือ Password ไม่ถูกต้อง'})
         except Exception as e:
-            print(f"Login error: {e}")
+            print(f"❌ Login error: {e}")
+            import traceback
+            traceback.print_exc()
             if conn:
                 conn.close()
-            return jsonify({'success': False, 'error': 'เกิดข้อผิดพลาด'})
+            return jsonify({'success': False, 'error': f'เกิดข้อผิดพลาด: {str(e)}'})
     
     # ถ้า login แล้ว redirect ไปหน้าหลัก
     if 'user_id' in session:
