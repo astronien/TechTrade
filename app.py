@@ -1,12 +1,16 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from functools import wraps
 import requests
 import json
 from datetime import datetime, timedelta
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import hashlib
+import secrets
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # Supabase Database Connection
 def get_db_connection():
@@ -30,9 +34,9 @@ def get_db_connection():
         traceback.print_exc()
         return None
 
-# สร้างตาราง zones ถ้ายังไม่มี
+# สร้างตาราง zones และ admin_users ถ้ายังไม่มี
 def init_database():
-    """สร้างตาราง zones ใน database"""
+    """สร้างตาราง zones และ admin_users ใน database"""
     print("🔧 Initializing database...")
     conn = get_db_connection()
     if not conn:
@@ -41,6 +45,8 @@ def init_database():
     
     try:
         cur = conn.cursor()
+        
+        # สร้างตาราง custom_zones
         cur.execute("""
             CREATE TABLE IF NOT EXISTS custom_zones (
                 id SERIAL PRIMARY KEY,
@@ -51,10 +57,30 @@ def init_database():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # สร้างตาราง admin_users
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # สร้าง admin user เริ่มต้น (username: admin, password: admin123)
+        default_password = hashlib.sha256('admin123'.encode()).hexdigest()
+        cur.execute("""
+            INSERT INTO admin_users (username, password_hash)
+            VALUES (%s, %s)
+            ON CONFLICT (username) DO NOTHING
+        """, ('admin', default_password))
+        
         conn.commit()
         cur.close()
         conn.close()
-        print("✅ Database table 'custom_zones' ready")
+        print("✅ Database tables ready")
+        print("✅ Default admin user: admin / admin123")
         return True
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
@@ -198,10 +224,73 @@ def fetch_data_from_api(start=0, length=50, **filters):
         print(f"❌ API Error: {str(e)}")
         return {"error": str(e)}
 
+# Decorator สำหรับตรวจสอบ login
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/')
+@login_required
 def index():
     """หน้าแรกแสดงข้อมูล"""
-    return render_template('index.html')
+    return render_template('index.html', username=session.get('username'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """หน้า Login"""
+    if request.method == 'POST':
+        data = request.get_json()
+        username = data.get('username', '')
+        password = data.get('password', '')
+        
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'กรุณากรอก Username และ Password'})
+        
+        # ตรวจสอบ username และ password
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'ไม่สามารถเชื่อมต่อ database ได้'})
+        
+        try:
+            cur = conn.cursor()
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            
+            cur.execute("""
+                SELECT id, username FROM admin_users 
+                WHERE username = %s AND password_hash = %s
+            """, (username, password_hash))
+            
+            user = cur.fetchone()
+            cur.close()
+            conn.close()
+            
+            if user:
+                session['user_id'] = user['id']
+                session['username'] = user['username']
+                return jsonify({'success': True, 'message': 'เข้าสู่ระบบสำเร็จ'})
+            else:
+                return jsonify({'success': False, 'error': 'Username หรือ Password ไม่ถูกต้อง'})
+        except Exception as e:
+            print(f"Login error: {e}")
+            if conn:
+                conn.close()
+            return jsonify({'success': False, 'error': 'เกิดข้อผิดพลาด'})
+    
+    # ถ้า login แล้ว redirect ไปหน้าหลัก
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Logout"""
+    session.clear()
+    return redirect(url_for('login'))
 
 @app.route('/install-extension')
 def install_extension():
