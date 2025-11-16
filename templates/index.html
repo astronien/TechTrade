@@ -2026,7 +2026,19 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             const container = document.getElementById('reportContainer');
             const submitBtn = document.querySelector('#reportForm button[type="submit"]');
 
-            container.innerHTML = '<div class="loading">⏳ กำลังสร้างรายงาน...</div>';
+            // แสดง loading พร้อมคำเตือนสำหรับข้อมูลจำนวนมาก
+            const dateStart = document.getElementById('reportDateStart').value;
+            const dateEnd = document.getElementById('reportDateEnd').value;
+            const daysDiff = Math.ceil((new Date(dateEnd) - new Date(dateStart)) / (1000 * 60 * 60 * 24));
+            
+            let loadingMessage = '⏳ กำลังสร้างรายงาน...';
+            if (daysDiff > 90) {
+                loadingMessage = '⏳ กำลังสร้างรายงาน...<br><small style="color: #ff9800;">⚠️ ข้อมูลจำนวนมาก อาจใช้เวลา 30-60 วินาที</small>';
+            } else if (daysDiff > 30) {
+                loadingMessage = '⏳ กำลังสร้างรายงาน...<br><small style="color: #2196F3;">ℹ️ กำลังดึงข้อมูล กรุณารอสักครู่...</small>';
+            }
+            
+            container.innerHTML = `<div class="loading">${loadingMessage}</div>`;
             submitBtn.disabled = true;
 
             // ดึง Session ID จาก localStorage
@@ -2082,7 +2094,15 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             });
 
             try {
-                const response = await fetch(`/api/report?${params}`);
+                // เพิ่ม timeout สำหรับ fetch (60 วินาที)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                
+                const response = await fetch(`/api/report?${params}`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
                 const data = await response.json();
 
                 if (data.error) {
@@ -2090,12 +2110,239 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                         <div class="error">
                             <h3>❌ เกิดข้อผิดพลาด</h3>
                             <p>${data.error}</p>
+                            ${data.message ? `<p><small>${data.message}</small></p>` : ''}
                         </div>
                     `;
                 } else {
                     displayReport(data);
                 }
             } catch (error) {
+                let errorMessage = error.message;
+                if (error.name === 'AbortError') {
+                    errorMessage = 'การดึงข้อมูลใช้เวลานานเกินไป (Timeout) กรุณาลองลดช่วงเวลาที่เลือก หรือเลือกสาขาเดียว';
+                }
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ เกิดข้อผิดพลาด</h3>
+                        <p>${errorMessage}</p>
+                        <p><small>💡 คำแนะนำ: ลองลดช่วงเวลา หรือเลือกดูทีละเดือน</small></p>
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        // ฟังก์ชันสร้างรายงานหลายสาขา (Zone)
+        async function generateMultiBranchReport(branchIds, sessionId, container, submitBtn) {
+            const dateStart = formatDateThai(document.getElementById('reportDateStart').value);
+            const dateEnd = formatDateThai(document.getElementById('reportDateEnd').value);
+            const saleCode = document.getElementById('reportSaleCode').value;
+            
+            let allDetails = [];
+            let totalFetched = 0;
+            let successCount = 0;
+            let failCount = 0;
+            
+            // อัพเดท loading message
+            container.innerHTML = `
+                <div class="loading">
+                    ⏳ กำลังดึงข้อมูล Zone (${branchIds.length} สาขา)...<br>
+                    <small>กำลังประมวลผล: 0/${branchIds.length} สาขา</small>
+                </div>
+            `;
+            
+            for (let i = 0; i < branchIds.length; i++) {
+                const branchId = branchIds[i];
+                
+                // อัพเดทสถานะ
+                container.innerHTML = `
+                    <div class="loading">
+                        ⏳ กำลังดึงข้อมูล Zone (${branchIds.length} สาขา)...<br>
+                        <small>กำลังประมวลผล: ${i + 1}/${branchIds.length} สาขา</small><br>
+                        <small style="color: #4CAF50;">✅ สำเร็จ: ${successCount} | ❌ ล้มเหลว: ${failCount}</small>
+                    </div>
+                `;
+                
+                try {
+                    const params = new URLSearchParams({
+                        branchId: branchId,
+                        saleCode: saleCode,
+                        dateStart: dateStart,
+                        dateEnd: dateEnd,
+                        sessionId: sessionId,
+                        customerSign: ''
+                    });
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 วินาทีต่อสาขา
+                    
+                    const response = await fetch(`/api/report?${params}`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    
+                    const data = await response.json();
+                    
+                    if (data.details && data.details.length > 0) {
+                        allDetails = allDetails.concat(data.details);
+                        totalFetched += data.details.length;
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    console.error(`Error fetching branch ${branchId}:`, error);
+                    failCount++;
+                }
+            }
+            
+            // สร้างรายงานจากข้อมูลที่รวมแล้ว
+            if (allDetails.length > 0) {
+                // คำนวณสรุปใหม่จากข้อมูลทั้งหมด
+                const combinedReport = calculateCombinedReport(allDetails);
+                displayReport({
+                    report: combinedReport,
+                    details: allDetails
+                });
+            } else {
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>❌ ไม่พบข้อมูล</h3>
+                        <p>ไม่พบข้อมูลในช่วงเวลาที่เลือกสำหรับ Zone นี้</p>
+                        <p><small>ตรวจสอบแล้ว ${branchIds.length} สาขา</small></p>
+                    </div>
+                `;
+            }
+            
+            submitBtn.disabled = false;
+        }
+
+        // ฟังก์ชันคำนวณรายงานรวมจากข้อมูลหลายสาขา
+        function calculateCombinedReport(items) {
+            const report = {
+                totalCount: items.length,
+                confirmedCount: 0,
+                notConfirmedCount: 0,
+                cancelledCount: 0,
+                totalAmount: 0,
+                confirmedAmount: 0,
+                statusSummary: {},
+                brandSummary: {},
+                dailySummary: {},
+                salesSummary: {}
+            };
+            
+            items.forEach(item => {
+                const status = item.BIDDING_STATUS_NAME || 'ไม่ระบุ';
+                const amount = parseFloat(item.amount) || 0;
+                const isConfirmed = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'].includes(status);
+                
+                // Status summary
+                if (!report.statusSummary[status]) {
+                    report.statusSummary[status] = { count: 0, amount: 0 };
+                }
+                report.statusSummary[status].count++;
+                report.statusSummary[status].amount += amount;
+                
+                // Brand summary
+                const brand = item.brand_name || 'ไม่ระบุ';
+                if (!report.brandSummary[brand]) {
+                    report.brandSummary[brand] = { count: 0, amount: 0 };
+                }
+                report.brandSummary[brand].count++;
+                report.brandSummary[brand].amount += amount;
+                
+                // Daily summary
+                const date = item.document_date || '';
+                if (date) {
+                    if (!report.dailySummary[date]) {
+                        report.dailySummary[date] = { count: 0, confirmedCount: 0, totalAmount: 0, confirmedAmount: 0 };
+                    }
+                    report.dailySummary[date].count++;
+                    report.dailySummary[date].totalAmount += amount;
+                    if (isConfirmed) {
+                        report.dailySummary[date].confirmedCount++;
+                        report.dailySummary[date].confirmedAmount += amount;
+                    }
+                }
+                
+                // Sales summary
+                const saleCode = item.SALE_CODE || '';
+                if (saleCode) {
+                    if (!report.salesSummary[saleCode]) {
+                        report.salesSummary[saleCode] = { 
+                            name: item.SALE_NAME || '', 
+                            count: 0, 
+                            confirmedCount: 0, 
+                            totalAmount: 0, 
+                            confirmedAmount: 0 
+                        };
+                    }
+                    report.salesSummary[saleCode].count++;
+                    report.salesSummary[saleCode].totalAmount += amount;
+                    if (isConfirmed) {
+                        report.salesSummary[saleCode].confirmedCount++;
+                        report.salesSummary[saleCode].confirmedAmount += amount;
+                    }
+                }
+                
+                // Totals
+                report.totalAmount += amount;
+                if (isConfirmed) {
+                    report.confirmedCount++;
+                    report.confirmedAmount += amount;
+                } else {
+                    report.notConfirmedCount++;
+                }
+                
+                if (status === 'ยกเลิกรายการ') {
+                    report.cancelledCount++;
+                }
+            });
+            
+            return report;
+        }
+
+        // ฟังก์ชันสร้างรายงานสาขาเดียว (เดิม)
+        async function generateSingleBranchReport(branchId, sessionId, container, submitBtn) {
+            const params = new URLSearchParams({
+                branchId: branchId,
+                saleCode: document.getElementById('reportSaleCode').value,
+                dateStart: formatDateThai(document.getElementById('reportDateStart').value),
+                dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
+                sessionId: sessionId,
+                customerSign: ''
+            });
+
+            try {
+                // เพิ่ม timeout สำหรับ fetch (60 วินาที)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                
+                const response = await fetch(`/api/report?${params}`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                const data = await response.json();
+
+                if (data.error) {
+                    container.innerHTML = `
+                        <div class="error">
+                            <h3>❌ เกิดข้อผิดพลาด</h3>
+                            <p>${data.error}</p>
+                            ${data.message ? `<p><small>${data.message}</small></p>` : ''}
+                        </div>
+                    `;
+                } else {
+                    displayReport(data);
+                }
+            } catch (error) {
+                let errorMessage = error.message;
+                if (error.name === 'AbortError') {
+                    errorMessage = 'การดึงข้อมูลใช้เวลานานเกินไป (Timeout) กรุณาลองลดช่วงเวลาที่เลือก';
+                }
                 container.innerHTML = `
                     <div class="error">
                         <h3>❌ เกิดข้อผิดพลาด</h3>

@@ -31,9 +31,7 @@ python3 app.py
 
 เปิด http://localhost:5001/login
 
-**ข้อมูล Admin เริ่มต้น:**
-- Username: `admin`
-- Password: `admin123`
+ใช้ข้อมูล Admin ที่ได้รับจากผู้ดูแลระบบ
 
 ## การจัดการ Admin Users
 
@@ -52,19 +50,21 @@ python3 check_admin.py
 
 ### คำสั่งด่วน
 
-**รีเซ็ตรหัสผ่าน admin:**
-```bash
-python3 check_admin.py << EOF
-5
-EOF
-```
-
 **ตรวจสอบรหัสผ่าน:**
 ```bash
 python3 check_admin.py << EOF
 2
-admin
-admin123
+your-username
+your-password
+EOF
+```
+
+**เปลี่ยนรหัสผ่าน:**
+```bash
+python3 check_admin.py << EOF
+3
+your-username
+new-password
 EOF
 ```
 
@@ -116,10 +116,9 @@ EOF
 
 **แก้ไขด่วน:**
 ```bash
-# รีเซ็ตรหัสผ่าน admin กลับเป็นค่าเริ่มต้น
-python3 check_admin.py << EOF
-5
-EOF
+# ตรวจสอบรหัสผ่าน
+python3 check_admin.py
+# เลือก 2 (ตรวจสอบรหัสผ่าน)
 ```
 
 ## API Endpoints

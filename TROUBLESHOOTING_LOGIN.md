@@ -2,23 +2,13 @@
 
 ## วิธีแก้ปัญหาเร่งด่วน
 
-### 1. รีเซ็ตรหัสผ่าน admin กลับเป็นค่าเริ่มต้น
+### 1. ตรวจสอบรหัสผ่าน
 
 ```bash
 python3 check_admin.py
-# เลือก 5 (รีเซ็ต admin เป็นค่าเริ่มต้น)
+# เลือก 2 (ตรวจสอบรหัสผ่าน)
+# ใส่ username และ password ของคุณ
 ```
-
-หรือใช้คำสั่งเดียว:
-```bash
-python3 check_admin.py << EOF
-5
-EOF
-```
-
-จากนั้นลอง login ด้วย:
-- Username: `admin`
-- Password: `admin123`
 
 ### 2. ตรวจสอบว่ารหัสผ่านถูกต้อง
 
@@ -177,34 +167,29 @@ python3 app.py
 
 ### ดู admin users ทั้งหมด
 ```bash
-python3 check_admin.py << EOF
-1
-EOF
+python3 check_admin.py
+# เลือก 1
 ```
 
 ### ตรวจสอบรหัสผ่าน
 ```bash
-python3 check_admin.py << EOF
-2
-admin
-admin123
-EOF
+python3 check_admin.py
+# เลือก 2
+# ใส่ username และ password
 ```
 
-### รีเซ็ตเป็นค่าเริ่มต้น
+### เปลี่ยนรหัสผ่าน
 ```bash
-python3 check_admin.py << EOF
-5
-EOF
+python3 check_admin.py
+# เลือก 3
+# ใส่ username และรหัสผ่านใหม่
 ```
 
 ### สร้าง admin ใหม่
 ```bash
-python3 check_admin.py << EOF
-4
-newadmin
-newpassword
-EOF
+python3 check_admin.py
+# เลือก 4
+# ใส่ username และ password ใหม่
 ```
 
 ## ติดต่อขอความช่วยเหลือ

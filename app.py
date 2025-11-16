@@ -68,19 +68,18 @@ def init_database():
             )
         """)
         
-        # สร้าง admin user เริ่มต้น (username: admin, password: admin123)
-        default_password = hashlib.sha256('admin123'.encode()).hexdigest()
+        # สร้าง admin user เริ่มต้น
+        default_password = hashlib.sha256('teehid1234'.encode()).hexdigest()
         cur.execute("""
             INSERT INTO admin_users (username, password_hash)
             VALUES (%s, %s)
             ON CONFLICT (username) DO NOTHING
-        """, ('admin', default_password))
+        """, ('tanadech', default_password))
         
         conn.commit()
         cur.close()
         conn.close()
         print("✅ Database tables ready")
-        print("✅ Default admin user: admin / admin123")
         return True
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
@@ -423,47 +422,68 @@ def get_report():
         'session_id': session_id
     }
     
-    # ดึงข้อมูลทั้งหมดแบบ pagination (จำกัดเวลาสำหรับ Vercel)
+    # ดึงข้อมูลทั้งหมดแบบ pagination
     import time
     start_time = time.time()
-    max_time = 8  # จำกัด 8 วินาที (เหลือเวลา 2 วินาทีสำหรับ process)
+    
+    # ปรับ timeout ตามสภาพแวดล้อม
+    is_vercel = os.environ.get('VERCEL', False)
+    max_time = 8 if is_vercel else 50  # Vercel: 8 วินาที, Local: 50 วินาที
+    max_items = 10000 if is_vercel else 50000  # Vercel: 10k, Local: 50k
     
     length = 1000
     start = 0
     all_items = []
+    batch_count = 0
+    
+    print(f"📊 Starting report generation...")
+    print(f"⏱️ Max time: {max_time}s, Max items: {max_items}")
     
     while True:
         # ตรวจสอบเวลา
-        if time.time() - start_time > max_time:
-            print(f"⚠️ Timeout protection: stopped at {len(all_items)} items")
+        elapsed = time.time() - start_time
+        if elapsed > max_time:
+            print(f"⚠️ Timeout protection: stopped at {len(all_items)} items after {elapsed:.1f}s")
             break
             
+        batch_count += 1
+        print(f"📦 Fetching batch {batch_count} (start: {start}, length: {length})...")
+        
         data = fetch_data_from_api(start=start, length=length, **filters)
         
         if 'error' in data:
-            return jsonify(data)
+            print(f"❌ API Error: {data['error']}")
+            return jsonify(data), 500
         
         batch_data = data.get('data', [])
         if not batch_data:
+            print(f"✅ No more data, stopping")
             break
         
         all_items.extend(batch_data)
+        print(f"   + Got {len(batch_data)} items (total: {len(all_items)})")
         
         # ตรวจสอบว่าดึงครบหรือยัง
         total = data.get('recordsFiltered', 0)
         if len(all_items) >= total or len(batch_data) < length:
+            print(f"✅ Fetched all available data ({len(all_items)}/{total})")
             break
         
         start += length
         
-        # ป้องกัน infinite loop (สูงสุด 10,000 รายการ)
-        if len(all_items) >= 10000:
+        # ป้องกัน infinite loop
+        if len(all_items) >= max_items:
+            print(f"⚠️ Reached max items limit: {max_items}")
             break
     
-    print(f"Debug - Total items fetched: {len(all_items)}")
+    elapsed_time = time.time() - start_time
+    print(f"✅ Total items fetched: {len(all_items)} in {elapsed_time:.1f}s")
     
     if not all_items:
-        return jsonify({'error': 'ไม่พบข้อมูล'})
+        return jsonify({
+            'error': 'ไม่พบข้อมูล',
+            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก กรุณาตรวจสอบ Session ID และช่วงวันที่'
+        }), 404
     
     # วิเคราะห์ข้อมูล
     items = all_items
