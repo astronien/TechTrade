@@ -1563,7 +1563,7 @@
                 return;
             }
             
-            // ถ้าเลือก Zone → Export Excel โดยตรง (ไม่แสดงในหน้าเว็บ)
+            // ถ้าเลือก Zone → ดึงข้อมูลทีละสาขา
             if (zoneId) {
                 const zone = ZONES_DATA.find(z => z.zone_id === zoneId);
                 if (!zone) {
@@ -1571,11 +1571,8 @@
                     return;
                 }
                 
-                // แจ้งเตือนและ Export Excel โดยตรง
-                if (confirm(`📊 รายงาน Zone: ${zone.zone_name}\n\n⚠️ เนื่องจากข้อมูลจำนวนมาก ระบบจะ Export เป็นไฟล์ Excel โดยตรง\n(ไม่แสดงในหน้าเว็บ)\n\nใช้เวลาประมาณ 2-5 นาที\n\nต้องการดำเนินการต่อหรือไม่?`)) {
-                    closeAnnualReportModal();
-                    await exportAnnualReportToExcel(year, '', zoneId);
-                }
+                closeAnnualReportModal();
+                await generateAnnualReportForZone(year, zone);
                 return;
             }
             
@@ -1629,7 +1626,7 @@
             const container = document.getElementById('reportContainer');
             const branchIds = zone.branch_ids;
             
-            // ดึงข้อมูลทุกสาขาใน Zone
+            // ดึงข้อมูลทุกสาขาใน Zone (ทีละสาขา)
             const branchesData = [];
             let totalRecords = 0;
             
@@ -1644,27 +1641,44 @@
                         <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 20px; margin-top: 15px; overflow: hidden;">
                             <div style="width: ${progress}%; background: #667eea; height: 100%; transition: width 0.3s;"></div>
                         </div>
-                        <p style="color: #999; font-size: 12px; margin-top: 10px;">⚠️ ข้อมูลจำนวนมาก กรุณารอสักครู่...</p>
+                        <p style="color: #999; font-size: 12px; margin-top: 10px;">กำลังประมวลผล... (ประมาณ ${Math.ceil((branchIds.length - i) * 5)} วินาที)</p>
                     </div>
                 `;
                 
-                const params = new URLSearchParams({
-                    year: year,
-                    branchId: branchId,
-                    sessionId: localStorage.getItem('sessionId') || ''
-                });
-                
-                const response = await fetch(`/api/annual-report-data?${params.toString()}`);
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    totalRecords += result.total_records;
-                    branchesData.push({
-                        branch_id: result.branch_id,
-                        branch_name: result.branch_name,
-                        total_records: result.total_records,
-                        monthly_data: result.monthly_data
+                try {
+                    const params = new URLSearchParams({
+                        year: year,
+                        branchId: branchId,
+                        sessionId: localStorage.getItem('sessionId') || ''
                     });
+                    
+                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        totalRecords += result.total_records;
+                        branchesData.push({
+                            branch_id: result.branch_id,
+                            branch_name: result.branch_name,
+                            total_records: result.total_records,
+                            monthly_data: result.monthly_data
+                        });
+                    } else {
+                        console.error(`Error fetching branch ${branchId}:`, result.error);
+                        // เพิ่มข้อมูลว่างถ้า error
+                        branchesData.push({
+                            branch_id: branchId,
+                            branch_name: `สาขา ${branchId} (Error)`,
+                            total_records: 0,
+                            monthly_data: Array.from({length: 12}, (_, i) => ({
+                                month: ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][i],
+                                month_number: i + 1,
+                                count: 0
+                            }))
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error fetching branch ${branchId}:`, error);
                 }
             }
             
@@ -1675,7 +1689,7 @@
                 zone_name: zone.zone_name,
                 branch_count: branchIds.length,
                 total_records: totalRecords,
-                branches_data: branchesData  // เก็บข้อมูลแยกตามสาขา
+                branches_data: branchesData
             };
             
             // แสดงตารางและกราฟ
