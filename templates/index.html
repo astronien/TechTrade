@@ -727,7 +727,9 @@
                     • ตารางแสดงจำนวนเทรดแต่ละเดือน (มค.-ธค.)<br>
                     • กราฟแท่ง (Bar Chart) เปรียบเทียบรายเดือน<br>
                     • ไฟล์ Excel (.xlsx) พร้อมดาวน์โหลด<br><br>
-                    ⚠️ <strong>หมายเหตุ:</strong> ถ้าข้อมูลเยอะมาก อาจใช้เวลา 2-5 นาที
+                    ⚠️ <strong>หมายเหตุ:</strong><br>
+                    • <strong>สาขาเดียว:</strong> แสดงในหน้าเว็บ + Export Excel (เร็ว 5-10 วินาที)<br>
+                    • <strong>Zone:</strong> Export Excel โดยตรง (ใช้เวลา 2-5 นาที)
                 </p>
             </div>
             <div class="modal-footer">
@@ -1561,6 +1563,22 @@
                 return;
             }
             
+            // ถ้าเลือก Zone → Export Excel โดยตรง (ไม่แสดงในหน้าเว็บ)
+            if (zoneId) {
+                const zone = ZONES_DATA.find(z => z.zone_id === zoneId);
+                if (!zone) {
+                    alert('❌ ไม่พบ Zone ที่เลือก');
+                    return;
+                }
+                
+                // แจ้งเตือนและ Export Excel โดยตรง
+                if (confirm(`📊 รายงาน Zone: ${zone.zone_name}\n\n⚠️ เนื่องจากข้อมูลจำนวนมาก ระบบจะ Export เป็นไฟล์ Excel โดยตรง\n(ไม่แสดงในหน้าเว็บ)\n\nใช้เวลาประมาณ 2-5 นาที\n\nต้องการดำเนินการต่อหรือไม่?`)) {
+                    closeAnnualReportModal();
+                    await exportAnnualReportToExcel(year, '', zoneId);
+                }
+                return;
+            }
+            
             // ปิด modal
             closeAnnualReportModal();
             
@@ -1570,41 +1588,30 @@
                 <div class="loading">
                     <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
                     <h3>กำลังสร้างรายงานรายปี ${year}</h3>
-                    <p style="color: #666; margin-top: 10px;">โปรดรอสักครู่... (ประมาณ 30-60 วินาที)</p>
+                    <p style="color: #666; margin-top: 10px;">โปรดรอสักครู่... (ประมาณ 5-10 วินาที)</p>
                 </div>
             `;
             
             try {
-                // ถ้าเลือก Zone ให้ดึงข้อมูลทุกสาขาใน Zone
-                if (zoneId) {
-                    const zone = ZONES_DATA.find(z => z.zone_id === zoneId);
-                    if (!zone) {
-                        throw new Error('ไม่พบ Zone ที่เลือก');
-                    }
-                    
-                    // ดึงข้อมูลทุกสาขาใน Zone
-                    await generateAnnualReportForZone(year, zone);
-                } else {
-                    // ดึงข้อมูลสาขาเดียวหรือทุกสาขา
-                    const params = new URLSearchParams({
-                        year: year,
-                        sessionId: localStorage.getItem('sessionId') || ''
-                    });
-                    
-                    if (branchId) {
-                        params.append('branchId', branchId);
-                    }
-                    
-                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
-                    const result = await response.json();
-                    
-                    if (!response.ok || !result.success) {
-                        throw new Error(result.error || `HTTP ${response.status}`);
-                    }
-                    
-                    // แสดงตารางและกราฟ
-                    displayAnnualReportTable(result);
+                // ดึงข้อมูลสาขาเดียวหรือทุกสาขา
+                const params = new URLSearchParams({
+                    year: year,
+                    sessionId: localStorage.getItem('sessionId') || ''
+                });
+                
+                if (branchId) {
+                    params.append('branchId', branchId);
                 }
+                
+                const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                const result = await response.json();
+                
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || `HTTP ${response.status}`);
+                }
+                
+                // แสดงตารางและกราฟ
+                displayAnnualReportTable(result);
                 
             } catch (error) {
                 console.error('Error generating annual report:', error);
