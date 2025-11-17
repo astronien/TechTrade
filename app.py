@@ -1655,17 +1655,50 @@ def get_annual_report_excel():
         if not all_data:
             return jsonify({'error': f'ไม่พบข้อมูลในปี {year}'}), 404
         
-        # หาชื่อสาขาหรือ Zone
-        branch_name = None
-        if zone_id and 'zone' in locals():
-            branch_name = f"Zone: {zone['zone_name']}"
-        elif branch_id:
-            branch = find_branch_by_id(branch_id)
-            if branch:
-                branch_name = branch['branch_name']
-        
         # สร้าง Excel Report
-        excel_path = generate_annual_excel_report(all_data, year, branch_id or zone_id, branch_name)
+        if zone_id and 'zone' in locals() and 'branch_ids' in locals():
+            # สร้างรายงาน Zone แยกตามสาขา
+            from excel_report_generator import generate_annual_excel_report_for_zone
+            import re
+            from collections import defaultdict
+            
+            # จัดกลุ่มข้อมูลตามสาขา
+            branches_data = []
+            for bid in branch_ids:
+                branch = find_branch_by_id(str(bid))
+                branch_name = branch['branch_name'] if branch else f"สาขา {bid}"
+                
+                # นับเทรดแต่ละเดือนของสาขานี้
+                monthly_counts = defaultdict(int)
+                for item in all_data:
+                    # ตรวจสอบว่า item นี้เป็นของสาขาไหน (ถ้ามี branch_id ใน item)
+                    item_branch = item.get('branch_id') or item.get('BRANCH_ID')
+                    if str(item_branch) == str(bid):
+                        doc_date = item.get('document_date', '')
+                        if doc_date and doc_date.startswith('/Date('):
+                            timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
+                            if timestamp_match:
+                                timestamp = int(timestamp_match.group(1)) / 1000
+                                date_obj = datetime.fromtimestamp(timestamp)
+                                if date_obj.year == year:
+                                    monthly_counts[date_obj.month] += 1
+                
+                branches_data.append({
+                    'branch_id': str(bid),
+                    'branch_name': branch_name,
+                    'monthly_counts': dict(monthly_counts)
+                })
+            
+            excel_path = generate_annual_excel_report_for_zone(branches_data, year, zone['zone_name'])
+        else:
+            # สร้างรายงานสาขาเดียว
+            branch_name = None
+            if branch_id:
+                branch = find_branch_by_id(branch_id)
+                if branch:
+                    branch_name = branch['branch_name']
+            
+            excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name)
         
         # ส่งไฟล์กลับ
         from flask import send_file
