@@ -1539,6 +1539,92 @@ def get_annual_report_data():
         return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
 
 
+@app.route('/api/annual-report-excel-from-data', methods=['POST'])
+def get_annual_report_excel_from_data():
+    """API endpoint สำหรับ Export Excel จากข้อมูลที่มีอยู่แล้ว (เร็ว!)"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'ไม่พบข้อมูล'}), 400
+        
+        year = data.get('year')
+        zone_name = data.get('zone_name')
+        branch_name = data.get('branch_name')
+        branches_data = data.get('branches_data')
+        
+        print(f"📊 Generating Excel from existing data for year {year}")
+        
+        # สร้าง Excel จากข้อมูลที่ส่งมา
+        if branches_data:
+            # Zone report
+            from excel_report_generator import generate_annual_excel_report_for_zone
+            from collections import defaultdict
+            
+            # แปลง monthly_data เป็น monthly_counts
+            formatted_branches = []
+            for branch in branches_data:
+                monthly_counts = {}
+                for month_data in branch.get('monthly_data', []):
+                    monthly_counts[month_data['month_number']] = month_data['count']
+                
+                formatted_branches.append({
+                    'branch_id': branch.get('branch_id'),
+                    'branch_name': branch.get('branch_name'),
+                    'monthly_counts': monthly_counts
+                })
+            
+            excel_path = generate_annual_excel_report_for_zone(formatted_branches, year, zone_name)
+        else:
+            # Single branch report
+            from excel_report_generator import generate_annual_excel_report
+            
+            # สร้าง dummy trade_data จาก monthly_data
+            # (ไม่ต้องมี raw data จริง เพราะเราแค่ต้องการตัวเลข)
+            monthly_data = data.get('monthly_data', [])
+            trade_data = []
+            
+            # สร้าง dummy records ตามจำนวนที่นับได้
+            for month_info in monthly_data:
+                count = month_info.get('count', 0)
+                month_num = month_info.get('month_number')
+                
+                # สร้าง dummy timestamp สำหรับเดือนนั้นๆ
+                for _ in range(count):
+                    timestamp = datetime(year, month_num, 15).timestamp() * 1000
+                    trade_data.append({
+                        'document_date': f'/Date({int(timestamp)})/'
+                    })
+            
+            excel_path = generate_annual_excel_report(trade_data, year, data.get('branch_id'), branch_name)
+        
+        # ส่งไฟล์กลับ
+        from flask import send_file
+        response = send_file(
+            excel_path,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=os.path.basename(excel_path)
+        )
+        
+        # ลบไฟล์ชั่วคราวหลังส่ง
+        @response.call_on_close
+        def cleanup():
+            try:
+                os.remove(excel_path)
+                print(f"🗑️ Removed temp file: {excel_path}")
+            except:
+                pass
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ Error generating Excel from data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
+
+
 @app.route('/api/annual-report-excel')
 def get_annual_report_excel():
     """API endpoint สำหรับ Export รายงานรายปีเป็น Excel"""
