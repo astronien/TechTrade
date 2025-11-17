@@ -1779,7 +1779,7 @@
                 </div>
                 
                 <div style="text-align: right; margin-bottom: 15px;">
-                    <button onclick="exportAnnualReportToExcel(${data.year}, '', '${data.zone_id}')" 
+                    <button onclick="exportAnnualReportToExcelFromData()" 
                             style="background: #28a745; padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
                         📥 Export Excel
                     </button>
@@ -1907,6 +1907,72 @@
                     }
                 }
             });
+        }
+
+        async function exportAnnualReportToExcelFromData() {
+            // Export จากข้อมูลที่แสดงอยู่ในหน้าเว็บ (ไม่ต้องดึงใหม่)
+            if (!window.currentAnnualReportData) {
+                alert('❌ ไม่พบข้อมูลรายงาน กรุณาสร้างรายงานก่อน');
+                return;
+            }
+            
+            const data = window.currentAnnualReportData;
+            
+            // ส่งข้อมูลไปให้ backend สร้าง Excel
+            try {
+                const button = event.target;
+                const originalText = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '⏳ กำลัง Export...';
+                
+                const response = await fetch('/api/annual-report-excel-from-data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                // ดาวน์โหลดไฟล์
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // ตั้งชื่อไฟล์
+                let filename;
+                if (data.zone_name) {
+                    filename = `trade_report_${data.year}_zone_${data.zone_name}.xlsx`;
+                } else if (data.branch_name) {
+                    filename = `trade_report_${data.year}_${data.branch_name}.xlsx`;
+                } else {
+                    filename = `trade_report_${data.year}.xlsx`;
+                }
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                button.disabled = false;
+                button.innerHTML = originalText;
+                
+                alert('✅ Export Excel สำเร็จ!');
+                
+            } catch (error) {
+                console.error('Error exporting Excel:', error);
+                alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+                
+                if (event && event.target) {
+                    event.target.disabled = false;
+                    event.target.innerHTML = '📥 Export Excel';
+                }
+            }
         }
 
         async function exportAnnualReportToExcel(year, branchId, zoneId) {
