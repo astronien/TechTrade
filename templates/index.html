@@ -380,6 +380,7 @@
             opacity: 0.6;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 
 <body>
@@ -621,6 +622,7 @@
                         <div class="btn-group">
                             <button type="submit">📊 สร้างรายงาน</button>
                             <button type="button" class="secondary" onclick="resetReportForm()">🔄 ล้างค่า</button>
+                            <button type="button" class="secondary" onclick="openAnnualReportModal()" style="background: #28a745;">📊 รายงาน Excel รายปี</button>
                         </div>
                     </form>
                 </div>
@@ -689,6 +691,48 @@
             <div class="modal-footer">
                 <button onclick="closeZoneModal()" class="secondary">ยกเลิก</button>
                 <button onclick="saveZone()">💾 บันทึก Zone</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal รายงาน Excel รายปี -->
+    <div id="annualReportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeAnnualReportModal()">&times;</span>
+                📊 รายงาน Excel รายปี
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>ปี (ค.ศ. หรือ พ.ศ.)</label>
+                    <input type="number" id="annualReportYear" placeholder="เช่น 2024 หรือ 2567" min="2020" max="2568">
+                    <small class="form-text text-muted">รองรับทั้ง ค.ศ. (2024) และ พ.ศ. (2567)</small>
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>🗺️ เลือก Zone (สำหรับ Area Manager)</label>
+                    <select id="annualReportZone" class="form-control" onchange="handleAnnualReportZoneChange()">
+                        <option value="">-- เลือกทีละสาขา --</option>
+                    </select>
+                    <small class="form-text text-muted">เลือก Zone เพื่อดูรายงานหลายสาขาพร้อมกัน</small>
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>สาขา (ไม่บังคับ)</label>
+                    <select id="annualReportBranch" class="form-control">
+                        <option value="">-- ทุกสาขา --</option>
+                    </select>
+                    <small class="form-text text-muted">เลือกสาขาเฉพาะ หรือเว้นว่างเพื่อดูทุกสาขา</small>
+                </div>
+                <p style="color: #666; font-size: 14px; margin-top: 20px;">
+                    💡 <strong>รายงานจะประกอบด้วย:</strong><br>
+                    • ตารางแสดงจำนวนเทรดแต่ละเดือน (มค.-ธค.)<br>
+                    • กราฟแท่ง (Bar Chart) เปรียบเทียบรายเดือน<br>
+                    • ไฟล์ Excel (.xlsx) พร้อมดาวน์โหลด<br><br>
+                    ⚠️ <strong>หมายเหตุ:</strong> ถ้าข้อมูลเยอะมาก อาจใช้เวลา 2-5 นาที
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeAnnualReportModal()" class="secondary">ยกเลิก</button>
+                <button onclick="generateAnnualReport()">📊 สร้างรายงาน</button>
             </div>
         </div>
     </div>
@@ -1442,6 +1486,472 @@
             document.getElementById('settingCancelType').value = cancelType;
             document.getElementById('settingReasonCancel').value = reasonCancel;
             document.getElementById('settingSessionId').value = sessionId;
+        }
+
+        // ฟังก์ชันรายงาน Excel รายปี
+        function openAnnualReportModal() {
+            // ตั้งค่าปีเริ่มต้นเป็นปีปัจจุบัน
+            const currentYear = new Date().getFullYear();
+            document.getElementById('annualReportYear').value = currentYear;
+            
+            // โหลดรายการ Zone
+            const zoneSelect = document.getElementById('annualReportZone');
+            zoneSelect.innerHTML = '<option value="">-- เลือกทีละสาขา --</option>';
+            
+            ZONES_DATA.forEach(zone => {
+                const option = document.createElement('option');
+                option.value = zone.zone_id;
+                option.textContent = zone.zone_name;
+                zoneSelect.appendChild(option);
+            });
+            
+            // โหลดรายการสาขาลง dropdown
+            const branchSelect = document.getElementById('annualReportBranch');
+            branchSelect.innerHTML = '<option value="">-- ทุกสาขา --</option>';
+            
+            BRANCHES_DATA.forEach(branch => {
+                const option = document.createElement('option');
+                option.value = branch.branch_id;
+                option.textContent = branch.branch_name;
+                branchSelect.appendChild(option);
+            });
+            
+            document.getElementById('annualReportModal').classList.add('show');
+        }
+
+        function handleAnnualReportZoneChange() {
+            const zoneSelect = document.getElementById('annualReportZone');
+            const branchSelect = document.getElementById('annualReportBranch');
+            const selectedZone = zoneSelect.value;
+            
+            if (selectedZone) {
+                // ถ้าเลือก Zone ให้ disable branch select
+                branchSelect.disabled = true;
+                branchSelect.value = '';
+            } else {
+                // ถ้าไม่เลือก Zone ให้ enable branch select
+                branchSelect.disabled = false;
+            }
+        }
+
+        function closeAnnualReportModal() {
+            document.getElementById('annualReportModal').classList.remove('show');
+        }
+
+        async function generateAnnualReport() {
+            const yearInput = document.getElementById('annualReportYear').value;
+            const zoneId = document.getElementById('annualReportZone').value;
+            const branchId = document.getElementById('annualReportBranch').value;
+            
+            if (!yearInput) {
+                alert('⚠️ กรุณาระบุปี');
+                return;
+            }
+            
+            // แปลงปี (รองรับทั้ง พ.ศ. และ ค.ศ.)
+            let year = parseInt(yearInput);
+            if (year > 2500) {
+                year = year - 543; // แปลง พ.ศ. เป็น ค.ศ.
+            }
+            
+            // ตรวจสอบปีที่ถูกต้อง
+            const currentYear = new Date().getFullYear();
+            if (year < 2020 || year > currentYear + 1) {
+                alert(`⚠️ กรุณาระบุปีระหว่าง 2020-${currentYear + 1} (ค.ศ.) หรือ 2563-${currentYear + 544} (พ.ศ.)`);
+                return;
+            }
+            
+            // ปิด modal
+            closeAnnualReportModal();
+            
+            // แสดง loading ในหน้ารายงาน
+            const container = document.getElementById('reportContainer');
+            container.innerHTML = `
+                <div class="loading">
+                    <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+                    <h3>กำลังสร้างรายงานรายปี ${year}</h3>
+                    <p style="color: #666; margin-top: 10px;">โปรดรอสักครู่... (ประมาณ 30-60 วินาที)</p>
+                </div>
+            `;
+            
+            try {
+                // ถ้าเลือก Zone ให้ดึงข้อมูลทุกสาขาใน Zone
+                if (zoneId) {
+                    const zone = ZONES_DATA.find(z => z.zone_id === zoneId);
+                    if (!zone) {
+                        throw new Error('ไม่พบ Zone ที่เลือก');
+                    }
+                    
+                    // ดึงข้อมูลทุกสาขาใน Zone
+                    await generateAnnualReportForZone(year, zone);
+                } else {
+                    // ดึงข้อมูลสาขาเดียวหรือทุกสาขา
+                    const params = new URLSearchParams({
+                        year: year,
+                        sessionId: localStorage.getItem('sessionId') || ''
+                    });
+                    
+                    if (branchId) {
+                        params.append('branchId', branchId);
+                    }
+                    
+                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                    const result = await response.json();
+                    
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.error || `HTTP ${response.status}`);
+                    }
+                    
+                    // แสดงตารางและกราฟ
+                    displayAnnualReportTable(result);
+                }
+                
+            } catch (error) {
+                console.error('Error generating annual report:', error);
+                container.innerHTML = `
+                    <div class="error-message">
+                        <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
+                        <h3>เกิดข้อผิดพลาด</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function generateAnnualReportForZone(year, zone) {
+            const container = document.getElementById('reportContainer');
+            const branchIds = zone.branch_ids;
+            
+            // ดึงข้อมูลทุกสาขาใน Zone
+            const branchesData = [];
+            let totalRecords = 0;
+            
+            for (let i = 0; i < branchIds.length; i++) {
+                const branchId = branchIds[i];
+                const progress = Math.round((i / branchIds.length) * 100);
+                container.innerHTML = `
+                    <div class="loading">
+                        <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+                        <h3>กำลังดึงข้อมูล Zone: ${zone.zone_name}</h3>
+                        <p style="color: #666; margin-top: 10px;">สาขา ${i + 1}/${branchIds.length} (${progress}%)</p>
+                        <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 20px; margin-top: 15px; overflow: hidden;">
+                            <div style="width: ${progress}%; background: #667eea; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                        <p style="color: #999; font-size: 12px; margin-top: 10px;">⚠️ ข้อมูลจำนวนมาก กรุณารอสักครู่...</p>
+                    </div>
+                `;
+                
+                const params = new URLSearchParams({
+                    year: year,
+                    branchId: branchId,
+                    sessionId: localStorage.getItem('sessionId') || ''
+                });
+                
+                const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    totalRecords += result.total_records;
+                    branchesData.push({
+                        branch_id: result.branch_id,
+                        branch_name: result.branch_name,
+                        total_records: result.total_records,
+                        monthly_data: result.monthly_data
+                    });
+                }
+            }
+            
+            const combinedResult = {
+                success: true,
+                year: year,
+                zone_id: zone.zone_id,
+                zone_name: zone.zone_name,
+                branch_count: branchIds.length,
+                total_records: totalRecords,
+                branches_data: branchesData  // เก็บข้อมูลแยกตามสาขา
+            };
+            
+            // แสดงตารางและกราฟ
+            displayAnnualReportTableForZone(combinedResult);
+        }
+
+        function displayAnnualReportTable(data) {
+            const container = document.getElementById('reportContainer');
+            let branchInfo;
+            
+            if (data.zone_name) {
+                branchInfo = `🗺️ Zone: ${data.zone_name} (${data.branch_count} สาขา)`;
+            } else if (data.branch_name) {
+                branchInfo = `สาขา: ${data.branch_name}`;
+            } else {
+                branchInfo = 'ทุกสาขา';
+            }
+            
+            // สร้าง HTML ตาราง
+            let html = `
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
+                    <h3 style="margin: 0; color: #667eea;">📊 รายงานรายปี ${data.year}</h3>
+                    <p style="margin: 5px 0 0 0; color: #666;">${branchInfo} | รวม ${data.total_records} รายการ</p>
+                </div>
+                
+                <div style="text-align: right; margin-bottom: 15px;">
+                    <button onclick="exportAnnualReportToExcel(${data.year}, '${data.branch_id || ''}', '${data.zone_id || ''}')" 
+                            style="background: #28a745; padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                        📥 Export Excel
+                    </button>
+                </div>
+                
+                <div class="data-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="background: #667eea; color: white;">เดือน</th>
+            `;
+            
+            // สร้างหัวตารางเดือน
+            data.monthly_data.forEach(month => {
+                html += `<th style="background: #4472C4; color: white;">${month.month}</th>`;
+            });
+            
+            html += `
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="background: #FFF2CC; font-weight: bold;">${data.year}</td>
+            `;
+            
+            // สร้างข้อมูลแต่ละเดือน
+            data.monthly_data.forEach(month => {
+                const bgColor = month.count > 0 ? '#E7E6E6' : '';
+                html += `<td style="text-align: center; background: ${bgColor};">${month.count}</td>`;
+            });
+            
+            html += `
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <canvas id="annualChart" style="max-height: 400px;"></canvas>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+            
+            // สร้างกราฟ
+            createAnnualChart(data.monthly_data);
+            
+            // เก็บข้อมูลไว้ใช้ export
+            window.currentAnnualReportData = data;
+        }
+
+        function displayAnnualReportTableForZone(data) {
+            const container = document.getElementById('reportContainer');
+            
+            // สร้าง HTML ตาราง
+            let html = `
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
+                    <h3 style="margin: 0; color: #667eea;">📊 รายงานรายปี ${data.year}</h3>
+                    <p style="margin: 5px 0 0 0; color: #666;">🗺️ Zone: ${data.zone_name} (${data.branch_count} สาขา) | รวม ${data.total_records} รายการ</p>
+                </div>
+                
+                <div style="text-align: right; margin-bottom: 15px;">
+                    <button onclick="exportAnnualReportToExcel(${data.year}, '', '${data.zone_id}')" 
+                            style="background: #28a745; padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                        📥 Export Excel
+                    </button>
+                </div>
+                
+                <div class="data-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="background: #667eea; color: white;">สาขา</th>
+            `;
+            
+            // สร้างหัวตารางเดือน
+            const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+            monthNames.forEach(month => {
+                html += `<th style="background: #4472C4; color: white;">${month}</th>`;
+            });
+            
+            html += `
+                                <th style="background: #28a745; color: white;">รวม</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            // สร้างแถวข้อมูลแต่ละสาขา
+            let totalByMonth = new Array(12).fill(0);
+            let grandTotal = 0;
+            
+            data.branches_data.forEach(branch => {
+                const branchName = branch.branch_name ? branch.branch_name.split(' : ').pop() : `สาขา ${branch.branch_id}`;
+                let branchTotal = 0;
+                
+                html += `<tr><td style="background: #FFF2CC; font-weight: bold;">${branchName}</td>`;
+                
+                branch.monthly_data.forEach((month, idx) => {
+                    const bgColor = month.count > 0 ? '#E7E6E6' : '';
+                    html += `<td style="text-align: center; background: ${bgColor};">${month.count}</td>`;
+                    totalByMonth[idx] += month.count;
+                    branchTotal += month.count;
+                });
+                
+                html += `<td style="text-align: center; background: #d4edda; font-weight: bold;">${branchTotal}</td>`;
+                html += `</tr>`;
+                
+                grandTotal += branchTotal;
+            });
+            
+            // แถวรวม
+            html += `<tr style="background: #f8f9fa; font-weight: bold;">`;
+            html += `<td style="background: #667eea; color: white;">รวมทั้งหมด</td>`;
+            totalByMonth.forEach(count => {
+                html += `<td style="text-align: center; background: #d1ecf1;">${count}</td>`;
+            });
+            html += `<td style="text-align: center; background: #28a745; color: white;">${grandTotal}</td>`;
+            html += `</tr>`;
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <canvas id="annualChart" style="max-height: 400px;"></canvas>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+            
+            // สร้างกราฟรวม
+            const chartData = totalByMonth.map((count, idx) => ({
+                month: monthNames[idx],
+                count: count
+            }));
+            createAnnualChart(chartData);
+            
+            // เก็บข้อมูลไว้ใช้ export
+            window.currentAnnualReportData = data;
+        }
+
+        function createAnnualChart(monthlyData) {
+            const ctx = document.getElementById('annualChart');
+            if (!ctx) return;
+            
+            // ถ้ามีกราฟเก่าอยู่ ให้ทำลายก่อน
+            if (window.annualChartInstance) {
+                window.annualChartInstance.destroy();
+            }
+            
+            const labels = monthlyData.map(m => m.month);
+            const counts = monthlyData.map(m => m.count);
+            
+            window.annualChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'จำนวนเทรด',
+                        data: counts,
+                        backgroundColor: 'rgba(102, 126, 234, 0.5)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'รายงานจำนวนเทรดรายเดือน',
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 10
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function exportAnnualReportToExcel(year, branchId, zoneId) {
+            try {
+                const button = event.target;
+                const originalText = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '⏳ กำลัง Export...';
+                
+                const params = new URLSearchParams({
+                    year: year,
+                    sessionId: localStorage.getItem('sessionId') || ''
+                });
+                
+                if (zoneId) {
+                    params.append('zoneId', zoneId);
+                } else if (branchId) {
+                    params.append('branchId', branchId);
+                }
+                
+                const response = await fetch(`/api/annual-report-excel?${params.toString()}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                // ดาวน์โหลดไฟล์
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // ตั้งชื่อไฟล์
+                let filename;
+                if (zoneId) {
+                    const zone = ZONES_DATA.find(z => z.zone_id == zoneId);
+                    const zoneName = zone ? zone.zone_name : zoneId;
+                    filename = `trade_report_${year}_zone_${zoneName}.xlsx`;
+                } else if (branchId) {
+                    const branchName = BRANCHES_DATA.find(b => b.branch_id == branchId)?.branch_name || branchId;
+                    filename = `trade_report_${year}_${branchName}.xlsx`;
+                } else {
+                    filename = `trade_report_${year}_all_branches.xlsx`;
+                }
+                
+                a.download = filename;
+                
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                button.disabled = false;
+                button.innerHTML = originalText;
+                
+                alert('✅ Export Excel สำเร็จ!');
+                
+            } catch (error) {
+                console.error('Error exporting Excel:', error);
+                alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+                
+                if (event && event.target) {
+                    event.target.disabled = false;
+                    event.target.innerHTML = '📥 Export Excel';
+                }
+            }
         }
 
         async function autoFetchSession(event) {

@@ -199,7 +199,7 @@ def fetch_data_from_api(start=0, length=50, **filters):
     print(f"   Sale Code: {filters.get('sale_code', 'N/A')}")
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies)
+        response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=60)
         response.raise_for_status()
         result = response.json()
         
@@ -219,9 +219,34 @@ def fetch_data_from_api(start=0, length=50, **filters):
         else:
             print(f"   Unexpected format: {result}")
         return result
+    except requests.exceptions.Timeout:
+        print(f"❌ API Timeout: Request took longer than 30 seconds")
+        return {"error": "API timeout - กรุณาลองใหม่อีกครั้ง"}
+    except requests.exceptions.ConnectionError as e:
+        print(f"❌ Connection Error: {str(e)}")
+        return {"error": "ไม่สามารถเชื่อมต่อ API ได้ - กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"}
     except requests.exceptions.RequestException as e:
         print(f"❌ API Error: {str(e)}")
         return {"error": str(e)}
+
+def fetch_data_with_retry(start=0, length=50, max_retries=3, **filters):
+    """ดึงข้อมูลจาก API พร้อม retry mechanism"""
+    import time
+    
+    for retry_count in range(max_retries):
+        data = fetch_data_from_api(start=start, length=length, **filters)
+        
+        if 'error' not in data:
+            # เพิ่ม delay เล็กน้อยระหว่าง request เพื่อไม่ให้ API ล้น
+            time.sleep(0.5)
+            return data
+        
+        if retry_count < max_retries - 1:
+            wait_time = 3 * (retry_count + 1)  # เพิ่มเวลารอเป็น 3, 6, 9 วินาที
+            print(f"⚠️ Retry {retry_count + 1}/{max_retries} after {wait_time}s...")
+            time.sleep(wait_time)
+    
+    return data  # ส่ง error กลับถ้า retry หมดแล้ว
 
 # Decorator สำหรับตรวจสอบ login
 def login_required(f):
@@ -449,7 +474,7 @@ def get_report():
         batch_count += 1
         print(f"📦 Fetching batch {batch_count} (start: {start}, length: {length})...")
         
-        data = fetch_data_from_api(start=start, length=length, **filters)
+        data = fetch_data_with_retry(start=start, length=length, **filters)
         
         if 'error' in data:
             print(f"❌ API Error: {data['error']}")
@@ -837,28 +862,35 @@ def find_zone_by_name(zone_name):
     return None
 
 def find_branch_by_id(branch_id_input):
-    """ค้นหาสาขาจาก ID number (เช่น 9 จาก ID9, 13 จาก ID13)"""
+    """ค้นหาสาขาจาก ID number (เช่น 9 จาก ID9, 13 จาก ID13) หรือ branch_id"""
     import os
     import re
     branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
     
     try:
-        # แปลงเป็นตัวเลข
-        search_id = int(branch_id_input)
-        
         with open(branches_file, 'r', encoding='utf-8') as f:
             branches_data = json.load(f)
-            
+        
+        # ลองค้นหาจาก branch_id ตรงๆ ก่อน
+        branch_id_str = str(branch_id_input)
         for branch in branches_data:
-            branch_name = branch.get('branch_name', '')
-            # ดึงตัวเลขจาก ID (เช่น "00009 : ID9 : ..." -> 9)
-            match = re.search(r'ID(\d+)', branch_name)
-            if match:
-                id_number = int(match.group(1))
-                if id_number == search_id:
-                    return branch
-    except ValueError:
-        print(f"Invalid branch_id: {branch_id_input}")
+            if str(branch.get('branch_id', '')) == branch_id_str:
+                return branch
+        
+        # ถ้าไม่เจอ ลองค้นหาจาก ID number ในชื่อสาขา
+        try:
+            search_id = int(branch_id_input)
+            for branch in branches_data:
+                branch_name = branch.get('branch_name', '')
+                # ดึงตัวเลขจาก ID (เช่น "00009 : ID9 : ..." -> 9)
+                match = re.search(r'ID(\d+)', branch_name)
+                if match:
+                    id_number = int(match.group(1))
+                    if id_number == search_id:
+                        return branch
+        except ValueError:
+            pass
+            
     except Exception as e:
         print(f"Error loading branches: {e}")
     
@@ -901,6 +933,7 @@ def get_month_date_range(month_number, year=None):
 
 # Import LINE Bot Handler
 from line_bot_handler import handle_line_message
+from excel_report_generator import generate_annual_excel_report, parse_year_from_command, get_year_date_range
 
 @app.route('/webhook/line', methods=['POST'])
 def line_webhook():
@@ -933,15 +966,218 @@ def line_webhook():
                     get_month_date_range
                 )
                 
-                # ถ้ามี response ให้ส่งกลับ
-                if response_message:
+                # ตรวจสอบว่าเป็นคำสั่ง Excel Annual Report หรือไม่
+                if isinstance(response_message, dict) and response_message.get('type') == 'excel_annual':
+                    # จัดการคำสั่ง Excel รายปี
+                    handle_excel_annual_request(reply_token, response_message['parts'], event)
+                elif response_message:
+                    # ส่ง text message ปกติ
                     reply_line_message(reply_token, response_message)
         
         return jsonify({'status': 'ok'})
     
     except Exception as e:
         print(f"LINE Webhook Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def handle_excel_annual_request(reply_token, parts, event):
+    """จัดการคำสั่งสร้างรายงาน Excel รายปี"""
+    try:
+        # ส่งข้อความแจ้งว่ากำลังประมวลผล
+        reply_line_message(reply_token, "⏳ กำลังสร้างรายงาน Excel รายปี...\nโปรดรอสักครู่ (ประมาณ 30-60 วินาที)")
+        
+        # แยก parameter จาก parts
+        # รูปแบบ: ['excel', 'รายปี', '2024', '9'] หรือ ['excel', 'รายปี', '2024']
+        year = None
+        branch_id = None
+        branch_name = None
+        
+        # หาตำแหน่ง 'รายปี'
+        if 'รายปี' in parts:
+            year_index = parts.index('รายปี') + 1
+            
+            # ถ้ามีปีระบุ
+            if len(parts) > year_index:
+                year_str = parts[year_index]
+                year = parse_year_from_command(year_str)
+                
+                if not year:
+                    push_line_message(event, f"❌ ปีไม่ถูกต้อง: {year_str}\n\nกรุณาระบุปี ค.ศ. 2020-{datetime.now().year+1} หรือ พ.ศ. 2563-{datetime.now().year+544}")
+                    return
+                
+                # ถ้ามี branch_id ระบุ
+                if len(parts) > year_index + 1:
+                    branch_id_str = parts[year_index + 1]
+                    branch = find_branch_by_id(branch_id_str)
+                    
+                    if branch:
+                        branch_id = branch['branch_id']
+                        branch_name = branch['branch_name']
+                    else:
+                        push_line_message(event, f"❌ ไม่พบสาขา ID: {branch_id_str}")
+                        return
+            else:
+                # ไม่ระบุปี ใช้ปีปัจจุบัน
+                year = datetime.now().year
+        else:
+            # ไม่มีคำว่า 'รายปี' ใช้ปีปัจจุบัน
+            year = datetime.now().year
+        
+        # ดึงข้อมูลจาก API
+        date_start, date_end = get_year_date_range(year)
+        
+        filters = {
+            'date_start': date_start,
+            'date_end': date_end,
+            'sale_code': '',
+            'customer_sign': '',
+            'session_id': '',
+            'branch_id': str(branch_id) if branch_id else None
+        }
+        
+        print(f"📊 Fetching annual data for year {year}, branch {branch_id}...")
+        
+        # ดึงข้อมูลทั้งปี
+        all_data = []
+        start = 0
+        length = 1000
+        
+        while True:
+            data = fetch_data_with_retry(start=start, length=length, **filters)
+            
+            if 'error' in data:
+                push_line_message(event, f"❌ ไม่สามารถดึงข้อมูลได้: {data.get('error')}")
+                return
+            
+            batch_data = data.get('data', [])
+            if not batch_data:
+                break
+            
+            all_data.extend(batch_data)
+            
+            # ตรวจสอบว่าดึงครบหรือยัง
+            total = data.get('recordsFiltered', 0)
+            if len(all_data) >= total or len(batch_data) < length:
+                break
+            
+            start += length
+            
+            # ป้องกัน infinite loop
+            if len(all_data) >= 50000:
+                break
+        
+        print(f"✅ Fetched {len(all_data)} records")
+        
+        if not all_data:
+            push_line_message(event, f"❌ ไม่พบข้อมูลในปี {year}")
+            return
+        
+        # สร้าง Excel Report
+        excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name)
+        
+        # ส่งไฟล์ Excel ผ่าน LINE
+        send_excel_file_to_line(event, excel_path, year, branch_id, branch_name)
+        
+        # ลบไฟล์ชั่วคราว
+        import os
+        try:
+            os.remove(excel_path)
+            print(f"🗑️ Removed temp file: {excel_path}")
+        except:
+            pass
+        
+    except Exception as e:
+        print(f"❌ Error generating Excel report: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        push_line_message(event, f"❌ เกิดข้อผิดพลาด: {str(e)}")
+
+
+def send_excel_file_to_line(event, excel_path, year, branch_id=None, branch_name=None):
+    """ส่งไฟล์ Excel ไปยัง LINE"""
+    import os
+    import requests
+    
+    channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
+    
+    if not channel_access_token:
+        print("❌ LINE_CHANNEL_ACCESS_TOKEN not found")
+        push_line_message(event, "❌ ไม่สามารถส่งไฟล์ได้: ไม่พบ Channel Access Token")
+        return
+    
+    # อ่านไฟล์
+    with open(excel_path, 'rb') as f:
+        file_content = f.read()
+    
+    # สร้างข้อความอธิบาย
+    if branch_id and branch_name:
+        description = f"รายงานเทรดรายปี {year}\nสาขา: {branch_name}"
+    else:
+        description = f"รายงานเทรดรายปี {year}\nทุกสาขา"
+    
+    # ส่งข้อความก่อน
+    push_line_message(event, f"✅ สร้างรายงานเสร็จแล้ว!\n\n{description}\n\nกำลังส่งไฟล์...")
+    
+    # ส่งไฟล์ผ่าน LINE (ใช้ Push Message API)
+    # หมายเหตุ: LINE Bot API ไม่รองรับการส่งไฟล์ Excel โดยตรง
+    # ต้องใช้วิธีอื่น เช่น upload ไปที่ cloud storage แล้วส่ง link
+    # หรือแปลงเป็น image แล้วส่ง
+    
+    # วิธีชั่วคราว: แจ้งให้ user ทราบว่าไฟล์พร้อมแล้ว
+    push_line_message(event, f"📊 รายงานพร้อมแล้ว!\n\n{description}\n\n⚠️ ขออภัย: LINE Bot ยังไม่รองรับการส่งไฟล์ Excel โดยตรง\nกรุณาติดต่อผู้ดูแลระบบเพื่อรับไฟล์")
+
+
+def push_line_message(event, message):
+    """ส่ง Push Message ไปยัง LINE"""
+    import os
+    import requests
+    
+    channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
+    
+    if not channel_access_token:
+        print("❌ LINE_CHANNEL_ACCESS_TOKEN not found")
+        return
+    
+    # ดึง user_id หรือ group_id
+    source = event.get('source', {})
+    source_type = source.get('type')
+    
+    if source_type == 'user':
+        to = source.get('userId')
+    elif source_type == 'group':
+        to = source.get('groupId')
+    elif source_type == 'room':
+        to = source.get('roomId')
+    else:
+        print(f"❌ Unknown source type: {source_type}")
+        return
+    
+    url = 'https://api.line.me/v2/bot/message/push'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {channel_access_token}'
+    }
+    payload = {
+        'to': to,
+        'messages': [
+            {
+                'type': 'text',
+                'text': message
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            print(f"✅ Pushed message to LINE")
+        else:
+            print(f"❌ Failed to push message: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Error pushing message: {str(e)}")
 
 def reply_line_message(reply_token, message):
     """ส่ง Reply Message ไปยัง LINE"""
@@ -1211,6 +1447,251 @@ def save_zones():
             'success': False,
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         }), 500
+
+@app.route('/api/annual-report-data')
+def get_annual_report_data():
+    """API endpoint สำหรับดึงข้อมูลรายงานรายปี (JSON) - เวอร์ชันเร็ว"""
+    try:
+        year = request.args.get('year', type=int)
+        branch_id = request.args.get('branchId', '')
+        session_id = request.args.get('sessionId', '')
+        
+        if not year:
+            return jsonify({'error': 'กรุณาระบุปี'}), 400
+        
+        # ตรวจสอบปี
+        current_year = datetime.now().year
+        if year < 2020 or year > current_year + 1:
+            return jsonify({'error': f'ปีต้องอยู่ระหว่าง 2020-{current_year + 1}'}), 400
+        
+        print(f"📊 Fetching annual report data (FAST) for year {year}, branch {branch_id or 'all'}")
+        
+        # นับจำนวนเทรดแต่ละเดือนโดยเรียก API ทีละเดือน
+        from collections import defaultdict
+        import re
+        monthly_counts = defaultdict(int)
+        total_records = 0
+        
+        month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+                       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+        
+        # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
+        for month_num in range(1, 13):
+            # คำนวณวันแรกและวันสุดท้ายของเดือน
+            import calendar
+            last_day = calendar.monthrange(year, month_num)[1]
+            date_start = f"01/{month_num:02d}/{year}"
+            date_end = f"{last_day}/{month_num:02d}/{year}"
+            
+            filters = {
+                'date_start': date_start,
+                'date_end': date_end,
+                'sale_code': '',
+                'customer_sign': '',
+                'session_id': session_id,
+                'branch_id': branch_id if branch_id else None
+            }
+            
+            # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
+            data = fetch_data_with_retry(start=0, length=1, **filters)
+            
+            if 'error' not in data:
+                # ใช้ recordsFiltered แทนการดึงข้อมูลทั้งหมด
+                count = data.get('recordsFiltered', 0)
+                monthly_counts[month_num] = count
+                total_records += count
+                print(f"   {month_names[month_num-1]}: {count} records")
+            else:
+                print(f"   {month_names[month_num-1]}: Error - {data.get('error')}")
+                monthly_counts[month_num] = 0
+        
+        print(f"✅ Total records: {total_records}")
+        
+        # สร้าง array ข้อมูล 12 เดือน
+        monthly_data = []
+        for month_num in range(1, 13):
+            monthly_data.append({
+                'month': month_names[month_num - 1],
+                'month_number': month_num,
+                'count': monthly_counts.get(month_num, 0)
+            })
+        
+        # หาชื่อสาขา
+        branch_name = None
+        if branch_id:
+            branch = find_branch_by_id(branch_id)
+            if branch:
+                branch_name = branch['branch_name']
+        
+        return jsonify({
+            'success': True,
+            'year': year,
+            'branch_id': branch_id,
+            'branch_name': branch_name,
+            'total_records': total_records,
+            'monthly_data': monthly_data
+        })
+        
+    except Exception as e:
+        print(f"❌ Error fetching annual report data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
+
+
+@app.route('/api/annual-report-excel')
+def get_annual_report_excel():
+    """API endpoint สำหรับ Export รายงานรายปีเป็น Excel"""
+    try:
+        year = request.args.get('year', type=int)
+        branch_id = request.args.get('branchId', '')
+        zone_id = request.args.get('zoneId', '')
+        session_id = request.args.get('sessionId', '')
+        
+        if not year:
+            return jsonify({'error': 'กรุณาระบุปี'}), 400
+        
+        # ตรวจสอบปี
+        current_year = datetime.now().year
+        if year < 2020 or year > current_year + 1:
+            return jsonify({'error': f'ปีต้องอยู่ระหว่าง 2020-{current_year + 1}'}), 400
+        
+        # ถ้าเลือก Zone ให้ดึงข้อมูลทุกสาขาใน Zone
+        if zone_id:
+            zone = find_zone_by_name(zone_id)  # ใช้ zone_id เป็น zone_name
+            if not zone:
+                # ลองหาจาก zones list
+                zones = load_zones_data()
+                zone = next((z for z in zones if z['zone_id'] == zone_id), None)
+            
+            if not zone:
+                return jsonify({'error': f'ไม่พบ Zone: {zone_id}'}), 404
+            
+            branch_ids = zone['branch_ids']
+            print(f"📊 Generating Excel for year {year}, zone {zone['zone_name']} ({len(branch_ids)} branches)")
+        else:
+            branch_ids = [branch_id] if branch_id else []
+            print(f"📊 Generating Excel for year {year}, branch {branch_id or 'all'}")
+        
+        # คำนวณวันที่เริ่มต้นและสิ้นสุดของปี
+        date_start = f"01/01/{year}"
+        date_end = f"31/12/{year}"
+        
+        # ดึงข้อมูลทั้งปี
+        all_data = []
+        
+        # ถ้าเป็น Zone ให้ดึงข้อมูลทุกสาขา
+        if zone_id and 'branch_ids' in locals():
+            for bid in branch_ids:
+                filters = {
+                    'date_start': date_start,
+                    'date_end': date_end,
+                    'sale_code': '',
+                    'customer_sign': '',
+                    'session_id': session_id,
+                    'branch_id': str(bid)
+                }
+                
+                start = 0
+                length = 1000
+                max_items = 50000
+                
+                while len(all_data) < max_items:
+                    data = fetch_data_with_retry(start=start, length=length, **filters)
+                    
+                    if 'error' in data:
+                        print(f"⚠️ Error fetching branch {bid}: {data['error']}")
+                        break
+                    
+                    batch_data = data.get('data', [])
+                    if not batch_data:
+                        break
+                    
+                    all_data.extend(batch_data)
+                    
+                    total = data.get('recordsFiltered', 0)
+                    if len(all_data) >= total or len(batch_data) < length:
+                        break
+                    
+                    start += length
+                
+                print(f"   Branch {bid}: {len(all_data)} records so far")
+        else:
+            # ดึงข้อมูลสาขาเดียวหรือทุกสาขา
+            filters = {
+                'date_start': date_start,
+                'date_end': date_end,
+                'sale_code': '',
+                'customer_sign': '',
+                'session_id': session_id,
+                'branch_id': branch_id if branch_id else None
+            }
+            
+            start = 0
+            length = 1000
+            max_items = 50000
+            
+            while len(all_data) < max_items:
+                data = fetch_data_with_retry(start=start, length=length, **filters)
+                
+                if 'error' in data:
+                    return jsonify({'error': f'ไม่สามารถดึงข้อมูลได้: {data["error"]}'}), 500
+                
+                batch_data = data.get('data', [])
+                if not batch_data:
+                    break
+                
+                all_data.extend(batch_data)
+                print(f"   Fetched {len(all_data)} records...")
+                
+                total = data.get('recordsFiltered', 0)
+                if len(all_data) >= total or len(batch_data) < length:
+                    break
+                
+                start += length
+        
+        print(f"✅ Total records: {len(all_data)}")
+        
+        if not all_data:
+            return jsonify({'error': f'ไม่พบข้อมูลในปี {year}'}), 404
+        
+        # หาชื่อสาขาหรือ Zone
+        branch_name = None
+        if zone_id and 'zone' in locals():
+            branch_name = f"Zone: {zone['zone_name']}"
+        elif branch_id:
+            branch = find_branch_by_id(branch_id)
+            if branch:
+                branch_name = branch['branch_name']
+        
+        # สร้าง Excel Report
+        excel_path = generate_annual_excel_report(all_data, year, branch_id or zone_id, branch_name)
+        
+        # ส่งไฟล์กลับ
+        from flask import send_file
+        response = send_file(
+            excel_path,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=os.path.basename(excel_path)
+        )
+        
+        # ลบไฟล์ชั่วคราวหลังส่ง
+        @response.call_on_close
+        def cleanup():
+            try:
+                os.remove(excel_path)
+                print(f"🗑️ Removed temp file: {excel_path}")
+            except:
+                pass
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ Error generating Excel: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
