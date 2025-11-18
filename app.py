@@ -871,13 +871,7 @@ def find_branch_by_id(branch_id_input):
         with open(branches_file, 'r', encoding='utf-8') as f:
             branches_data = json.load(f)
         
-        # ลองค้นหาจาก branch_id ตรงๆ ก่อน
-        branch_id_str = str(branch_id_input)
-        for branch in branches_data:
-            if str(branch.get('branch_id', '')) == branch_id_str:
-                return branch
-        
-        # ถ้าไม่เจอ ลองค้นหาจาก ID number ในชื่อสาขา
+        # ลองค้นหาจาก ID number ในชื่อสาขาก่อน (เพื่อให้ตรงกับที่ผู้ใช้ต้องการ)
         try:
             search_id = int(branch_id_input)
             for branch in branches_data:
@@ -890,6 +884,12 @@ def find_branch_by_id(branch_id_input):
                         return branch
         except ValueError:
             pass
+        
+        # ถ้าไม่เจอ ลองค้นหาจาก branch_id ตรงๆ
+        branch_id_str = str(branch_id_input)
+        for branch in branches_data:
+            if str(branch.get('branch_id', '')) == branch_id_str:
+                return branch
             
     except Exception as e:
         print(f"Error loading branches: {e}")
