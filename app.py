@@ -195,8 +195,10 @@ def fetch_data_from_api(start=0, length=50, **filters):
     # Debug: แสดง payload ที่ส่งไป
     print(f"📤 Sending to API:")
     print(f"   Date: {filters.get('date_start')} to {filters.get('date_end')}")
-    print(f"   Branch ID: {branch_id}")
+    print(f"   Branch ID (in payload): {branch_id}")
     print(f"   Sale Code: {filters.get('sale_code', 'N/A')}")
+    print(f"   Session ID: {session_id[:10] if session_id else 'N/A'}...")
+    print(f"🔍 DEBUG: Full payload branchID field: {payload.get('branchID')}")
     
     try:
         response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=60)
@@ -207,14 +209,24 @@ def fetch_data_from_api(start=0, length=50, **filters):
         print(f"📥 API Response:")
         if 'd' in result:
             data_obj = result['d']
-            print(f"   Records Total: {data_obj.get('recordsTotal', 0)}")
-            print(f"   Records Filtered: {data_obj.get('recordsFiltered', 0)}")
-            print(f"   Data items: {len(data_obj.get('data', []))}")
+            records_total = data_obj.get('recordsTotal', 0)
+            records_filtered = data_obj.get('recordsFiltered', 0)
+            data_items = len(data_obj.get('data', []))
+            
+            print(f"   Records Total: {records_total}")
+            print(f"   Records Filtered: {records_filtered}")
+            print(f"   Data items: {data_items}")
+            
+            # Debug: ถ้าไม่มีข้อมูล แสดงรายละเอียดเพิ่มเติม
+            if records_filtered == 0:
+                print(f"⚠️ DEBUG: No records found!")
+                print(f"   - Branch ID used: {branch_id}")
+                print(f"   - Date range: {filters.get('date_start')} to {filters.get('date_end')}")
             
             return {
                 'data': data_obj.get('data', []),
-                'recordsTotal': data_obj.get('recordsTotal', 0),
-                'recordsFiltered': data_obj.get('recordsFiltered', 0)
+                'recordsTotal': records_total,
+                'recordsFiltered': records_filtered
             }
         else:
             print(f"   Unexpected format: {result}")
@@ -902,40 +914,57 @@ def find_branch_by_sequential_id(seq_id):
     import json
     branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
     
+    print(f"🔍 DEBUG find_branch_by_sequential_id: Looking for seq_id={seq_id} (type: {type(seq_id)})")
+    
     try:
         with open(branches_file, 'r', encoding='utf-8') as f:
             branches_data = json.load(f)
         
+        print(f"🔍 DEBUG find_branch_by_sequential_id: Loaded {len(branches_data)} branches from file")
+        
         try:
             seq_id_int = int(seq_id)
+            print(f"🔍 DEBUG find_branch_by_sequential_id: Converted to int: {seq_id_int}")
+            
             for branch in branches_data:
                 if branch.get('branch_id') == seq_id_int:
+                    print(f"✅ DEBUG find_branch_by_sequential_id: Found branch: {branch.get('branch_name')}")
                     return branch
+            
+            print(f"⚠️ DEBUG find_branch_by_sequential_id: No branch found with branch_id={seq_id_int}")
         except ValueError:
+            print(f"❌ DEBUG find_branch_by_sequential_id: Cannot convert '{seq_id}' to int")
             pass
             
     except Exception as e:
-        print(f"Error finding branch by sequential id: {e}")
+        print(f"❌ DEBUG find_branch_by_sequential_id: Error loading branches: {e}")
     
     return None
 
 def get_real_branch_id(branch):
     """ดึง Real ID จากข้อมูลสาขา (เช่น 249 จาก ID249)"""
     if not branch:
+        print(f"🔍 DEBUG get_real_branch_id: branch is None/empty")
         return None
         
     branch_name = branch.get('branch_name', '')
+    print(f"🔍 DEBUG get_real_branch_id: Processing branch_name: {branch_name}")
+    
     import re
     
     # Pattern 1: IDxxx (e.g. "00249 : ID249 : ...")
     match = re.search(r'ID(\d+)', branch_name)
     if match:
-        return match.group(1)
+        real_id = match.group(1)
+        print(f"✅ DEBUG get_real_branch_id: Pattern 1 (IDxxx) matched -> {real_id}")
+        return real_id
         
     # Pattern 2: FCBxxx/FCPxxx (e.g. "00517 : FCB517 : ...")
     match = re.search(r'FC[BP](\d+)', branch_name)
     if match:
-        return match.group(1)
+        real_id = match.group(1)
+        print(f"✅ DEBUG get_real_branch_id: Pattern 2 (FCBxxx) matched -> {real_id}")
+        return real_id
         
     # Pattern 3: Just numbers in the middle (e.g. "01331 : 1331 : ...")
     parts = branch_name.split(':')
@@ -943,9 +972,14 @@ def get_real_branch_id(branch):
         middle = parts[1].strip()
         match = re.search(r'(\d+)', middle)
         if match:
-            return match.group(1)
-            
-    return str(branch.get('branch_id'))
+            real_id = match.group(1)
+            print(f"✅ DEBUG get_real_branch_id: Pattern 3 (middle number) matched -> {real_id}")
+            return real_id
+    
+    # Fallback: ใช้ branch_id
+    fallback_id = str(branch.get('branch_id'))
+    print(f"⚠️ DEBUG get_real_branch_id: No pattern matched, using branch_id -> {fallback_id}")
+    return fallback_id
 
 def parse_thai_month(month_name):
     """แปลงชื่อเดือนภาษาไทยเป็นเลขเดือน"""
@@ -1515,20 +1549,24 @@ def get_annual_report_data():
         if year < 2020 or year > current_year + 1:
             return jsonify({'error': f'ปีต้องอยู่ระหว่าง 2020-{current_year + 1}'}), 400
         
-        # แปลง Sequential ID เป็น Real ID สำหรับเรียก API
-        real_branch_id = branch_id
+        # ใช้ Sequential ID ตรงๆ ไม่ต้องแปลงเป็น Real ID
+        # เพราะ API ต้องการ branch_id ที่เป็น sequential index
+        api_branch_id = branch_id
         branch_info = None
         
-        if branch_id:
-            # ค้นหาจาก Sequential ID (ที่ส่งมาจาก Frontend)
-            branch_info = find_branch_by_sequential_id(branch_id)
-            if branch_info:
-                real_id = get_real_branch_id(branch_info)
-                if real_id:
-                    real_branch_id = real_id
-                    print(f"🔄 Translated Sequential ID {branch_id} -> Real ID {real_branch_id} ({branch_info.get('branch_name')})")
+        print(f"🔍 DEBUG: Received branch_id from frontend: {branch_id} (type: {type(branch_id)})")
         
-        print(f"📊 Fetching annual report data (FAST) for year {year}, branch {branch_id or 'all'} (Real ID: {real_branch_id})")
+        if branch_id:
+            # ค้นหาข้อมูลสาขาเพื่อแสดงชื่อ
+            branch_info = find_branch_by_sequential_id(branch_id)
+            print(f"🔍 DEBUG: find_branch_by_sequential_id({branch_id}) returned: {branch_info}")
+            
+            if branch_info:
+                print(f"✅ Using Sequential ID {branch_id} for API call ({branch_info.get('branch_name')})")
+            else:
+                print(f"⚠️ DEBUG: Branch not found for Sequential ID: {branch_id}")
+        
+        print(f"📊 Fetching annual report data (FAST) for year {year}, branch Sequential ID: {api_branch_id or 'all'}")
         
         # นับจำนวนเทรดแต่ละเดือนโดยเรียก API ทีละเดือน
         from collections import defaultdict
@@ -1553,11 +1591,26 @@ def get_annual_report_data():
                 'sale_code': '',
                 'customer_sign': '',
                 'session_id': session_id,
-                'branch_id': real_branch_id if real_branch_id else None
+                'branch_id': api_branch_id if api_branch_id else None
             }
+            
+            print(f"🔍 DEBUG [{month_names[month_num-1]}]: Calling API with filters:")
+            print(f"   - date_start: {date_start}")
+            print(f"   - date_end: {date_end}")
+            print(f"   - branch_id (Sequential ID): {api_branch_id if api_branch_id else 'None (all branches)'}")
+            print(f"   - session_id: {session_id[:10] if session_id else 'None'}...")
             
             # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
             data = fetch_data_with_retry(start=0, length=1, **filters)
+            
+            print(f"🔍 DEBUG [{month_names[month_num-1]}]: API Response:")
+            print(f"   - Has error: {'error' in data}")
+            if 'error' in data:
+                print(f"   - Error message: {data.get('error')}")
+            else:
+                print(f"   - recordsTotal: {data.get('recordsTotal', 'N/A')}")
+                print(f"   - recordsFiltered: {data.get('recordsFiltered', 'N/A')}")
+                print(f"   - data items: {len(data.get('data', []))}")
             
             if 'error' not in data:
                 # ใช้ recordsFiltered แทนการดึงข้อมูลทั้งหมด
