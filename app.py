@@ -896,6 +896,57 @@ def find_branch_by_id(branch_id_input):
     
     return None
 
+def find_branch_by_sequential_id(seq_id):
+    """ค้นหาสาขาจาก branch_id (sequential index)"""
+    import os
+    import json
+    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+    
+    try:
+        with open(branches_file, 'r', encoding='utf-8') as f:
+            branches_data = json.load(f)
+        
+        try:
+            seq_id_int = int(seq_id)
+            for branch in branches_data:
+                if branch.get('branch_id') == seq_id_int:
+                    return branch
+        except ValueError:
+            pass
+            
+    except Exception as e:
+        print(f"Error finding branch by sequential id: {e}")
+    
+    return None
+
+def get_real_branch_id(branch):
+    """ดึง Real ID จากข้อมูลสาขา (เช่น 249 จาก ID249)"""
+    if not branch:
+        return None
+        
+    branch_name = branch.get('branch_name', '')
+    import re
+    
+    # Pattern 1: IDxxx (e.g. "00249 : ID249 : ...")
+    match = re.search(r'ID(\d+)', branch_name)
+    if match:
+        return match.group(1)
+        
+    # Pattern 2: FCBxxx/FCPxxx (e.g. "00517 : FCB517 : ...")
+    match = re.search(r'FC[BP](\d+)', branch_name)
+    if match:
+        return match.group(1)
+        
+    # Pattern 3: Just numbers in the middle (e.g. "01331 : 1331 : ...")
+    parts = branch_name.split(':')
+    if len(parts) >= 2:
+        middle = parts[1].strip()
+        match = re.search(r'(\d+)', middle)
+        if match:
+            return match.group(1)
+            
+    return str(branch.get('branch_id'))
+
 def parse_thai_month(month_name):
     """แปลงชื่อเดือนภาษาไทยเป็นเลขเดือน"""
     months = {
@@ -1464,7 +1515,20 @@ def get_annual_report_data():
         if year < 2020 or year > current_year + 1:
             return jsonify({'error': f'ปีต้องอยู่ระหว่าง 2020-{current_year + 1}'}), 400
         
-        print(f"📊 Fetching annual report data (FAST) for year {year}, branch {branch_id or 'all'}")
+        # แปลง Sequential ID เป็น Real ID สำหรับเรียก API
+        real_branch_id = branch_id
+        branch_info = None
+        
+        if branch_id:
+            # ค้นหาจาก Sequential ID (ที่ส่งมาจาก Frontend)
+            branch_info = find_branch_by_sequential_id(branch_id)
+            if branch_info:
+                real_id = get_real_branch_id(branch_info)
+                if real_id:
+                    real_branch_id = real_id
+                    print(f"🔄 Translated Sequential ID {branch_id} -> Real ID {real_branch_id} ({branch_info.get('branch_name')})")
+        
+        print(f"📊 Fetching annual report data (FAST) for year {year}, branch {branch_id or 'all'} (Real ID: {real_branch_id})")
         
         # นับจำนวนเทรดแต่ละเดือนโดยเรียก API ทีละเดือน
         from collections import defaultdict
@@ -1489,7 +1553,7 @@ def get_annual_report_data():
                 'sale_code': '',
                 'customer_sign': '',
                 'session_id': session_id,
-                'branch_id': branch_id if branch_id else None
+                'branch_id': real_branch_id if real_branch_id else None
             }
             
             # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
@@ -1518,7 +1582,9 @@ def get_annual_report_data():
         
         # หาชื่อสาขา
         branch_name = None
-        if branch_id:
+        if branch_info:
+            branch_name = branch_info['branch_name']
+        elif branch_id:
             branch = find_branch_by_id(branch_id)
             if branch:
                 branch_name = branch['branch_name']
@@ -1669,13 +1735,21 @@ def get_annual_report_excel():
         # ถ้าเป็น Zone ให้ดึงข้อมูลทุกสาขา
         if zone_id and 'branch_ids' in locals():
             for bid in branch_ids:
+                # แปลง Sequential ID เป็น Real ID
+                real_bid = str(bid)
+                branch_info = find_branch_by_sequential_id(bid)
+                if branch_info:
+                    real_id = get_real_branch_id(branch_info)
+                    if real_id:
+                        real_bid = real_id
+                
                 filters = {
                     'date_start': date_start,
                     'date_end': date_end,
                     'sale_code': '',
                     'customer_sign': '',
                     'session_id': session_id,
-                    'branch_id': str(bid)
+                    'branch_id': real_bid
                 }
                 
                 start = 0
@@ -1704,13 +1778,25 @@ def get_annual_report_excel():
                 print(f"   Branch {bid}: {len(all_data)} records so far")
         else:
             # ดึงข้อมูลสาขาเดียวหรือทุกสาขา
+            
+            # แปลง Sequential ID เป็น Real ID
+            real_branch_id = branch_id
+            branch_info = None
+            
+            if branch_id:
+                branch_info = find_branch_by_sequential_id(branch_id)
+                if branch_info:
+                    real_id = get_real_branch_id(branch_info)
+                    if real_id:
+                        real_branch_id = real_id
+            
             filters = {
                 'date_start': date_start,
                 'date_end': date_end,
                 'sale_code': '',
                 'customer_sign': '',
                 'session_id': session_id,
-                'branch_id': branch_id if branch_id else None
+                'branch_id': real_branch_id if real_branch_id else None
             }
             
             start = 0
@@ -1751,7 +1837,7 @@ def get_annual_report_excel():
             # จัดกลุ่มข้อมูลตามสาขา
             branches_data = []
             for bid in branch_ids:
-                branch = find_branch_by_id(str(bid))
+                branch = find_branch_by_sequential_id(str(bid))
                 branch_name = branch['branch_name'] if branch else f"สาขา {bid}"
                 
                 # นับเทรดแต่ละเดือนของสาขานี้
@@ -1780,7 +1866,7 @@ def get_annual_report_excel():
             # สร้างรายงานสาขาเดียว
             branch_name = None
             if branch_id:
-                branch = find_branch_by_id(branch_id)
+                branch = find_branch_by_sequential_id(branch_id)
                 if branch:
                     branch_name = branch['branch_name']
             
