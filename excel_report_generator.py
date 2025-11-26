@@ -252,7 +252,7 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     # สร้างกราฟแท่ง (Bar Chart)
     chart = BarChart()
     if month:
-        chart.title = f"สถิติการเทรดรายวัน Zone {zone_name} - {month_name_th[month-1]} {year}"
+        chart.title = f"สถิติการเทรดรายวัน Zone {zone_name} - {month_names_th[month-1]} {year}"
         chart.x_axis.title = 'วันที่'
     else:
         chart.title = f"สถิติการเทรดรายเดือน Zone {zone_name} - {year}"

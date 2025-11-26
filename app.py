@@ -1816,11 +1816,25 @@ def get_annual_report_excel_from_data():
             return jsonify({'error': 'ไม่พบข้อมูล'}), 400
         
         year = data.get('year')
+        month = data.get('month')  # เพิ่ม month parameter
+        if month:
+            month = int(month)  # แปลงเป็น int
         zone_name = data.get('zone_name')
         branch_name = data.get('branch_name')
         branches_data = data.get('branches_data')
         
-        print(f"📊 Generating Excel from existing data for year {year}")
+        print(f"📊 Generating Excel from existing data for year {year}{f', month {month}' if month else ''}")
+        print(f"🔍 DEBUG: branches_data exists? {branches_data is not None}")
+        print(f"🔍 DEBUG: Number of branches? {len(branches_data) if branches_data else 0}")
+        if branches_data and len(branches_data) > 0:
+            first_branch = branches_data[0]
+            print(f"🔍 DEBUG: First branch has monthly_data? {first_branch.get('monthly_data') is not None}")
+            if first_branch.get('monthly_data'):
+                sample_data = first_branch['monthly_data']
+                print(f"🔍 DEBUG: Sample data count: {len(sample_data)}")
+                if len(sample_data) > 0:
+                    print(f"🔍 DEBUG: First item keys: {sample_data[0].keys()}")
+                    print(f"🔍 DEBUG: First item: {sample_data[0]}")
         
         # สร้าง Excel จากข้อมูลที่ส่งมา
         if branches_data:
@@ -1828,12 +1842,16 @@ def get_annual_report_excel_from_data():
             from excel_report_generator import generate_annual_excel_report_for_zone
             from collections import defaultdict
             
-            # แปลง monthly_data เป็น monthly_counts
+            # แปลง monthly_data เป็น monthly_counts (หรือ daily_counts ถ้าเป็นรายเดือน)
             formatted_branches = []
             for branch in branches_data:
                 monthly_counts = {}
-                for month_data in branch.get('monthly_data', []):
-                    monthly_counts[month_data['month_number']] = month_data['count']
+                for item in branch.get('monthly_data', []):
+                    # ตรวจสอบว่าเป็น daily_data (มี key 'day') หรือ monthly_data (มี key 'month_number')
+                    if 'day' in item:
+                        monthly_counts[item['day']] = item['count']
+                    elif 'month_number' in item:
+                        monthly_counts[item['month_number']] = item['count']
                 
                 formatted_branches.append({
                     'branch_id': branch.get('branch_id'),
@@ -1841,29 +1859,42 @@ def get_annual_report_excel_from_data():
                     'monthly_counts': monthly_counts
                 })
             
-            excel_path = generate_annual_excel_report_for_zone(formatted_branches, year, zone_name)
+            excel_path = generate_annual_excel_report_for_zone(formatted_branches, year, zone_name, month=month)
         else:
             # Single branch report
             from excel_report_generator import generate_annual_excel_report
             
-            # สร้าง dummy trade_data จาก monthly_data
+            # สร้าง dummy trade_data จาก monthly_data หรือ daily_data
             # (ไม่ต้องมี raw data จริง เพราะเราแค่ต้องการตัวเลข)
-            monthly_data = data.get('monthly_data', [])
+            report_data = data.get('monthly_data') or data.get('daily_data', [])
             trade_data = []
             
-            # สร้าง dummy records ตามจำนวนที่นับได้
-            for month_info in monthly_data:
-                count = month_info.get('count', 0)
-                month_num = month_info.get('month_number')
-                
-                # สร้าง dummy timestamp สำหรับเดือนนั้นๆ
-                for _ in range(count):
-                    timestamp = datetime(year, month_num, 15).timestamp() * 1000
-                    trade_data.append({
-                        'document_date': f'/Date({int(timestamp)})/'
-                    })
+            if month and data.get('daily_data'):
+                # รายเดือน - ใช้ daily_data
+                for day_info in report_data:
+                    count = day_info.get('count', 0)
+                    day_num = day_info.get('day')
+                    
+                    # สร้าง dummy timestamp สำหรับวันนั้นๆ
+                    for _ in range(count):
+                        timestamp = datetime(year, month, day_num, 12, 0, 0).timestamp() * 1000
+                        trade_data.append({
+                            'document_date': f'/Date({int(timestamp)})/'
+                        })
+            else:
+                # รายปี - ใช้ monthly_data
+                for month_info in report_data:
+                    count = month_info.get('count', 0)
+                    month_num = month_info.get('month_number')
+                    
+                    # สร้าง dummy timestamp สำหรับเดือนนั้นๆ
+                    for _ in range(count):
+                        timestamp = datetime(year, month_num, 15).timestamp() * 1000
+                        trade_data.append({
+                            'document_date': f'/Date({int(timestamp)})/'
+                        })
             
-            excel_path = generate_annual_excel_report(trade_data, year, data.get('branch_id'), branch_name)
+            excel_path = generate_annual_excel_report(trade_data, year, data.get('branch_id'), branch_name, month=month)
         
         # ส่งไฟล์กลับ
         from flask import send_file
