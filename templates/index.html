@@ -1604,7 +1604,7 @@
                 }
 
                 closeAnnualReportModal();
-                await generateAnnualReportForZone(year, zone);
+                await generateAnnualReportForZone(year, zone, month);
                 return;
             }
 
@@ -1628,12 +1628,20 @@
                     sessionId: localStorage.getItem('sessionId') || ''
                 });
 
+                if (month) {
+                    params.append('month', month);
+                }
+
                 if (branchId) {
                     params.append('branchId', branchId);
                 }
 
                 const response = await fetch(`/api/annual-report-data?${params.toString()}`);
                 const result = await response.json();
+
+                console.log('📊 DEBUG: API Response:', result);
+                console.log('📊 DEBUG: Has daily_data?', result.daily_data !== undefined);
+                console.log('📊 DEBUG: Has monthly_data?', result.monthly_data !== undefined);
 
                 if (!response.ok || !result.success) {
                     throw new Error(result.error || `HTTP ${response.status}`);
@@ -1654,7 +1662,7 @@
             }
         }
 
-        async function generateAnnualReportForZone(year, zone) {
+        async function generateAnnualReportForZone(year, zone, month = null) {
             const container = document.getElementById('reportContainer');
             const branchIds = zone.branch_ids;
 
@@ -1684,6 +1692,10 @@
                         sessionId: localStorage.getItem('sessionId') || ''
                     });
 
+                    if (month) {
+                        params.append('month', month);
+                    }
+
                     const response = await fetch(`/api/annual-report-data?${params.toString()}`);
                     const result = await response.json();
 
@@ -1693,7 +1705,7 @@
                             branch_id: result.branch_id,
                             branch_name: result.branch_name,
                             total_records: result.total_records,
-                            monthly_data: result.monthly_data
+                            monthly_data: result.monthly_data || result.daily_data // รองรับทั้ง monthly และ daily
                         });
                     } else {
                         console.error(`Error fetching branch ${branchId}:`, result.error);
@@ -1740,15 +1752,22 @@
                 branchInfo = 'ทุกสาขา';
             }
 
+            // ตรวจสอบว่าเป็นรายงานรายเดือน (daily_data) หรือรายปี (monthly_data)
+            const isMonthlyReport = data.daily_data !== undefined;
+            const reportData = isMonthlyReport ? data.daily_data : data.monthly_data;
+
+            const month_names_th = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
             // สร้าง HTML ตาราง
             let html = `
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
-                    <h3 style="margin: 0; color: #667eea;">📊 รายงานรายปี ${data.year}</h3>
+                    <h3 style="margin: 0; color: #667eea;">📊 ${isMonthlyReport ? 'รายงานรายเดือน ' + month_names_th[data.month - 1] : 'รายงานรายปี'} ${data.year}</h3>
                     <p style="margin: 5px 0 0 0; color: #666;">${branchInfo} | รวม ${data.total_records} รายการ</p>
                 </div>
                 
                 <div style="text-align: right; margin-bottom: 15px;">
-                    <button onclick="exportAnnualReportToExcel(${data.year}, '${data.branch_id || ''}', '${data.zone_id || ''}')" 
+                    <button onclick="exportAnnualReportToExcel(${data.year}, '${data.branch_id || ''}', '${data.zone_id || ''}', ${data.month || 'null'})" 
                             style="background: #28a745; padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
                         📥 Export Excel
                     </button>
@@ -1758,26 +1777,35 @@
                     <table>
                         <thead>
                             <tr>
-                                <th style="background: #667eea; color: white;">เดือน</th>
+                                <th style="background: #667eea; color: white;">${isMonthlyReport ? 'วัน' : 'เดือน'}</th>
             `;
 
-            // สร้างหัวตารางเดือน
-            data.monthly_data.forEach(month => {
-                html += `<th style="background: #4472C4; color: white;">${month.month}</th>`;
-            });
+            // สร้างหัวตาราง
+            if (isMonthlyReport) {
+                // รายเดือน - แสดงวันที่
+                reportData.forEach(day => {
+                    html += `<th style="background: #4472C4; color: white;">${day.day}</th>`;
+                });
+            } else {
+                // รายปี - แสดงเดือน
+                reportData.forEach(month => {
+                    html += `<th style="background: #4472C4; color: white;">${month.month}</th>`;
+                });
+            }
 
             html += `
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td style="background: #FFF2CC; font-weight: bold;">${data.year}</td>
+                                <td style="background: #FFF2CC; font-weight: bold;">${isMonthlyReport ? month_names_th[data.month - 1] : data.year}</td>
             `;
 
-            // สร้างข้อมูลแต่ละเดือน
-            data.monthly_data.forEach(month => {
-                const bgColor = month.count > 0 ? '#E7E6E6' : '';
-                html += `<td style="text-align: center; background: ${bgColor};">${month.count}</td>`;
+            // สร้างข้อมูลแต่ละวัน/เดือน
+            reportData.forEach(item => {
+                const count = item.count || 0;
+                const bgColor = count > 0 ? '#E7E6E6' : '';
+                html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
             });
 
             html += `
@@ -1794,7 +1822,7 @@
             container.innerHTML = html;
 
             // สร้างกราฟ
-            createAnnualChart(data.monthly_data);
+            createAnnualChart(reportData, isMonthlyReport);
 
             // เก็บข้อมูลไว้ใช้ export
             window.currentAnnualReportData = data;
@@ -1803,10 +1831,17 @@
         function displayAnnualReportTableForZone(data) {
             const container = document.getElementById('reportContainer');
 
+            // ตรวจสอบว่าเป็นรายงานรายเดือน (daily_data) หรือรายปี (monthly_data)
+            const firstBranch = data.branches_data[0];
+            const isMonthlyReport = firstBranch && firstBranch.monthly_data && firstBranch.monthly_data[0] && firstBranch.monthly_data[0].day !== undefined;
+
+            const month_names_th = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
             // สร้าง HTML ตาราง
             let html = `
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
-                    <h3 style="margin: 0; color: #667eea;">📊 รายงานรายปี ${data.year}</h3>
+                    <h3 style="margin: 0; color: #667eea;">📊 ${isMonthlyReport ? 'รายงานรายเดือน ' + month_names_th[(data.month || 1) - 1] : 'รายงานรายปี'} ${data.year}</h3>
                     <p style="margin: 5px 0 0 0; color: #666;">🗺️ Zone: ${data.zone_name} (${data.branch_count} สาขา) | รวม ${data.total_records} รายการ</p>
                 </div>
                 
@@ -1824,11 +1859,23 @@
                                 <th style="background: #667eea; color: white;">สาขา</th>
             `;
 
-            // สร้างหัวตารางเดือน
-            const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-            monthNames.forEach(month => {
-                html += `<th style="background: #4472C4; color: white;">${month}</th>`;
-            });
+            // สร้างหัวตารางตามประเภทรายงาน
+            let numCols;
+            if (isMonthlyReport) {
+                // รายเดือน - แสดงวันที่
+                const sampleData = firstBranch.monthly_data;
+                numCols = sampleData.length;
+                sampleData.forEach(day => {
+                    html += `<th style="background: #4472C4; color: white;">${day.day}</th>`;
+                });
+            } else {
+                // รายปี - แสดงเดือน
+                const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+                numCols = 12;
+                monthNames.forEach(month => {
+                    html += `<th style="background: #4472C4; color: white;">${month}</th>`;
+                });
+            }
 
             html += `
                                 <th style="background: #28a745; color: white;">รวม</th>
@@ -1838,7 +1885,7 @@
             `;
 
             // สร้างแถวข้อมูลแต่ละสาขา
-            let totalByMonth = new Array(12).fill(0);
+            let totalByPeriod = new Array(numCols).fill(0);
             let grandTotal = 0;
 
             data.branches_data.forEach(branch => {
@@ -1847,11 +1894,12 @@
 
                 html += `<tr><td style="background: #FFF2CC; font-weight: bold;">${branchName}</td>`;
 
-                branch.monthly_data.forEach((month, idx) => {
-                    const bgColor = month.count > 0 ? '#E7E6E6' : '';
-                    html += `<td style="text-align: center; background: ${bgColor};">${month.count}</td>`;
-                    totalByMonth[idx] += month.count;
-                    branchTotal += month.count;
+                branch.monthly_data.forEach((item, idx) => {
+                    const count = item.count || 0;
+                    const bgColor = count > 0 ? '#E7E6E6' : '';
+                    html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
+                    totalByPeriod[idx] += count;
+                    branchTotal += count;
                 });
 
                 html += `<td style="text-align: center; background: #d4edda; font-weight: bold;">${branchTotal}</td>`;
@@ -1863,7 +1911,7 @@
             // แถวรวม
             html += `<tr style="background: #f8f9fa; font-weight: bold;">`;
             html += `<td style="background: #667eea; color: white;">รวมทั้งหมด</td>`;
-            totalByMonth.forEach(count => {
+            totalByPeriod.forEach(count => {
                 html += `<td style="text-align: center; background: #d1ecf1;">${count}</td>`;
             });
             html += `<td style="text-align: center; background: #28a745; color: white;">${grandTotal}</td>`;
@@ -1882,17 +1930,27 @@
             container.innerHTML = html;
 
             // สร้างกราฟรวม
-            const chartData = totalByMonth.map((count, idx) => ({
-                month: monthNames[idx],
-                count: count
-            }));
-            createAnnualChart(chartData);
+            let chartData;
+            if (isMonthlyReport) {
+                chartData = totalByPeriod.map((count, idx) => ({
+                    day: idx + 1,
+                    count: count
+                }));
+            } else {
+                const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+                chartData = totalByPeriod.map((count, idx) => ({
+                    month: monthNames[idx],
+                    count: count
+                }));
+            }
+
+            createAnnualChart(chartData, isMonthlyReport);
 
             // เก็บข้อมูลไว้ใช้ export
             window.currentAnnualReportData = data;
         }
 
-        function createAnnualChart(monthlyData) {
+        function createAnnualChart(reportData, isMonthlyReport) {
             const ctx = document.getElementById('annualChart');
             if (!ctx) return;
 
@@ -1901,8 +1959,20 @@
                 window.annualChartInstance.destroy();
             }
 
-            const labels = monthlyData.map(m => m.month);
-            const counts = monthlyData.map(m => m.count);
+            // สร้าง labels และ data ตามประเภทรายงาน
+            let labels, counts, chartTitle;
+
+            if (isMonthlyReport) {
+                // รายเดือน - แสดงวันที่
+                labels = reportData.map(d => `${d.day}`);
+                counts = reportData.map(d => d.count);
+                chartTitle = 'รายงานจำนวนเทรดรายวัน';
+            } else {
+                // รายปี - แสดงเดือน
+                labels = reportData.map(m => m.month);
+                counts = reportData.map(m => m.count);
+                chartTitle = 'รายงานจำนวนเทรดรายเดือน';
+            }
 
             window.annualChartInstance = new Chart(ctx, {
                 type: 'bar',
@@ -1922,7 +1992,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'รายงานจำนวนเทรดรายเดือน',
+                            text: chartTitle,
                             font: { size: 16 }
                         },
                         legend: {

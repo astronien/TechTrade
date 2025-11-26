@@ -1615,6 +1615,7 @@ def get_annual_report_data():
     """API endpoint สำหรับดึงข้อมูลรายงานรายปี (JSON) - เวอร์ชันเร็ว"""
     try:
         year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)  # เพิ่มพารามิเตอร์เดือน
         branch_id = request.args.get('branchId', '')
         session_id = request.args.get('sessionId', '')
         
@@ -1643,24 +1644,23 @@ def get_annual_report_data():
             else:
                 print(f"⚠️ DEBUG: Branch not found for Sequential ID: {branch_id}")
         
-        print(f"📊 Fetching annual report data (FAST) for year {year}, branch Sequential ID: {api_branch_id or 'all'}")
+        print(f"📊 Fetching {'monthly' if month else 'annual'} report data for year {year}{f', month {month}' if month else ''}, branch Sequential ID: {api_branch_id or 'all'}")
         
-        # นับจำนวนเทรดแต่ละเดือนโดยเรียก API ทีละเดือน
+        # นับจำนวนเทรดแต่ละเดือน/วันโดยเรียก API
         from collections import defaultdict
         import re
-        monthly_counts = defaultdict(int)
-        total_records = 0
+        import calendar
         
-        month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
-                       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-        
-        # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
-        for month_num in range(1, 13):
-            # คำนวณวันแรกและวันสุดท้ายของเดือน
-            import calendar
-            last_day = calendar.monthrange(year, month_num)[1]
-            date_start = f"01/{month_num:02d}/{year}"
-            date_end = f"{last_day}/{month_num:02d}/{year}"
+        if month:
+            # รายงานรายเดือน - นับรายวัน
+            num_days = calendar.monthrange(year, month)[1]
+            daily_counts = defaultdict(int)
+            total_records = 0
+            
+            # ดึงข้อมูลทั้งเดือน
+            last_day = calendar.monthrange(year, month)[1]
+            date_start = f"01/{month:02d}/{year}"
+            date_end = f"{last_day}/{month:02d}/{year}"
             
             filters = {
                 'date_start': date_start,
@@ -1671,62 +1671,133 @@ def get_annual_report_data():
                 'branch_id': api_branch_id if api_branch_id else None
             }
             
-            print(f"🔍 DEBUG [{month_names[month_num-1]}]: Calling API with filters:")
+            print(f"🔍 DEBUG: Fetching daily data for month {month}")
             print(f"   - date_start: {date_start}")
             print(f"   - date_end: {date_end}")
-            print(f"   - branch_id (Sequential ID): {api_branch_id if api_branch_id else 'None (all branches)'}")
-            print(f"   - session_id: {session_id[:10] if session_id else 'None'}...")
             
-            # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
-            data = fetch_data_with_retry(start=0, length=1, **filters)
+            # ดึงข้อมูลทั้งหมดของเดือนนั้น
+            all_items = fetch_all_for_branch(filters)
+            total_records = len(all_items)
             
-            print(f"🔍 DEBUG [{month_names[month_num-1]}]: API Response:")
-            print(f"   - Has error: {'error' in data}")
-            if 'error' in data:
-                print(f"   - Error message: {data.get('error')}")
-            else:
-                print(f"   - recordsTotal: {data.get('recordsTotal', 'N/A')}")
-                print(f"   - recordsFiltered: {data.get('recordsFiltered', 'N/A')}")
-                print(f"   - data items: {len(data.get('data', []))}")
+            # นับตามวัน
+            for item in all_items:
+                doc_date = item.get('document_date', '')
+                if doc_date and doc_date.startswith('/Date('):
+                    timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
+                    if timestamp_match:
+                        timestamp = int(timestamp_match.group(1)) / 1000
+                        date_obj = datetime.fromtimestamp(timestamp)
+                        if date_obj.year == year and date_obj.month == month:
+                            daily_counts[date_obj.day] += 1
             
-            if 'error' not in data:
-                # ใช้ recordsFiltered แทนการดึงข้อมูลทั้งหมด
-                count = data.get('recordsFiltered', 0)
-                monthly_counts[month_num] = count
-                total_records += count
-                print(f"   {month_names[month_num-1]}: {count} records")
-            else:
-                print(f"   {month_names[month_num-1]}: Error - {data.get('error')}")
-                monthly_counts[month_num] = 0
-        
-        print(f"✅ Total records: {total_records}")
-        
-        # สร้าง array ข้อมูล 12 เดือน
-        monthly_data = []
-        for month_num in range(1, 13):
-            monthly_data.append({
-                'month': month_names[month_num - 1],
-                'month_number': month_num,
-                'count': monthly_counts.get(month_num, 0)
+            # สร้าง array ข้อมูลรายวัน
+            daily_data = []
+            for day in range(1, num_days + 1):
+                daily_data.append({
+                    'day': day,
+                    'count': daily_counts.get(day, 0)
+                })
+            
+            print(f"✅ Total records: {total_records}")
+            
+            # หาชื่อสาขา
+            branch_name = None
+            if branch_info:
+                branch_name = branch_info['branch_name']
+            elif branch_id:
+                branch = find_branch_by_id(branch_id)
+                if branch:
+                    branch_name = branch['branch_name']
+            
+            return jsonify({
+                'success': True,
+                'year': year,
+                'month': month,
+                'branch_id': branch_id,
+                'branch_name': branch_name,
+                'total_records': total_records,
+                'daily_data': daily_data
             })
-        
-        # หาชื่อสาขา
-        branch_name = None
-        if branch_info:
-            branch_name = branch_info['branch_name']
-        elif branch_id:
-            branch = find_branch_by_id(branch_id)
-            if branch:
-                branch_name = branch['branch_name']
-        
-        return jsonify({
-            'success': True,
-            'year': year,
-            'branch_id': branch_id,
-            'branch_name': branch_name,
-            'total_records': total_records,
-            'monthly_data': monthly_data
-        })
+        else:
+            # รายงานรายปี - นับรายเดือน
+            monthly_counts = defaultdict(int)
+            total_records = 0
+            
+            month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+                           'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+            
+            # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
+            for month_num in range(1, 13):
+                # คำนวณวันแรกและวันสุดท้ายของเดือน
+                last_day = calendar.monthrange(year, month_num)[1]
+                date_start = f"01/{month_num:02d}/{year}"
+                date_end = f"{last_day}/{month_num:02d}/{year}"
+                
+                filters = {
+                    'date_start': date_start,
+                    'date_end': date_end,
+                    'sale_code': '',
+                    'customer_sign': '',
+                    'session_id': session_id,
+                    'branch_id': api_branch_id if api_branch_id else None
+                }
+                
+                print(f"🔍 DEBUG [{month_names[month_num-1]}]: Calling API with filters:")
+                print(f"   - date_start: {date_start}")
+                print(f"   - date_end: {date_end}")
+                print(f"   - branch_id (Sequential ID): {api_branch_id if api_branch_id else 'None (all branches)'}")
+                print(f"   - session_id: {session_id[:10] if session_id else 'None'}...")
+                
+                # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
+                data = fetch_data_with_retry(start=0, length=1, **filters)
+                
+                print(f"🔍 DEBUG [{month_names[month_num-1]}]: API Response:")
+                print(f"   - Has error: {'error' in data}")
+                if 'error' in data:
+                    print(f"   - Error message: {data.get('error')}")
+                else:
+                    print(f"   - recordsTotal: {data.get('recordsTotal', 'N/A')}")
+                    print(f"   - recordsFiltered: {data.get('recordsFiltered', 'N/A')}")
+                    print(f"   - data items: {len(data.get('data', []))}")
+                
+                if 'error' not in data:
+                    # ใช้ recordsFiltered แทนการดึงข้อมูลทั้งหมด
+                    count = data.get('recordsFiltered', 0)
+                    monthly_counts[month_num] = count
+                    total_records += count
+                    print(f"   {month_names[month_num-1]}: {count} records")
+                else:
+                    print(f"   {month_names[month_num-1]}: Error - {data.get('error')}")
+                    monthly_counts[month_num] = 0
+            
+            print(f"✅ Total records: {total_records}")
+            
+            # สร้าง array ข้อมูล 12 เดือน
+            monthly_data = []
+            for month_num in range(1, 13):
+                monthly_data.append({
+                    'month': month_names[month_num - 1],
+                    'month_number': month_num,
+                    'count': monthly_counts.get(month_num, 0)
+                })
+            
+            # หาชื่อสาขา
+            branch_name = None
+            if branch_info:
+                branch_name = branch_info['branch_name']
+            elif branch_id:
+                branch = find_branch_by_id(branch_id)
+                if branch:
+                    branch_name = branch['branch_name']
+            
+            return jsonify({
+                'success': True,
+                'year': year,
+                'branch_id': branch_id,
+                'branch_name': branch_name,
+                'total_records': total_records,
+                'monthly_data': monthly_data
+            })
         
     except Exception as e:
         print(f"❌ Error fetching annual report data: {str(e)}")
@@ -1994,7 +2065,11 @@ def get_annual_report_excel():
                                 timestamp = int(timestamp_match.group(1)) / 1000
                                 date_obj = datetime.fromtimestamp(timestamp)
                                 if date_obj.year == year:
-                                    monthly_counts[date_obj.month] += 1
+                                    if month:
+                                        if date_obj.month == month:
+                                            monthly_counts[date_obj.day] += 1
+                                    else:
+                                        monthly_counts[date_obj.month] += 1
                 
                 branches_data.append({
                     'branch_id': str(bid),
