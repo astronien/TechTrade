@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_file
 from functools import wraps
 import requests
 import json
@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import hashlib
 import secrets
+from excel_report_generator import generate_excel_report
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -443,38 +444,22 @@ def get_data():
     
     return jsonify(data)
 
-@app.route('/api/report')
-def get_report():
-    """API endpoint สำหรับสร้างรายงาน"""
-    from collections import defaultdict
-    
-    # รับพารามิเตอร์
-    session_id = request.args.get('sessionId', '')
-    filters = {
-        'date_start': request.args.get('dateStart', ''),
-        'date_end': request.args.get('dateEnd', ''),
-        'sale_code': request.args.get('saleCode', ''),
-        'customer_sign': request.args.get('customerSign', ''),  # เพิ่ม customerSign
-        'branch_id': request.args.get('branchId', BRANCH_ID),
-        'session_id': session_id
-    }
-    
-    # ดึงข้อมูลทั้งหมดแบบ pagination
+def fetch_all_for_branch(filters):
+    """ดึงข้อมูลทั้งหมดของสาขาเดียว (พร้อม pagination)"""
     import time
-    start_time = time.time()
     
     # ปรับ timeout ตามสภาพแวดล้อม
     is_vercel = os.environ.get('VERCEL', False)
-    max_time = 8 if is_vercel else 50  # Vercel: 8 วินาที, Local: 50 วินาที
-    max_items = 10000 if is_vercel else 50000  # Vercel: 10k, Local: 50k
+    max_time = 20 if is_vercel else 60
+    max_items = 10000 if is_vercel else 50000
     
     length = 1000
     start = 0
     all_items = []
     batch_count = 0
+    start_time = time.time()
     
-    print(f"📊 Starting report generation...")
-    print(f"⏱️ Max time: {max_time}s, Max items: {max_items}")
+    print(f"📊 Fetching for branch {filters.get('branch_id')}...")
     
     while True:
         # ตรวจสอบเวลา
@@ -484,43 +469,76 @@ def get_report():
             break
             
         batch_count += 1
-        print(f"📦 Fetching batch {batch_count} (start: {start}, length: {length})...")
         
         data = fetch_data_with_retry(start=start, length=length, **filters)
         
         if 'error' in data:
             print(f"❌ API Error: {data['error']}")
-            return jsonify(data), 500
+            return [] # Return empty list on error to allow other branches to continue
         
         batch_data = data.get('data', [])
         if not batch_data:
-            print(f"✅ No more data, stopping")
             break
         
         all_items.extend(batch_data)
-        print(f"   + Got {len(batch_data)} items (total: {len(all_items)})")
         
         # ตรวจสอบว่าดึงครบหรือยัง
         total = data.get('recordsFiltered', 0)
         if len(all_items) >= total or len(batch_data) < length:
-            print(f"✅ Fetched all available data ({len(all_items)}/{total})")
             break
         
         start += length
         
         # ป้องกัน infinite loop
         if len(all_items) >= max_items:
-            print(f"⚠️ Reached max items limit: {max_items}")
             break
+            
+    return all_items
+
+def fetch_and_process_report(filters):
+    """ดึงและประมวลผลข้อมูลรายงาน"""
+    from collections import defaultdict
+    import time
+    
+    start_time = time.time()
+    all_items = []
+    
+    zone_id = filters.get('zone_id')
+    
+    if zone_id:
+        print(f"🗺️ Fetching data for Zone: {zone_id}")
+        zones = load_custom_zones_from_file()
+        target_zone = next((z for z in zones if str(z['zone_id']) == str(zone_id)), None)
+        
+        if target_zone:
+            branch_ids = target_zone['branch_ids']
+            print(f"   Found {len(branch_ids)} branches: {branch_ids}")
+            
+            for i, branch_id in enumerate(branch_ids):
+                print(f"   [{i+1}/{len(branch_ids)}] Processing branch {branch_id}...")
+                branch_filters = filters.copy()
+                branch_filters['branch_id'] = branch_id
+                # ลบ zone_id ออกเพื่อไม่ให้ recursive (แม้จริงๆ function นี้ไม่ได้เรียกตัวเอง)
+                if 'zone_id' in branch_filters:
+                    del branch_filters['zone_id']
+                
+                items = fetch_all_for_branch(branch_filters)
+                all_items.extend(items)
+        else:
+            print(f"❌ Zone not found: {zone_id}")
+            return {'error': 'ไม่พบข้อมูล Zone'}, []
+    else:
+        # สาขาเดียว
+        all_items = fetch_all_for_branch(filters)
+    
+    elapsed_time = time.time() - start_time
+    print(f"✅ Total items fetched: {len(all_items)} in {elapsed_time:.1f}s")
     
     elapsed_time = time.time() - start_time
     print(f"✅ Total items fetched: {len(all_items)} in {elapsed_time:.1f}s")
     
     if not all_items:
-        return jsonify({
-            'error': 'ไม่พบข้อมูล',
-            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก กรุณาตรวจสอบ Session ID และช่วงวันที่'
-        }), 404
+        return None, []
     
     # วิเคราะห์ข้อมูล
     items = all_items
@@ -598,12 +616,6 @@ def get_report():
         if status == 'ยกเลิกรายการ':
             cancelled_count += 1
     
-    # Debug: แสดงสถานะที่พบ
-    print(f"Debug - Total items: {total_count}")
-    print(f"Debug - Confirmed count: {confirmed_count}")
-    print(f"Debug - Not confirmed count: {not_confirmed_count}")
-    print(f"Debug - Status summary: {status_summary}")
-    
     # เรียงลำดับ
     status_summary = dict(sorted(status_summary.items(), key=lambda x: x[1]['count'], reverse=True))
     brand_summary = dict(sorted(brand_summary.items(), key=lambda x: x[1]['count'], reverse=True))
@@ -623,10 +635,72 @@ def get_report():
         'salesSummary': sales_summary
     }
     
+    return report, items
+
+@app.route('/api/report')
+def get_report():
+    """API endpoint สำหรับสร้างรายงาน"""
+    # รับพารามิเตอร์
+    session_id = request.args.get('sessionId', '')
+    filters = {
+        'date_start': request.args.get('dateStart', ''),
+        'date_end': request.args.get('dateEnd', ''),
+        'sale_code': request.args.get('saleCode', ''),
+        'customer_sign': request.args.get('customerSign', ''),
+        'branch_id': request.args.get('branchId', BRANCH_ID),
+        'session_id': session_id
+    }
+    
+    report, items = fetch_and_process_report(filters)
+    
+    if report is None:
+        return jsonify({
+            'error': 'ไม่พบข้อมูล',
+            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก กรุณาตรวจสอบ Session ID และช่วงวันที่'
+        }), 404
+        
+    if 'error' in report:
+        return jsonify(report), 500
+    
     return jsonify({
         'report': report,
         'details': items
     })
+
+@app.route('/api/export-report')
+def export_report():
+    """API endpoint สำหรับ Export รายงานเป็น Excel"""
+    # รับพารามิเตอร์
+    session_id = request.args.get('sessionId', '')
+    filters = {
+        'date_start': request.args.get('dateStart', ''),
+        'date_end': request.args.get('dateEnd', ''),
+        'sale_code': request.args.get('saleCode', ''),
+        'customer_sign': request.args.get('customerSign', ''),
+        'branch_id': request.args.get('branchId', BRANCH_ID),
+        'zone_id': request.args.get('zoneId', ''),
+        'session_id': session_id
+    }
+    
+    report, items = fetch_and_process_report(filters)
+    
+    if report is None or (not items and 'error' not in report):
+        return jsonify({
+            'error': 'ไม่พบข้อมูล',
+            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก'
+        }), 404
+        
+    if 'error' in report:
+        return jsonify(report), 500
+        
+    # สร้างไฟล์ Excel
+    filepath = generate_excel_report(items, report, filters['date_start'], filters['date_end'])
+    
+    return send_file(
+        filepath,
+        as_attachment=True,
+        download_name=os.path.basename(filepath)
+    )
 
 
 
@@ -1157,14 +1231,17 @@ def handle_excel_annual_request(reply_token, parts, event):
         print(f"✅ Fetched {len(all_data)} records")
         
         if not all_data:
-            push_line_message(event, f"❌ ไม่พบข้อมูลในปี {year}")
+            push_line_message(event, f"❌ ไม่พบข้อมูลในปี {year}{f' เดือน {month}' if month else ''}")
+            # If no data, still generate an empty report for consistency
+            # The original code would return here, but the instruction implies generating a report even if empty.
+            # Let's keep the original behavior of returning if no data, as generating an empty report might not be desired.
             return
         
         # สร้าง Excel Report
-        excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name)
+        excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name, month=month)
         
         # ส่งไฟล์ Excel ผ่าน LINE
-        send_excel_file_to_line(event, excel_path, year, branch_id, branch_name)
+        send_excel_file_to_line(event, excel_path, year, branch_id, branch_name, month=month)
         
         # ลบไฟล์ชั่วคราว
         import os
@@ -1746,9 +1823,10 @@ def get_annual_report_excel_from_data():
 
 @app.route('/api/annual-report-excel')
 def get_annual_report_excel():
-    """API endpoint สำหรับ Export รายงานรายปีเป็น Excel"""
+    """API endpoint สำหรับ Export รายงานรายปี/รายเดือนเป็น Excel"""
     try:
         year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int) # รับค่าเดือน (ถ้ามี)
         branch_id = request.args.get('branchId', '')
         zone_id = request.args.get('zoneId', '')
         session_id = request.args.get('sessionId', '')
@@ -1778,9 +1856,19 @@ def get_annual_report_excel():
             branch_ids = [branch_id] if branch_id else []
             print(f"📊 Generating Excel for year {year}, branch {branch_id or 'all'}")
         
-        # คำนวณวันที่เริ่มต้นและสิ้นสุดของปี
-        date_start = f"01/01/{year}"
-        date_end = f"31/12/{year}"
+        # คำนวณวันที่เริ่มต้นและสิ้นสุด
+        if month:
+            # กรณีเลือกเดือน: วันที่ 1 ถึงวันสุดท้ายของเดือนนั้น
+            import calendar
+            last_day = calendar.monthrange(year, month)[1]
+            date_start = f"01/{month:02d}/{year}"
+            date_end = f"{last_day}/{month:02d}/{year}"
+            print(f"📊 Generating Monthly Excel for {month:02d}/{year}")
+        else:
+            # กรณีทั้งปี: 1 ม.ค. ถึง 31 ธ.ค.
+            date_start = f"01/01/{year}"
+            date_end = f"31/12/{year}"
+            print(f"📊 Generating Annual Excel for year {year}")
         
         # ดึงข้อมูลทั้งปี
         all_data = []
@@ -1914,7 +2002,7 @@ def get_annual_report_excel():
                     'monthly_counts': dict(monthly_counts)
                 })
             
-            excel_path = generate_annual_excel_report_for_zone(branches_data, year, zone['zone_name'])
+            excel_path = generate_annual_excel_report_for_zone(branches_data, year, zone['zone_name'], month=month)
         else:
             # สร้างรายงานสาขาเดียว
             branch_name = None
