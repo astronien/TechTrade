@@ -8,7 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import hashlib
 import secrets
-from excel_report_generator import generate_excel_report
+from excel_report_generator import generate_excel_report, generate_annual_excel_report, generate_annual_excel_report_for_zone
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
