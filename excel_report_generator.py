@@ -640,3 +640,29 @@ def get_year_date_range(year):
     date_end = f"31/12/{year}"
     
     return date_start, date_end
+
+def parse_date(date_str):
+    """
+    Helper function to parse date string from various formats
+    """
+    if not date_str:
+        return None
+        
+    try:
+        # Format: /Date(1704042000000)/
+        if date_str.startswith('/Date('):
+            timestamp_match = re.search(r'/Date\((\d+)\)/', date_str)
+            if timestamp_match:
+                timestamp = int(timestamp_match.group(1)) / 1000
+                return datetime.fromtimestamp(timestamp)
+                
+        # Format: DD/MM/YYYY
+        parts = date_str.split('/')
+        if len(parts) == 3:
+            day, month, year = map(int, parts)
+            return datetime(year, month, day)
+            
+    except Exception:
+        pass
+        
+    return None
