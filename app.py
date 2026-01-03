@@ -2196,7 +2196,12 @@ def update_branches_data():
              return jsonify({'success': False, 'error': 'Unknown API response format', 'debug': str(result)[:200]}), 500
              
         if not branches_list:
-            return jsonify({'success': False, 'error': 'No branches found in response'}), 500
+            print(f"❌ Raw API Response: {json.dumps(result, ensure_ascii=False)[:1000]}")
+            return jsonify({
+                'success': False, 
+                'error': 'No branches found in response',
+                'raw_response': str(result)[:500]
+            }), 500
             
         print(f"✅ Fetched {len(branches_list)} branches")
         
