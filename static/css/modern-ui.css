@@ -6,20 +6,20 @@
     --primary-dark: hsl(var(--primary-hue), 70%, 50%);
     --primary-light: hsl(var(--primary-hue), 70%, 95%);
     --accent: #F43F5E;
-    
+
     --bg-gradient: linear-gradient(135deg, #f6f8fd 0%, #f1f4f9 100%);
     --glass-bg: rgba(255, 255, 255, 0.85);
     --glass-border: rgba(255, 255, 255, 0.6);
     --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
     --glass-blur: blur(12px);
-    
+
     --text-main: #1e293b;
     --text-muted: #64748b;
-    
+
     --radius-lg: 24px;
     --radius-md: 16px;
     --radius-sm: 10px;
-    
+
     --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -32,14 +32,15 @@
 
 body {
     background: #f0f4f8;
-    background-image: 
-        radial-gradient(at 0% 0%, hsla(253,16%,90%,1) 0, transparent 50%), 
-        radial-gradient(at 50% 0%, hsla(225,39%,90%,1) 0, transparent 50%), 
-        radial-gradient(at 100% 0%, hsla(339,49%,90%,1) 0, transparent 50%);
+    background-image:
+        radial-gradient(at 0% 0%, hsla(253, 16%, 90%, 1) 0, transparent 50%),
+        radial-gradient(at 50% 0%, hsla(225, 39%, 90%, 1) 0, transparent 50%),
+        radial-gradient(at 100% 0%, hsla(339, 49%, 90%, 1) 0, transparent 50%);
     min-height: 100vh;
     display: flex;
     color: var(--text-main);
-    overflow: hidden; /* Use internal scroll for main content */
+    overflow: hidden;
+    /* Use internal scroll for main content */
 }
 
 /* Sidebar Pro Max */
@@ -53,7 +54,7 @@ body {
     display: flex;
     flex-direction: column;
     z-index: 100;
-    box-shadow: 5px 0 25px rgba(0,0,0,0.03);
+    box-shadow: 5px 0 25px rgba(0, 0, 0, 0.03);
 }
 
 .sidebar-logo {
@@ -94,13 +95,13 @@ body {
 .sidebar-menu a span {
     margin-right: 15px;
     font-size: 1.3em;
-    text-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    text-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .sidebar-menu a:hover {
     background: white;
     color: var(--primary);
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
     transform: translateX(5px);
 }
 
@@ -142,7 +143,9 @@ h1 {
 }
 
 /* Glass Panels */
-.search-panel, .data-container, .modal-content {
+.search-panel,
+.data-container,
+.modal-content {
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -155,7 +158,8 @@ h1 {
 }
 
 .search-panel:hover {
-    box-shadow: 0 15px 40px rgba(0,0,0,0.08); /* Minimal lift */
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.08);
+    /* Minimal lift */
 }
 
 /* Form Elements */
@@ -169,7 +173,8 @@ h1 {
     letter-spacing: 0.5px;
 }
 
-input, select {
+input,
+select {
     width: 100%;
     padding: 12px 16px;
     background: white;
@@ -180,7 +185,8 @@ input, select {
     transition: var(--transition);
 }
 
-input:focus, select:focus {
+input:focus,
+select:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 4px var(--primary-light);
@@ -190,7 +196,8 @@ input:focus, select:focus {
 .btn-group {
     display: flex;
     gap: 15px;
-    justify-content: flex-start; /* Left align for cleaner look */
+    justify-content: flex-start;
+    /* Left align for cleaner look */
     margin-top: 30px;
 }
 
@@ -198,7 +205,8 @@ button {
     padding: 14px 32px;
     font-size: 15px;
     font-weight: 600;
-    border-radius: 50px; /* Pill shape */
+    border-radius: 50px;
+    /* Pill shape */
     border: none;
     cursor: pointer;
     transition: var(--transition);
@@ -232,7 +240,8 @@ button.secondary:hover {
 .data-table {
     width: 100%;
     border-collapse: separate;
-    border-spacing: 0 8px; /* Spacing between rows */
+    border-spacing: 0 8px;
+    /* Spacing between rows */
 }
 
 .data-table th {
@@ -281,14 +290,22 @@ button.secondary:hover {
 
 /* Modal */
 .modal {
-    background-color: rgba(15, 23, 42, 0.6); /* Darker overlay */
+    background-color: rgba(15, 23, 42, 0.6);
+    /* Darker overlay */
     backdrop-filter: blur(5px);
 }
 
 /* Animations */
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* Scrollbar */
@@ -296,24 +313,44 @@ button.secondary:hover {
     width: 8px;
     height: 8px;
 }
+
 ::-webkit-scrollbar-track {
     background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
     background: #cbd5e1;
     border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
 }
 
 /* Utility */
-.d-flex { display: flex; }
-.justify-between { justify-content: space-between; }
-.items-center { align-items: center; }
-.mb-4 { margin-bottom: 1rem; }
-.text-danger { color: #dc2626 !important; }
-.text-success { color: #16a34a !important; }
+.d-flex {
+    display: flex;
+}
+
+.justify-between {
+    justify-content: space-between;
+}
+
+.items-center {
+    align-items: center;
+}
+
+.mb-4 {
+    margin-bottom: 1rem;
+}
+
+.text-danger {
+    color: #dc2626 !important;
+}
+
+.text-success {
+    color: #16a34a !important;
+}
 
 /* Responsive Grid */
 .form-row {
@@ -325,13 +362,42 @@ button.secondary:hover {
 
 /* Extension Banner Refine */
 #extensionBanner {
-    background: linear-gradient(to right, #fffbeb, #fff); 
+    background: linear-gradient(to right, #fffbeb, #fff);
     border: 1px solid #fcd34d !important;
     box-shadow: 0 4px 15px rgba(251, 191, 36, 0.1) !important;
 }
 
 /* Icons */
 /* Assuming usage of emojis, these styles make them pop */
-span[role="img"], .sidebar-menu span {
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1));
+/* FIX: Restore Layout Structure */
+.page-section {
+    display: none;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.page-section.active {
+    display: block;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal.show {
+    display: flex !important;
+}
+
+/* Linter Fixes & Enhancements */
+.sidebar-logo,
+h1 {
+    background-clip: text;
+    /* Standard property */
 }
