@@ -6,6 +6,7 @@ from datetime import datetime
 from collections import defaultdict
 import os
 import tempfile
+import re
 
 def generate_monthly_excel_report(trade_data, year, month, branch_id=None, branch_name=None):
     """สร้างรายงานรายเดือน (แยกตามวัน)"""
