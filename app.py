@@ -2190,6 +2190,8 @@ def update_branches_data():
                      return jsonify({'success': False, 'error': 'Cannot parse "d" string'}), 500
              elif isinstance(raw_data, list):
                  branches_list = raw_data
+             elif isinstance(raw_data, dict) and 'data' in raw_data:
+                 branches_list = raw_data['data']
         elif isinstance(result, list):
             branches_list = result
         else:
