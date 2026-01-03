@@ -1923,8 +1923,16 @@ def get_annual_report_excel_from_data():
         return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
 
 
-@app.route('/api/annual-report-excel')
-def get_annual_report_excel():
+@app.route('/api/health')
+def health_check():
+    return jsonify({
+        'status': 'ok', 
+        'version': 'v2-fix-404', 
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/annual-report-excel-v2')
+def get_annual_report_excel_v2():
     """API endpoint สำหรับ Export รายงานรายปี/รายเดือนเป็น Excel"""
     try:
         year = request.args.get('year', type=int)

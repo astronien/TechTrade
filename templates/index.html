@@ -1798,7 +1798,7 @@
                     params.append('branchId', branchId);
                 }
 
-                const response = await fetch(`/api/annual-report-excel?${params.toString()}`);
+                const response = await fetch(`/api/annual-report-excel-v2?${params.toString()}`);
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
