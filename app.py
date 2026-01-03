@@ -2145,5 +2145,101 @@ def get_annual_report_excel():
         traceback.print_exc()
         return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
 
+@app.route('/api/admin/update-branches', methods=['POST'])
+def update_branches_data():
+    """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
+    try:
+        data = request.get_json()
+        session_id = data.get('sessionId')
+        
+        if not session_id:
+            return jsonify({'success': False, 'error': 'กรุณาระบุ Session ID'}), 400
+            
+        print(f"🔄 Updating branches with Session ID: {session_id[:10]}...")
+        
+        # 1. เรียก API ดึงข้อมูลสาขา
+        url = 'https://eve.techswop.com/TI/inventory/stock-view-list.aspx/GetDropDownBranch'
+        headers = {
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Content-Type': 'application/json; charset=utf-8',
+            'Origin': 'https://eve.techswop.com',
+            'Referer': 'https://eve.techswop.com/ti/index.aspx',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Cookie': f'ASP.NET_SessionId={session_id}'
+        }
+        
+        payload = {} # Empty payload often works for simple Get calls in ASP.NET page methods
+        
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code != 200:
+             return jsonify({'success': False, 'error': f'API Error: {response.status_code}'}), 500
+             
+        result = response.json()
+        
+        # ตรวจสอบโครงสร้างข้อมูลที่ได้
+        branches_list = []
+        if 'd' in result:
+             # กรณี ASP.NET response ปติที่จะอยู่ใน 'd'
+             raw_data = result['d']
+             # อาจจะเป็น string JSON หรือ array เลย
+             if isinstance(raw_data, str):
+                 try:
+                     branches_list = json.loads(raw_data)
+                 except:
+                     return jsonify({'success': False, 'error': 'Cannot parse "d" string'}), 500
+             elif isinstance(raw_data, list):
+                 branches_list = raw_data
+        elif isinstance(result, list):
+            branches_list = result
+        else:
+             return jsonify({'success': False, 'error': 'Unknown API response format', 'debug': str(result)[:200]}), 500
+             
+        if not branches_list:
+            return jsonify({'success': False, 'error': 'No branches found in response'}), 500
+            
+        print(f"✅ Fetched {len(branches_list)} branches")
+        
+        # 2. แปลงข้อมูลให้เป็น Format ที่เราใช้
+        formatted_branches = []
+        for b in branches_list:
+            # พยายามหา field ที่ถูกต้อง
+            bid = b.get('BRANCH_ID') or b.get('branch_id') or b.get('Value') or b.get('Id')
+            bname = b.get('BRANCH_NAME') or b.get('branch_name') or b.get('Text') or b.get('Name')
+            
+            if bid and bname:
+                formatted_branches.append({
+                    "branch_id": bid,
+                    "branch_name": bname
+                })
+        
+        if not formatted_branches:
+             return jsonify({'success': False, 'error': 'Could not extract valid branch data'}), 500
+
+        # 3. อัปเดตไฟล์ extracted_branches.json
+        json_path = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(formatted_branches, f, ensure_ascii=False, indent=2)
+            
+        # 4. อัปเดตไฟล์ static/branches-data.js
+        js_path = os.path.join(os.path.dirname(__file__), 'static', 'branches-data.js')
+        js_content = f"""// ข้อมูลสาขาทั้งหมด {len(formatted_branches)} สาขา (Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
+const BRANCHES_DATA = {json.dumps(formatted_branches, ensure_ascii=False, indent=None)};
+"""
+        with open(js_path, 'w', encoding='utf-8') as f:
+            f.write(js_content)
+            
+        return jsonify({
+            'success': True,
+            'count': len(formatted_branches),
+            'message': f'อัปเดตข้อมูลสำเร็จ! ({len(formatted_branches)} สาขา)'
+        })
+
+    except Exception as e:
+        print(f"❌ Error updating branches: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
