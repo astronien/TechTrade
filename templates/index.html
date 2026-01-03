@@ -826,6 +826,20 @@
                     3. พิมพ์: <code>document.cookie.match(/ASP\.NET_SessionId=([^;]+)/)[1]</code><br>
                     4. Copy ค่าที่ได้มาวางที่นี่
                 </p>
+                </p>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #28a745;">🔄 อัปเดตข้อมูลสาขา</h3>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                        หากมีสาขาใหม่ (เช่น 2919) ที่ไม่แสดงในรายการ ให้กดปุ่มนี้เพื่อดึงข้อมูลล่าสุดจากระบบ
+                    </p>
+                    <button onclick="autoUpdateBranches()"
+                        style="width: 100%; padding: 10px; background-color: #17a2b8;">
+                        🔄 อัปเดตรายชื่อสาขา (ต้องใส่ Session ID ด้านบนก่อน)
+                    </button>
+                    <small id="updateBranchResult" class="form-text text-muted"
+                        style="display: block; margin-top: 5px;"></small>
+                </div>
             </div>
             <div class="modal-footer">
                 <button onclick="closeSettings()" class="secondary">ยกเลิก</button>
@@ -1089,7 +1103,53 @@
 
 
 
-        // เพิ่ม event handler สำหรับ dropdown change
+        // ฟังก์ชันอัปเดตสาขา (Hybrid)
+        async function autoUpdateBranches() {
+            const sessionIdInput = document.getElementById('settingSessionId');
+            const resultElem = document.getElementById('updateBranchResult');
+            const sessionId = sessionIdInput.value.trim();
+
+            if (!sessionId) {
+                alert('กรุณากรอก Session ID ก่อนกดอัปเดต');
+                sessionIdInput.focus();
+                return;
+            }
+
+            if (!confirm('ต้องการดึงรายชื่อสาขาล่าสุดจากระบบใช่หรือไม่?\n(อาจใช้เวลาสักครู่)')) {
+                return;
+            }
+
+            resultElem.textContent = '⏳ กำลังติดต่อ Server...';
+            resultElem.className = 'form-text text-info';
+
+            try {
+                const response = await fetch('/api/admin/update-branches', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ sessionId: sessionId })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    resultElem.textContent = `✅ ${result.message}`;
+                    resultElem.className = 'form-text text-success';
+                    alert(`✅ สำเร็จ!\nพบทั้งหมด ${result.count} สาขา\n\nระบบจะรีโหลดหน้าเว็บเพื่อใช้ข้อมูลใหม่...`);
+                    location.reload();
+                } else {
+                    resultElem.textContent = `❌ ${result.error}`;
+                    resultElem.className = 'form-text text-danger';
+                    alert(`❌ เกิดข้อผิดพลาด: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Update branches error:', error);
+                resultElem.textContent = `❌ เชื่อมต่อ Server ไม่เลสำเร็จ`;
+                resultElem.className = 'form-text text-danger';
+                alert('❌ ไม่สามารถติดต่อ Server ได้');
+            }
+        }
         document.addEventListener('DOMContentLoaded', () => {
             const branchSelect = document.getElementById('branchSelect');
             const reportBranchSelect = document.getElementById('reportBranchSelect');
