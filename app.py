@@ -6,8 +6,7 @@ from datetime import datetime, timedelta
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import hashlib
-import secrets
+from excel_report_generator import generate_excel_report, generate_annual_excel_report, generate_annual_excel_report_for_zone
 
 
 app = Flask(__name__)
@@ -669,7 +668,6 @@ def get_report():
 
 @app.route('/api/export-report')
 def export_report():
-    from excel_report_generator import generate_excel_report
     """API endpoint สำหรับ Export รายงานเป็น Excel"""
     # รับพารามิเตอร์
     session_id = request.args.get('sessionId', '')
@@ -1936,8 +1934,6 @@ def health_check():
 def get_annual_report_excel_v2():
     """API endpoint สำหรับ Export รายงานรายปี/รายเดือนเป็น Excel"""
     try:
-        from excel_report_generator import generate_annual_excel_report, generate_annual_excel_report_for_zone
-
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int) # รับค่าเดือน (ถ้ามี)
         branch_id = request.args.get('branchId', '')
