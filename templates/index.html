@@ -1134,10 +1134,18 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    resultElem.textContent = `✅ ${result.message}`;
-                    resultElem.className = 'form-text text-success';
-                    alert(`✅ สำเร็จ!\nพบทั้งหมด ${result.count} สาขา\n\nระบบจะรีโหลดหน้าเว็บเพื่อใช้ข้อมูลใหม่...`);
-                    location.reload();
+                    if (result.manual_copy_needed) {
+                        // กรณีเขียนไฟล์ไม่ได้ (Vercel)
+                        resultElem.innerHTML = `✅ ${result.message}<br><textarea style="width:100%; height:100px; margin-top:10px; font-size:10px;">${result.branches_json}</textarea>`;
+                        resultElem.className = 'form-text text-warning';
+                        alert(`✅ ดึงข้อมูลสำเร็จ! แต่ Server เขียนไฟล์ไม่ได้\n\nกรุณา Copy ข้อมูลในช่อง Textbox ส่งให้ Developer อัปเดตไฟล์ครับ`);
+                    } else {
+                        // กรณีเขียนไฟล์ได้ปกติ
+                        resultElem.textContent = `✅ ${result.message}`;
+                        resultElem.className = 'form-text text-success';
+                        alert(`✅ สำเร็จ!\nพบทั้งหมด ${result.count} สาขา\n\nระบบจะรีโหลดหน้าเว็บเพื่อใช้ข้อมูลใหม่...`);
+                        location.reload();
+                    }
                 } else {
                     resultElem.textContent = `❌ ${result.error}`;
                     resultElem.className = 'form-text text-danger';

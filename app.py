@@ -2221,24 +2221,37 @@ def update_branches_data():
         if not formatted_branches:
              return jsonify({'success': False, 'error': 'Could not extract valid branch data'}), 500
 
-        # 3. อัปเดตไฟล์ extracted_branches.json
-        json_path = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(formatted_branches, f, ensure_ascii=False, indent=2)
-            
-        # 4. อัปเดตไฟล์ static/branches-data.js
-        js_path = os.path.join(os.path.dirname(__file__), 'static', 'branches-data.js')
-        js_content = f"""// ข้อมูลสาขาทั้งหมด {len(formatted_branches)} สาขา (Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
+        # 3. พยายามอัปเดตไฟล์ (อาจจะพังบน Vercel เพราะ Read-only)
+        try:
+            # 3.1 อัปเดตไฟล์ extracted_branches.json
+            json_path = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(formatted_branches, f, ensure_ascii=False, indent=2)
+                
+            # 3.2 อัปเดตไฟล์ static/branches-data.js
+            js_path = os.path.join(os.path.dirname(__file__), 'static', 'branches-data.js')
+            js_content = f"""// ข้อมูลสาขาทั้งหมด {len(formatted_branches)} สาขา (Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
 const BRANCHES_DATA = {json.dumps(formatted_branches, ensure_ascii=False, indent=None)};
 """
-        with open(js_path, 'w', encoding='utf-8') as f:
-            f.write(js_content)
+            with open(js_path, 'w', encoding='utf-8') as f:
+                f.write(js_content)
+                
+            return jsonify({
+                'success': True,
+                'count': len(formatted_branches),
+                'message': f'อัปเดตข้อมูลสำเร็จ! ({len(formatted_branches)} สาขา)'
+            })
             
-        return jsonify({
-            'success': True,
-            'count': len(formatted_branches),
-            'message': f'อัปเดตข้อมูลสำเร็จ! ({len(formatted_branches)} สาขา)'
-        })
+        except OSError as e:
+            # กรณี Vercel Read-Only
+            print(f"⚠️ Read-only filesystem detected: {e}")
+            return jsonify({
+                'success': True,
+                'count': len(formatted_branches),
+                'message': f'ดึงข้อมูลสำเร็จ! ({len(formatted_branches)} สาขา) <br>⚠️ บน Server เขียนไฟล์ไม่ได้ กรุณา Copy JSON ด้านล่างไปส่งให้ Developer:',
+                'manual_copy_needed': True,
+                'branches_json': json.dumps(formatted_branches, ensure_ascii=False)
+            })
 
     except Exception as e:
         print(f"❌ Error updating branches: {str(e)}")
