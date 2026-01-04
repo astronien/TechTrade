@@ -4,10 +4,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from excel_report_generator import generate_excel_report, generate_annual_excel_report, generate_annual_excel_report_for_zone
-
+import secrets
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -22,6 +19,8 @@ def get_db_connection():
             return None
         
         print(f"🔌 Connecting to database...")
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
         conn = psycopg2.connect(
             db_url,
             cursor_factory=RealDictCursor
