@@ -119,7 +119,6 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
         num_days = calendar.monthrange(year, month)[1]
         headers = ['สาขา'] + [str(d) for d in range(1, num_days + 1)] + ['รวม']
     else:
-    else:
         # รายงานรายปี
         ws.title = f"Report {year}"
         headers = ['สาขา', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
