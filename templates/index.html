@@ -1333,6 +1333,8 @@
                     const result = await response.json();
                     if (!result.success) {
                         console.error('❌ Error saving system settings:', result.error);
+                        alert(`❌ บันทึกการตั้งค่าล้มเหลว: ${result.error}`);
+                        return;
                     }
                 } catch (error) {
                     console.error('❌ Error saving system settings:', error);

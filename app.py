@@ -2709,12 +2709,21 @@ def save_admin_settings():
         eve_username = data.get('eve_username')
         eve_password = data.get('eve_password')
         
+        # Check DB connection first
+        conn = get_db_connection()
+        if not conn:
+             return jsonify({'success': False, 'error': 'Database Connection Failed: Check POSTGRES_URL_NON_POOLING'}), 500
+        conn.close()
+        
         if eve_username:
-            save_system_setting('eve_username', eve_username)
+            if not save_system_setting('eve_username', eve_username):
+                return jsonify({'success': False, 'error': 'Failed to save username to DB'}), 500
+                
         if eve_password:
-            save_system_setting('eve_password', eve_password)
+            if not save_system_setting('eve_password', eve_password):
+                return jsonify({'success': False, 'error': 'Failed to save password to DB'}), 500
             
-        return jsonify({'success': True, 'message': 'Settings saved'})
+        return jsonify({'success': True, 'message': 'Settings saved to Database'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
