@@ -119,22 +119,40 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
         num_days = calendar.monthrange(year, month)[1]
         headers = ['สาขา'] + [str(d) for d in range(1, num_days + 1)] + ['รวม']
     else:
+    else:
         # รายงานรายปี
-        ws.title = f"Zone {zone_name} - {year}"
+        ws.title = f"Report {year}"
         headers = ['สาขา', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
                    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.', 'รวม']
-                   
-    ws.append(headers)
-    # หัวตาราง
-    ws['A1'].value = 'สาขา' # Set value after append to avoid overwriting
-    ws['A1'].font = Font(bold=True, size=12, color="FFFFFF")
-    ws['A1'].fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
-    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+    
+    # --- ส่วนหัวรายงาน (Rows 1-2) ---
+    ws['A1'] = f"รายงานรายปี {year}"
+    ws['A1'].font = Font(bold=True, size=16, color="333333")
+    
+    ws['A2'] = f"สาขา/Zone: {zone_name}" 
+    ws['A2'].font = Font(size=12, color="666666")
+    
+    # --- ตารางข้อมูล (Row 4) ---
+    start_row = 4
+    ws.append([]) # Row 1 (used manually)
+    ws.append([]) # Row 2 (used manually)
+    ws.append([]) # Row 3 (Spacer)
+    ws.append(headers) # Row 4 (Table Header)
+    
+    # จัดรูปแบบหัวตาราง
+    header_row = start_row
+    
+    # Cell A4 (สาขา)
+    cell = ws.cell(row=header_row, column=1)
+    cell.value = 'สาขา' 
+    cell.font = Font(bold=True, size=12, color="FFFFFF")
+    cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
     
     # เขียนชื่อเดือน/วัน
     if month:
         for col_idx, day_num in enumerate(range(1, num_days + 1), start=2):
-            cell = ws.cell(row=1, column=col_idx)
+            cell = ws.cell(row=header_row, column=col_idx)
             cell.value = str(day_num)
             cell.font = Font(bold=True, size=11, color="FFFFFF")
             cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -142,30 +160,19 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
             cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                                 top=Side(style='thin'), bottom=Side(style='thin'))
         # คอลัมน์รวม
-        ws.cell(row=1, column=num_days + 2).value = 'รวม'
-        ws.cell(row=1, column=num_days + 2).font = Font(bold=True, size=11, color="FFFFFF")
-        ws.cell(row=1, column=num_days + 2).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
-        ws.cell(row=1, column=num_days + 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row=header_row, column=num_days + 2).value = 'รวม'
+        ws.cell(row=header_row, column=num_days + 2).font = Font(bold=True, size=11, color="FFFFFF")
+        ws.cell(row=header_row, column=num_days + 2).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+        ws.cell(row=header_row, column=num_days + 2).alignment = Alignment(horizontal='center', vertical='center')
     else:
-        month_names_short = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
-                             'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
-        for col_idx, month_name_short in enumerate(month_names_short, start=2):
-            cell = ws.cell(row=1, column=col_idx)
-            cell.value = month_name_short
-            cell.font = Font(bold=True, size=11, color="FFFFFF")
-            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
-                                top=Side(style='thin'), bottom=Side(style='thin'))
-        
         # คอลัมน์รวม
-        ws.cell(row=1, column=14).value = 'รวม'
-        ws.cell(row=1, column=14).font = Font(bold=True, size=11, color="FFFFFF")
-        ws.cell(row=1, column=14).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
-        ws.cell(row=1, column=14).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row=header_row, column=14).value = 'รวม'
+        ws.cell(row=header_row, column=14).font = Font(bold=True, size=11, color="FFFFFF")
+        ws.cell(row=header_row, column=14).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+        ws.cell(row=header_row, column=14).alignment = Alignment(horizontal='center', vertical='center')
     
     # เขียนข้อมูลแต่ละสาขา
-    row_idx = 2
+    row_idx = 5
     
     # ข้อมูล
     rows = []
@@ -269,16 +276,19 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     # We want X-axis = Time (Months/Days), Series = Branches
     
     # Reference data excluding 'Total' column
+    # Data for chart
     data_len = num_days if month else 12
-    data = Reference(ws, min_col=2, min_row=1, max_col=data_len + 1, max_row=row_idx) # max_row is now row_idx (including total row)
+    data = Reference(ws, min_col=2, min_row=header_row, max_col=data_len + 1, max_row=row_idx) 
     
     chart.add_data(data, titles_from_data=True, from_rows=True)
     
     # Categories (Header row excluding 'Branch' and 'Total')
-    cats = Reference(ws, min_col=2, min_row=1, max_col=data_len + 1)
+    cats = Reference(ws, min_col=2, min_row=header_row, max_col=data_len + 1)
     chart.set_categories(cats)
     
-    ws.add_chart(chart, f"A{row_idx + 2}")
+    chart.set_categories(cats)
+    
+    ws.add_chart(chart, f"A{row_idx + 4}")
     
     filename = f"zone_report_{year}_{month if month else 'annual'}_{zone_name}.xlsx"
     temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()

@@ -1739,7 +1739,7 @@ def get_annual_report_data():
             
             # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
             for month_num in range(1, 13):
-                # คำนวณวันแรกและวันสุดท้ายของเดือน
+                # ... (setup logic) ...
                 last_day = calendar.monthrange(year, month_num)[1]
                 date_start = f"01/{month_num:02d}/{year}"
                 date_end = f"{last_day}/{month_num:02d}/{year}"
@@ -1753,32 +1753,16 @@ def get_annual_report_data():
                     'branch_id': api_branch_id if api_branch_id else None
                 }
                 
-                print(f"🔍 DEBUG [{month_names[month_num-1]}]: Calling API with filters:")
-                print(f"   - date_start: {date_start}")
-                print(f"   - date_end: {date_end}")
-                print(f"   - branch_id (Sequential ID): {api_branch_id if api_branch_id else 'None (all branches)'}")
-                print(f"   - session_id: {session_id[:10] if session_id else 'None'}...")
-                
                 # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
                 data = fetch_data_with_retry(start=0, length=1, **filters)
                 
-                print(f"🔍 DEBUG [{month_names[month_num-1]}]: API Response:")
-                print(f"   - Has error: {'error' in data}")
-                if 'error' in data:
-                    print(f"   - Error message: {data.get('error')}")
-                else:
-                    print(f"   - recordsTotal: {data.get('recordsTotal', 'N/A')}")
-                    print(f"   - recordsFiltered: {data.get('recordsFiltered', 'N/A')}")
-                    print(f"   - data items: {len(data.get('data', []))}")
-                
                 if 'error' not in data:
-                    # ใช้ recordsFiltered แทนการดึงข้อมูลทั้งหมด
                     count = data.get('recordsFiltered', 0)
                     monthly_counts[month_num] = count
                     total_records += count
-                    print(f"   {month_names[month_num-1]}: {count} records")
+                    print(f"   🗓️ Month {month_num}: {count} records | Running Total: {total_records}")
                 else:
-                    print(f"   {month_names[month_num-1]}: Error - {data.get('error')}")
+                    print(f"   ❌ Month {month_num}: Error - {data.get('error')}")
                     monthly_counts[month_num] = 0
             
             print(f"✅ Total records: {total_records}")
@@ -2235,8 +2219,6 @@ def generate_annual_excel_from_data():
                     costs[int(item['day'])] = int(item['count'])
             
             branch_name = data.get('branch_name') or str(data.get('branch_id', 'Unknown'))
-            if ' : ' in branch_name:
-                 branch_name = branch_name.split(' : ')[-1]
 
             formatted_branches = [{
                 'branch_id': data.get('branch_id', 'Unknown'),
