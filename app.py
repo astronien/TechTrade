@@ -2183,6 +2183,104 @@ def get_annual_report_excel_v2():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/annual-report-excel-from-data', methods=['POST'])
+def generate_annual_excel_from_data():
+    """สร้าง Excel จากข้อมูลที่ส่งมาจาก Frontend (ไม่ต้องดึงใหม่)"""
+    try:
+        data = request.get_json()
+        
+        # ตรวจสอบว่าเป็นรายงานแบบไหน
+        # ถ้ามี branches_data แสดงว่าเป็น Zone Report (หรือ All Branches)
+        if 'branches_data' in data and data['branches_data']:
+            from excel_report_generator import generate_annual_excel_report_for_zone
+            
+            # ปรับปรุง data ให้ตรง format ที่ generator ต้องการ
+            formatted_branches = []
+            for b in data['branches_data']:
+                counts = {}
+                monthly_data = b.get('monthly_data', [])
+                
+                for item in monthly_data:
+                    # ถ้าเป็นรายปี
+                    if 'month_number' in item:
+                        counts[int(item['month_number'])] = int(item['count'])
+                    elif 'day' in item:
+                        # ถ้าเป็นรายเดือน
+                        counts[int(item['day'])] = int(item['count'])
+                
+                formatted_branches.append({
+                    'branch_id': b['branch_id'],
+                    'branch_name': b['branch_name'],
+                    'monthly_counts': counts
+                })
+            
+            excel_path = generate_annual_excel_report_for_zone(
+                formatted_branches, 
+                data['year'], 
+                data.get('zone_name', 'Report'),
+                month=data.get('month')
+            )
+            
+        else:
+            # รายงานสาขาเดียว (หรือแบบที่ส่ง raw processed data มา)
+            # data ในที่นี้คือ { year, branch_id, monthly_data: [{month:..., count:...}], ... }
+            
+            costs = {}
+            monthly_data = data.get('daily_data', data.get('monthly_data', []))
+            
+            for item in monthly_data:
+                if 'month_number' in item:
+                    costs[int(item['month_number'])] = int(item['count'])
+                elif 'day' in item:
+                    costs[int(item['day'])] = int(item['count'])
+            
+            branch_name = data.get('branch_name') or str(data.get('branch_id', 'Unknown'))
+            if ' : ' in branch_name:
+                 branch_name = branch_name.split(' : ')[-1]
+
+            formatted_branches = [{
+                'branch_id': data.get('branch_id', 'Unknown'),
+                'branch_name': branch_name,
+                'monthly_counts': costs
+            }]
+            
+            from excel_report_generator import generate_annual_excel_report_for_zone
+            excel_path = generate_annual_excel_report_for_zone(
+                formatted_branches, 
+                data['year'], 
+                branch_name, 
+                month=data.get('month')
+            )
+
+        if not os.path.exists(excel_path):
+            return jsonify({'error': 'File generation failed'}), 500
+            
+        file_size = os.path.getsize(excel_path)
+        print(f"📦 Generated Excel size: {file_size} bytes")
+
+        # อ่านไฟล์ลงหน่วยความจำเพื่อส่งกลับและลบไฟล์ทันที
+        import io
+        return_data = io.BytesIO()
+        with open(excel_path, 'rb') as f:
+            return_data.write(f.read())
+        return_data.seek(0)
+        
+        os.remove(excel_path)
+        
+        from flask import send_file
+        return send_file(
+            return_data,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=os.path.basename(excel_path)
+        )
+
+    except Exception as e:
+        print(f"❌ Error generating Excel from data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/update-branches', methods=['POST'])
 def update_branches_data():
     """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
@@ -2226,40 +2324,6 @@ def update_branches_data():
                      branches_list = json.loads(raw_data)
                  except:
                      return jsonify({'success': False, 'error': 'Cannot parse "d" string'}), 500
-             # รายงานสาขาเดียว (หรือแบบที่ส่ง raw processed data มา)
-            # data ในที่นี้คือ { year, branch_id, monthly_data: [{month:..., count:...}], ... }
-            
-            # แปลง annual data (monthly_counts)
-            # ต้องแปลง list of objects เป็น dict {month_num: count}
-            
-            # จำลอง structure เหมือน trade_data แต่เรามี processed count แล้ว
-            # เราต้องแก้ generate_annual_excel_report ให้รับ processed counts ได้ หรือสร้าง func ใหม่
-            # เพื่อความง่าย เราจะใช้ generate_annual_excel_report_for_zone แต่ส่งไป 1 สาขา
-            
-             # ปรับปรุง data ให้ตรง format
-            costs = {}
-            monthly_data = data.get('daily_data', data.get('monthly_data', []))
-            
-            for item in monthly_data:
-                # ถ้าเป็นรายปี
-                if 'month_number' in item:
-                    costs[int(item['month_number'])] = int(item['count'])
-                elif 'day' in item:
-                        # ถ้าเป็นรายเดือน
-                    costs[int(item['day'])] = int(item['count'])
-            
-            formatted_branches = [{
-                'branch_id': data.get('branch_id', 'Unknown'),
-                'branch_name': data.get('branch_name', data.get('branch_id', 'Unknown')),
-                'monthly_counts': costs
-            }]
-            
-            excel_path = generate_annual_excel_report_for_zone(
-                formatted_branches, 
-                data['year'], 
-                data.get('branch_name', str(data.get('branch_id'))), # ใช้ชื่อสาขาเป็น zone name ชั่วคราวเพื่อให้แสดงในหัว report
-                month=data.get('month')
-            )
              elif isinstance(raw_data, list):
                  branches_list = raw_data
              elif isinstance(raw_data, dict) and 'data' in raw_data:
