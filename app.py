@@ -1345,6 +1345,10 @@ def reply_line_message(reply_token, message):
     import os
     channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_CHANNEL_ACCESS_TOKEN')
     
+    if channel_access_token == 'YOUR_CHANNEL_ACCESS_TOKEN':
+        print("❌ Error: LINE_CHANNEL_ACCESS_TOKEN is set to default placeholder!")
+        return None
+
     url = 'https://api.line.me/v2/bot/message/reply'
     headers = {
         'Content-Type': 'application/json',
@@ -1362,10 +1366,18 @@ def reply_line_message(reply_token, message):
     
     try:
         response = requests.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            print(f"❌ Failed to reply Line message: {response.status_code}")
+            print(f"   Response: {response.text}")
+        else:
+            print(f"✅ Reply Line message success")
         return response.json()
     except Exception as e:
         print(f"Error sending LINE message: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
+
 
 @app.route('/api/send-line', methods=['POST'])
 def send_line():
