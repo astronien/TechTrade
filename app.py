@@ -2151,12 +2151,20 @@ def get_annual_report_excel_v2():
             
             excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name)
         
+        if not os.path.exists(excel_path):
+            return jsonify({'error': 'File generation failed'}), 500
+            
+        file_size = os.path.getsize(excel_path)
+        print(f"📦 Generated Excel size: {file_size} bytes")
+
         # อ่านไฟล์ลงหน่วยความจำเพื่อส่งกลับและลบไฟล์ทันที (เลี่ยงปัญหา File Lock/Delete Race Condition)
         import io
         return_data = io.BytesIO()
         with open(excel_path, 'rb') as f:
             return_data.write(f.read())
         return_data.seek(0)
+        
+        print(f"📦 Buffered size: {return_data.getbuffer().nbytes} bytes")
         
         # ลบไฟล์ต้นฉบับ
         os.remove(excel_path)
@@ -2218,6 +2226,40 @@ def update_branches_data():
                      branches_list = json.loads(raw_data)
                  except:
                      return jsonify({'success': False, 'error': 'Cannot parse "d" string'}), 500
+             # รายงานสาขาเดียว (หรือแบบที่ส่ง raw processed data มา)
+            # data ในที่นี้คือ { year, branch_id, monthly_data: [{month:..., count:...}], ... }
+            
+            # แปลง annual data (monthly_counts)
+            # ต้องแปลง list of objects เป็น dict {month_num: count}
+            
+            # จำลอง structure เหมือน trade_data แต่เรามี processed count แล้ว
+            # เราต้องแก้ generate_annual_excel_report ให้รับ processed counts ได้ หรือสร้าง func ใหม่
+            # เพื่อความง่าย เราจะใช้ generate_annual_excel_report_for_zone แต่ส่งไป 1 สาขา
+            
+             # ปรับปรุง data ให้ตรง format
+            costs = {}
+            monthly_data = data.get('daily_data', data.get('monthly_data', []))
+            
+            for item in monthly_data:
+                # ถ้าเป็นรายปี
+                if 'month_number' in item:
+                    costs[int(item['month_number'])] = int(item['count'])
+                elif 'day' in item:
+                        # ถ้าเป็นรายเดือน
+                    costs[int(item['day'])] = int(item['count'])
+            
+            formatted_branches = [{
+                'branch_id': data.get('branch_id', 'Unknown'),
+                'branch_name': data.get('branch_name', data.get('branch_id', 'Unknown')),
+                'monthly_counts': costs
+            }]
+            
+            excel_path = generate_annual_excel_report_for_zone(
+                formatted_branches, 
+                data['year'], 
+                data.get('branch_name', str(data.get('branch_id'))), # ใช้ชื่อสาขาเป็น zone name ชั่วคราวเพื่อให้แสดงในหัว report
+                month=data.get('month')
+            )
              elif isinstance(raw_data, list):
                  branches_list = raw_data
              elif isinstance(raw_data, dict) and 'data' in raw_data:
