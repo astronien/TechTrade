@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta
 import os
 import secrets
+import hashlib
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
