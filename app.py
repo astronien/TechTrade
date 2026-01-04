@@ -1936,9 +1936,12 @@ def get_annual_report_excel_from_data():
 
 @app.route('/api/health')
 def health_check():
+    token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
+    is_token_set = token and token != 'YOUR_CHANNEL_ACCESS_TOKEN'
     return jsonify({
         'status': 'ok', 
-        'version': 'v2-fix-404', 
+        'version': 'v2-fix-hashlib-and-webhook',
+        'line_token_configured': is_token_set, 
         'timestamp': datetime.now().isoformat()
     })
 
@@ -2084,10 +2087,20 @@ def get_annual_report_excel_v2():
                 
                 start += length
         
-        print(f"✅ Total records: {len(all_data)}")
-        
         if not all_data:
-            return jsonify({'error': f'ไม่พบข้อมูลในปี {year}'}), 404
+            debug_info = {
+                'year': year,
+                'branch_id': branch_id,
+                'zone_id': zone_id,
+                'real_branch_id': real_branch_id if 'real_branch_id' in locals() else 'N/A',
+                'filters': filters,
+                'session_provided': bool(session_id)
+            }
+            return jsonify({
+                'success': False, 
+                'error': f'ไม่พบข้อมูลการขายในปี {year} (No Data Found)',
+                'debug': debug_info
+            }), 200
         
         # สร้าง Excel Report
         if zone_id and 'zone' in locals() and 'branch_ids' in locals():
@@ -2157,12 +2170,12 @@ def get_annual_report_excel_v2():
                 pass
         
         return response
-        
+
     except Exception as e:
-        print(f"❌ Error generating Excel: {str(e)}")
+        print(f"❌ Error generating Excel from data: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/update-branches', methods=['POST'])
 def update_branches_data():
