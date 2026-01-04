@@ -301,8 +301,11 @@ def perform_eve_login():
         password = get_system_setting('eve_password')
         
         if not username or not password:
-            print("❌ Bot Login failed: No credentials stored.")
-            return None
+            return None, "No credentials stored in settings."
+            
+        # Trim whitespaces
+        username = username.strip()
+        password = password.strip()
             
         print(f"🤖 Bot attempting login as: {username}...")
         
@@ -310,23 +313,23 @@ def perform_eve_login():
         login_url = 'https://eve.techswop.com/TI/login.aspx'
         
         # 2. GET Login Page (to parse ViewState)
-        response_get = session.get(login_url, timeout=30)
+        try:
+            response_get = session.get(login_url, timeout=30)
+        except requests.exceptions.RequestException as e:
+            return None, f"Connection Failed (GET): {str(e)}"
+
         if response_get.status_code != 200:
-            print(f"❌ Bot Login failed: GET page returned {response_get.status_code}")
-            return None
+            return None, f"Login Page Unreachable: HTTP {response_get.status_code}"
             
         hidden_fields = extract_aspnet_fields(response_get.content)
         if '__VIEWSTATE' not in hidden_fields:
-            print("❌ Bot Login failed: Could not find __VIEWSTATE. Content snippet:")
-            print(response_get.content[:500].decode('utf-8', errors='ignore'))
-            return None
+            return None, "Could not find __VIEWSTATE in login page."
             
         # 3. POST Credentials
-        # พบว่าหน้าเว็บใช้ name="btnSignin" (แก้จาก btnLogin)
         payload = {
             'txtUsername': username,
             'txtPassword': password,
-            'btnSignin': 'เข้าสู่ระบบ',  # สำคัญ: ต้องใส่ value ให้ตรงกับหน้าเว็บ
+            'btnSignin': 'เข้าสู่ระบบ', 
             **hidden_fields
         }
         
@@ -337,7 +340,10 @@ def perform_eve_login():
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         
-        response_post = session.post(login_url, data=payload, headers=headers, timeout=30)
+        try:
+            response_post = session.post(login_url, data=payload, headers=headers, timeout=30)
+        except requests.exceptions.RequestException as e:
+             return None, f"Connection Failed (POST): {str(e)}"
         
         # 4. Check Success
         cookies = session.cookies.get_dict()
@@ -349,26 +355,28 @@ def perform_eve_login():
         if session_id:
             # ตรวจสอบเพิ่มเติมว่า Login จริงหรือเปล่า (ถ้าเด้งกลับมาหน้า Login แปลว่าผิด)
             if '/login.aspx' in response_post.url.lower() and 'เข้าสู่ระบบ' in response_post.text:
-                 print("❌ Bot Login failed: Redirected back to login page (Wrong Credentials?)")
-                 return None
+                 # Check for specific error message in HTML if possible
+                 if 'รหัสผ่านไม่ถูกต้อง' in response_post.text or 'User หรือ Password ไม่ถูกต้อง' in response_post.text:
+                     return None, "Username or Password Incorrect."
+                 return None, "Login failed (Redirected to login page). Credentials might be wrong."
 
             print(f"✅ Bot Login Successful! Session ID: {session_id[:10]}...")
-            return session_id
+            return session_id, None
             
-        print("❌ Bot Login failed: No Session ID returned.")
-        return None
+        return None, "No Session ID returned from server."
 
     except Exception as e:
         print(f"❌ Bot Login Error: {e}")
-        return None
+        return None, f"System Error: {str(e)}"
+
 
 @app.route('/api/admin/run-bot', methods=['POST'])
 def run_bot_update():
     """API to manually trigger the Bot"""
     try:
-        session_id = perform_eve_login()
+        session_id, error_msg = perform_eve_login()
         if not session_id:
-            return jsonify({'success': False, 'error': 'Bot Login Failed (Check logs/credentials)'}), 400
+            return jsonify({'success': False, 'error': error_msg}), 400
             
         # Trigger update with new session
         success, count = trigger_branch_update(session_id)
