@@ -8,7 +8,9 @@ import secrets
 import hashlib
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+# Use a fixed secret key for development to avoid session invalidation on restart
+app.secret_key = os.environ.get('SECRET_KEY', 'techtrade_dev_secret_key_fixed_12345')
+app.permanent_session_lifetime = timedelta(days=7) # Remember login for 7 days
 
 # Supabase Database Connection
 def get_db_connection():
@@ -605,6 +607,7 @@ def login():
                 if user['password_hash'] == password_hash:
                     session['user_id'] = user['id']
                     session['username'] = user['username']
+                    session.permanent = True
                     print(f"✅ Login successful for {username}")
                     cur.close()
                     conn.close()
@@ -2714,9 +2717,23 @@ def get_all_branches():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/admin/system-settings', methods=['POST'])
-def save_admin_settings():
-    """API สำหรับบันทึกการตั้งค่า (Eve Credentials)"""
+@app.route('/api/admin/system-settings', methods=['GET', 'POST'])
+def manage_admin_settings():
+    """API สำหรับจัดการการตั้งค่า (Eve Credentials) - GET/POST"""
+    if request.method == 'GET':
+        try:
+            username = get_system_setting('eve_username')
+            password = get_system_setting('eve_password')
+            
+            return jsonify({
+                'success': True,
+                'eve_username': username if username else '',
+                'eve_password_set': bool(password) # Don't send actual password back for security, just flag
+            })
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # POST Method (Save)
     try:
         data = request.get_json()
         eve_username = data.get('eve_username')
@@ -2728,11 +2745,11 @@ def save_admin_settings():
              return jsonify({'success': False, 'error': 'Database Connection Failed: Check POSTGRES_URL_NON_POOLING'}), 500
         conn.close()
         
-        if eve_username:
+        if eve_username is not None: # Allow saving empty string to clear
             if not save_system_setting('eve_username', eve_username):
                 return jsonify({'success': False, 'error': 'Failed to save username to DB'}), 500
                 
-        if eve_password:
+        if eve_password: # Only update password if provided (non-empty)
             if not save_system_setting('eve_password', eve_password):
                 return jsonify({'success': False, 'error': 'Failed to save password to DB'}), 500
             

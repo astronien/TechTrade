@@ -1280,8 +1280,25 @@
             localStorage.setItem('extensionBannerDismissed', 'true');
         }
 
-        function openSettings() {
+        async function openSettings() {
             document.getElementById('settingsModal').classList.add('show');
+
+            // โหลดการตั้งค่าล่าสุดจาก Server
+            try {
+                const response = await fetch('/api/admin/system-settings');
+                const result = await response.json();
+                if (result.success) {
+                    if (result.eve_username) {
+                        document.getElementById('settingEveUser').value = result.eve_username;
+                    }
+                    if (result.eve_password_set) {
+                        // แสดงให้รู้ว่ามีรหัสผ่านแล้ว
+                        document.getElementById('settingEvePass').setAttribute('placeholder', '****** (ตั้งค่าไว้แล้ว)');
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error loading settings:', error);
+            }
         }
 
         function closeSettings() {
