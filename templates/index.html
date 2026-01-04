@@ -1398,48 +1398,7 @@
                     return;
                 }
 
-                async function runBotUpdate() {
-                    const botStatus = document.getElementById('botStatus');
-                    const eveUser = document.getElementById('settingEveUser').value;
-                    const evePass = document.getElementById('settingEvePass').value;
 
-                    if (!eveUser || !evePass) {
-                        alert('⚠️ กรุณากรอก Username และ Password ก่อนทดสอบ Bot');
-                        return;
-                    }
-
-                    // Auto Save Credentials first before running
-                    await saveSettings();
-
-                    if (!confirm('ต้องการให้ Bot ลอง Login และดึงข้อมูลหรือไม่?\n(ขั้นตอนนี้อาจใช้เวลา 10-30 วินาที)')) {
-                        return;
-                    }
-
-                    botStatus.innerHTML = '⏳ กำลังทำงาน... (Bot กำลัง Login)';
-                    botStatus.style.color = '#ff9800';
-
-                    try {
-                        const response = await fetch('/api/admin/run-bot', {
-                            method: 'POST'
-                        });
-                        const result = await response.json();
-
-                        if (result.success) {
-                            botStatus.innerHTML = `✅ สำเร็จ! Updated ${result.count} branches`;
-                            botStatus.style.color = 'green';
-                            alert(`✅ Bot Login สำเร็จ!\n\nดึงข้อมูลมาได้ทั้งหมด ${result.count} สาขา`);
-                            // Refresh current view
-                            loadBranches();
-                        } else {
-                            botStatus.innerHTML = `❌ ล้มเหลว: ${result.error}`;
-                            botStatus.style.color = 'red';
-                            alert(`❌ Bot Login ล้มเหลว\n\nสาเหตุ: ${result.error}\n\nกรุณาเช็ค Username/Password หรือลองกด Login เองเพื่อให้แน่ใจว่ารหัสถูก`);
-                        }
-                    } catch (error) {
-                        botStatus.innerHTML = `❌ Error: ${error.message}`;
-                        botStatus.style.color = 'red';
-                    }
-                }
 
                 closeAnnualReportModal();
                 await generateAnnualReportForZone(year, zone, month);
@@ -3375,6 +3334,49 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
 
             // เปิด URL ในหน้าต่างใหม่เพื่อดาวน์โหลด
             window.open(`/api/export-report?${params.toString()}`, '_blank');
+        }
+
+        async function runBotUpdate() {
+            const botStatus = document.getElementById('botStatus');
+            const eveUser = document.getElementById('settingEveUser').value;
+            const evePass = document.getElementById('settingEvePass').value;
+
+            if (!eveUser || !evePass) {
+                alert('⚠️ กรุณากรอก Username และ Password ก่อนทดสอบ Bot');
+                return;
+            }
+
+            // Auto Save Credentials first before running
+            await saveSettings();
+
+            if (!confirm('ต้องการให้ Bot ลอง Login และดึงข้อมูลหรือไม่?\n(ขั้นตอนนี้อาจใช้เวลา 10-30 วินาที)')) {
+                return;
+            }
+
+            botStatus.innerHTML = '⏳ กำลังทำงาน... (Bot กำลัง Login)';
+            botStatus.style.color = '#ff9800';
+
+            try {
+                const response = await fetch('/api/admin/run-bot', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    botStatus.innerHTML = `✅ สำเร็จ! Updated ${result.count} branches`;
+                    botStatus.style.color = 'green';
+                    alert(`✅ Bot Login สำเร็จ!\n\nดึงข้อมูลมาได้ทั้งหมด ${result.count} สาขา`);
+                    // Refresh current view
+                    loadBranches();
+                } else {
+                    botStatus.innerHTML = `❌ ล้มเหลว: ${result.error}`;
+                    botStatus.style.color = 'red';
+                    alert(`❌ Bot Login ล้มเหลว\n\nสาเหตุ: ${result.error}\n\nกรุณาเช็ค Username/Password หรือลองกด Login เองเพื่อให้แน่ใจว่ารหัสถูก`);
+                }
+            } catch (error) {
+                botStatus.innerHTML = `❌ Error: ${error.message}`;
+                botStatus.style.color = 'red';
+            }
         }
     </script>
 </body>
