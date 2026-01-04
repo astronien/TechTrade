@@ -410,94 +410,147 @@
                 ⚙️ ตั้งค่าข้อมูลพนักงาน
             </div>
             <div class="modal-body">
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>รหัสพนักงาน</label>
-                    <input type="text" id="settingEmpCode" placeholder="ระบุรหัสพนักงาน">
-                </div>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>ชื่อพนักงาน</label>
-                    <input type="text" id="settingEmpName" placeholder="ระบุชื่อพนักงาน">
-                </div>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>เบอร์โทรศัพท์</label>
-                    <input type="text" id="settingEmpPhone" placeholder="เช่น 081-234-5678">
-                </div>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>ประเภทการยกเลิกรายการ</label>
-                    <select id="settingCancelType">
-                        <option value="1">โดนยกเลิกจากผู้ขาย</option>
-                        <option value="2">อื่นๆ</option>
-                    </select>
-                </div>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>สาเหตุการยกเลิกรายการ</label>
-                    <select id="settingReasonCancel">
-                        <option value="1">ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง</option>
-                        <option value="2">ราคาไม่ตรงตามที่ต้องการ</option>
-                        <option value="3">อื่นๆ</option>
-                    </select>
-                </div>
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
-                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #667eea;">🍪 Session Cookie
-                    (สำหรับยกเลิกรายการ)</h3>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>ASP.NET_SessionId</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="settingSessionId" placeholder="คัดลอกจาก Browser DevTools"
-                            style="flex: 1;">
-                        <button onclick="autoFetchSession(event)" style="padding: 10px 20px; white-space: nowrap;">
-                            🔄 ดึงอัตโนมัติ
-                        </button>
-                    </div>
-                </div>
-                <p style="color: #666; font-size: 14px;">
-                    💡 <strong>วิธีที่ 1: ดึงอัตโนมัติ (แนะนำ)</strong><br>
-                    - กด "🔄 ดึงอัตโนมัติ" → เปิดหน้า eve.techswop.com → Login → Copy Session ID กลับมาวาง<br><br>
+                <style>
+                    .settings-grid {
+                        display: grid;
+                        grid-template-columns: 1fr;
+                        gap: 20px;
+                    }
 
-                    💡 <strong>วิธีที่ 2: ดึงด้วย Console</strong><br>
-                    1. Login เข้าระบบ eve.techswop.com<br>
-                    2. กด F12 → Console<br>
-                    3. พิมพ์: <code>document.cookie.match(/ASP\.NET_SessionId=([^;]+)/)[1]</code><br>
-                    4. Copy ค่าที่ได้มาวางที่นี่
-                </p>
-                </p>
+                    @media (min-width: 768px) {
+                        .settings-grid {
+                            grid-template-columns: 1fr 1fr;
+                        }
+                    }
 
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
-                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #ff9800;">🤖 Eve System Credentials (Bot)</h3>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                        ใส่รหัสผ่านระบบ Eve เพื่อให้ระบบช่วยดึงข้อมูลอัตโนมัติ (Active Update)
-                    </p>
-                    <label>Username</label>
-                    <input type="text" id="settingEveUser" placeholder="Eve Username">
-                </div>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>Password</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="password" id="settingEvePass" placeholder="Eve Password" style="flex: 1;">
-                        <button onclick="togglePasswordVisibility('settingEvePass')"
-                            style="padding: 10px; width: 40px;">👁️</button>
+                    .settings-section {
+                        background: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 8px;
+                        border: 1px solid #e9ecef;
+                    }
+
+                    .settings-section h3 {
+                        margin-top: 0;
+                        font-size: 1.1em;
+                        margin-bottom: 15px;
+                        border-bottom: 2px solid #ddd;
+                        padding-bottom: 10px;
+                    }
+
+                    .full-width {
+                        grid-column: 1 / -1;
+                    }
+                </style>
+
+                <div class="settings-grid">
+                    <!-- Column 1: Personal Info -->
+                    <div class="settings-section">
+                        <h3 style="color: #4a5568;">👤 ข้อมูลพนักงาน</h3>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>รหัสพนักงาน</label>
+                            <input type="text" id="settingEmpCode" placeholder="ระบุรหัสพนักงาน" class="form-control">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>ชื่อพนักงาน</label>
+                            <input type="text" id="settingEmpName" placeholder="ระบุชื่อพนักงาน" class="form-control">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>เบอร์โทรศัพท์</label>
+                            <input type="text" id="settingEmpPhone" placeholder="เช่น 081-234-5678"
+                                class="form-control">
+                        </div>
                     </div>
-                    <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
-                        <button onclick="runBotUpdate()"
-                            style="background-color: #ff9800; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-size: 13px;">
-                            🤖 Run Bot Now
-                        </button>
-                        <span id="botStatus" style="font-size: 12px; color: #666;">(ทดสอบระบบ Active Update)</span>
+
+                    <!-- Column 2: Cancellation Settings -->
+                    <div class="settings-section">
+                        <h3 style="color: #e53e3e;">❌ ตั้งค่าการยกเลิก</h3>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>ประเภทการยกเลิกรายการ</label>
+                            <select id="settingCancelType" class="form-control">
+                                <option value="1">โดนยกเลิกจากผู้ขาย</option>
+                                <option value="2">อื่นๆ</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>สาเหตุการยกเลิกรายการ</label>
+                            <select id="settingReasonCancel" class="form-control">
+                                <option value="1">ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง</option>
+                                <option value="2">ราคาไม่ตรงตามที่ต้องการ</option>
+                                <option value="3">อื่นๆ</option>
+                            </select>
+                        </div>
                     </div>
-                </div>
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
-                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #28a745;">🔄 อัปเดตข้อมูลสาขา</h3>
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                        หากมีสาขาใหม่ (เช่น 2919) ที่ไม่แสดงในรายการ ให้กดปุ่มนี้เพื่อดึงข้อมูลล่าสุดจากระบบ
-                    </p>
-                    <button onclick="autoUpdateBranches()"
-                        style="width: 100%; padding: 10px; background-color: #17a2b8;">
-                        🔄 อัปเดตรายชื่อสาขา (ต้องใส่ Session ID ด้านบนก่อน)
-                    </button>
-                    <small id="updateBranchResult" class="form-text text-muted"
-                        style="display: block; margin-top: 5px;"></small>
+
+                    <!-- Update Branches (Full Width) -->
+                    <div class="settings-section full-width" style="border-color: #bee3f8; background-color: #ebf8ff;">
+                        <h3 style="color: #3182ce; border-color: #90cdf4;">🔄 อัปเดตข้อมูลสาขา</h3>
+                        <div
+                            style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                            <p style="font-size: 14px; color: #666; margin: 0; max-width: 60%;">
+                                หากมีสาขาใหม่ (เช่น 2919) ที่ไม่แสดงในรายการ ให้กดปุ่มนี้เพื่อดึงข้อมูลล่าสุดจากระบบ
+                            </p>
+                            <button onclick="autoUpdateBranches()"
+                                style="padding: 10px 20px; background-color: #3182ce; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                                🔄 อัปเดตรายชื่อสาขา
+                            </button>
+                        </div>
+                        <small id="updateBranchResult" class="form-text text-muted"
+                            style="display: block; margin-top: 5px; text-align: right;"></small>
+                    </div>
+
+                    <!-- Column 1: Session Cookie -->
+                    <div class="settings-section">
+                        <h3 style="color: #d69e2e;">🍪 Session Cookie</h3>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>ASP.NET_SessionId</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="text" id="settingSessionId" placeholder="Session ID" class="form-control"
+                                    style="flex: 1;">
+                                <button onclick="autoFetchSession(event)"
+                                    style="padding: 5px 10px; font-size: 12px; white-space: nowrap;">
+                                    🔄 ดึงเอง
+                                </button>
+                            </div>
+                        </div>
+                        <details>
+                            <summary style="font-size: 12px; color: #666; cursor: pointer; outline: none;">💡 วิธีหา
+                                Session ID</summary>
+                            <p style="color: #666; font-size: 12px; margin-top: 5px; line-height: 1.4;">
+                                1. Login เว็บ Eve ในแท็บใหม่<br>
+                                2. กด F12 > Console<br>
+                                3. พิมพ์: `document.cookie.match(/ASP\.NET_SessionId=([^;]+)/)[1]`<br>
+                                4. Copy ค่ามาวาง
+                            </p>
+                        </details>
+                    </div>
+
+                    <!-- Column 2: Eve Credentials -->
+                    <div class="settings-section">
+                        <h3 style="color: #dd6b20;">🤖 Eve Credentials (Bot)</h3>
+                        <div class="form-group" style="margin-bottom: 10px;">
+                            <input type="text" id="settingEveUser" placeholder="Eve Username" class="form-control"
+                                style="font-size: 13px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 10px;">
+                            <div style="display: flex; gap: 5px;">
+                                <input type="password" id="settingEvePass" placeholder="Eve Password"
+                                    class="form-control" style="flex: 1; font-size: 13px;">
+                                <button onclick="togglePasswordVisibility('settingEvePass')"
+                                    style="padding: 5px; width: 30px;">👁️</button>
+                            </div>
+                        </div>
+                        <div <div
+                            style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+                            <button onclick="runBotUpdate()"
+                                style="background-color: #dd6b20; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-size: 13px; width: 100%;">
+                                🤖 Run Bot Now
+                            </button>
+                        </div>
+                        <div style="text-align: center; margin-top: 5px;">
+                            <span id="botStatus" style="font-size: 11px; color: #666;">(ทดสอบระบบ Active Update)</span>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
