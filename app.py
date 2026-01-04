@@ -2030,7 +2030,13 @@ def get_annual_report_data():
                 'daily_data': daily_data
             })
         else:
-            # รายงานรายปี - นับรายเดือน
+            # รายงานรายเดือน - นับรายวัน (Logic เดิม)
+            pass # (This block is not being edited, just context)
+
+        if not month:
+            # รายงานรายปี - นับรายเดือน (Parallel Fetching)
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            
             monthly_counts = defaultdict(lambda: {'assessed': 0, 'agreed': 0})
             total_assessed = 0
             total_agreed = 0
@@ -2038,53 +2044,69 @@ def get_annual_report_data():
             month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
                            'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
             
-            # ดึงข้อมูลทีละเดือน
-            for month_num in range(1, 13):
-                # ... (setup logic) ...
-                last_day = calendar.monthrange(year, month_num)[1]
-                date_start = f"01/{month_num:02d}/{year}"
-                date_end = f"{last_day}/{month_num:02d}/{year}"
+            def fetch_month_data(month_num):
+                """Helper function to fetch data for a single month"""
+                try:
+                    last_day = calendar.monthrange(year, month_num)[1]
+                    date_start = f"01/{month_num:02d}/{year}"
+                    date_end = f"{last_day}/{month_num:02d}/{year}"
+                    
+                    filters = {
+                        'date_start': date_start,
+                        'date_end': date_end,
+                        'sale_code': '',
+                        'customer_sign': '',
+                        'session_id': session_id,
+                        'branch_id': api_branch_id if api_branch_id else None
+                    }
+                    
+                    # Fetch FULL data for the month
+                    # Note: We create a NEW session for each thread ideally, but requests.Session is thread-safe enough for this simple usage 
+                    # OR we just rely on stateless requests if fetch_data_from_api creates fresh requests.
+                    # fetch_data_from_api seems to create new requests.post calls.
+                    
+                    items = fetch_all_for_branch(filters)
+                    count_a = len(items)
+                    count_g = sum(1 for item in items if item.get('status') == 3)
+                    
+                    return month_num, count_a, count_g, None
+                except Exception as e:
+                    return month_num, 0, 0, str(e)
+
+            print(f"🚀 Starting parallel fetch for Year {year}...")
+            
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                # Launch all 12 tasks
+                future_to_month = {executor.submit(fetch_month_data, m): m for m in range(1, 13)}
                 
-                filters = {
-                    'date_start': date_start,
-                    'date_end': date_end,
-                    'sale_code': '',
-                    'customer_sign': '',
-                    'session_id': session_id,
-                    'branch_id': api_branch_id if api_branch_id else None
-                }
-                
-                # Fetch FULL data for the month to iterate status
-                all_items = fetch_all_for_branch(filters)
-                count_assessed = len(all_items)
-                count_agreed = 0
-                
-                for item in all_items:
-                    if item.get('status') == 3:
-                        count_agreed += 1
-                
-                monthly_counts[month_num]['assessed'] = count_assessed
-                monthly_counts[month_num]['agreed'] = count_agreed
-                
-                total_assessed += count_assessed
-                total_agreed += count_agreed
-                
-                print(f"   🗓️ Month {month_num}: {count_assessed} items ({count_agreed} agreed)")
+                for future in as_completed(future_to_month):
+                    m_num, c_assessed, c_agreed, err = future.result()
+                    
+                    if err:
+                        print(f"   ❌ Month {m_num}: Error - {err}")
+                        monthly_counts[m_num]['assessed'] = 0
+                        monthly_counts[m_num]['agreed'] = 0
+                    else:
+                        print(f"   ✅ Month {m_num}: {c_assessed} items ({c_agreed} agreed)")
+                        monthly_counts[m_num]['assessed'] = c_assessed
+                        monthly_counts[m_num]['agreed'] = c_agreed
+                        total_assessed += c_assessed
+                        total_agreed += c_agreed
             
             print(f"✅ Year Total - Assessed: {total_assessed}, Agreed: {total_agreed}")
             
-            # สร้าง array ข้อมูล 12 เดือน
+            # สร้าง array ข้อมูล 12 เดือน (Sort by month_number)
             monthly_data = []
             for month_num in range(1, 13):
                 monthly_data.append({
                     'month': month_names[month_num - 1],
                     'month_number': month_num,
-                    'count': monthly_counts[month_num]['assessed'], # Backwards compatibility
+                    'count': monthly_counts[month_num]['assessed'], 
                     'assessed': monthly_counts[month_num]['assessed'],
                     'agreed': monthly_counts[month_num]['agreed']
                 })
             
-            # หาชื่อสาขา
+            # หาชื่อสาขา (Logic เดิม)
             branch_name = None
             if branch_info:
                 branch_name = branch_info['branch_name']
