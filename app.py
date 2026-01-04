@@ -2151,25 +2151,23 @@ def get_annual_report_excel_v2():
             
             excel_path = generate_annual_excel_report(all_data, year, branch_id, branch_name)
         
-        # ส่งไฟล์กลับ
+        # อ่านไฟล์ลงหน่วยความจำเพื่อส่งกลับและลบไฟล์ทันที (เลี่ยงปัญหา File Lock/Delete Race Condition)
+        import io
+        return_data = io.BytesIO()
+        with open(excel_path, 'rb') as f:
+            return_data.write(f.read())
+        return_data.seek(0)
+        
+        # ลบไฟล์ต้นฉบับ
+        os.remove(excel_path)
+        
         from flask import send_file
-        response = send_file(
-            excel_path,
+        return send_file(
+            return_data,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
             download_name=os.path.basename(excel_path)
         )
-        
-        # ลบไฟล์ชั่วคราวหลังส่ง
-        @response.call_on_close
-        def cleanup():
-            try:
-                os.remove(excel_path)
-                print(f"🗑️ Removed temp file: {excel_path}")
-            except:
-                pass
-        
-        return response
 
     except Exception as e:
         print(f"❌ Error generating Excel from data: {e}")

@@ -88,7 +88,9 @@ def generate_monthly_excel_report(trade_data, year, month, branch_id=None, branc
     
     # Save file
     filename = f"monthly_report_{year}_{month:02d}_{branch_id or 'all'}.xlsx"
-    filepath = os.path.join(tempfile.gettempdir(), filename)
+    # Force /tmp for Vercel
+    temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
+    filepath = os.path.join(temp_dir, filename)
     wb.save(filepath)
     
     return filepath
@@ -279,7 +281,7 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     ws.add_chart(chart, f"A{row_idx + 2}")
     
     filename = f"zone_report_{year}_{month if month else 'annual'}_{zone_name}.xlsx"
-    temp_dir = tempfile.gettempdir()
+    temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
     filepath = os.path.join(temp_dir, filename)
     
     wb.save(filepath)
@@ -439,7 +441,7 @@ def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=N
         filename = f"trade_report_{year}_all_branches.xlsx"
     
     # บันทึกไฟล์ใน temp directory
-    temp_dir = tempfile.gettempdir()
+    temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
     filepath = os.path.join(temp_dir, filename)
     
     wb.save(filepath)
@@ -591,7 +593,7 @@ def generate_excel_report(trade_data, report_summary, date_start, date_end):
     # บันทึกไฟล์
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"trade_report_{date_str}.xlsx"
-    temp_dir = tempfile.gettempdir()
+    temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
     filepath = os.path.join(temp_dir, filename)
     
     wb.save(filepath)
