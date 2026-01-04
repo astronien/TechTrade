@@ -461,6 +461,31 @@
                     4. Copy ค่าที่ได้มาวางที่นี่
                 </p>
                 </p>
+
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #ff9800;">🤖 Eve System Credentials (Bot)</h3>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                        ใส่รหัสผ่านระบบ Eve เพื่อให้ระบบช่วยดึงข้อมูลอัตโนมัติ (Active Update)
+                    </p>
+                    <label>Username</label>
+                    <input type="text" id="settingEveUser" placeholder="Eve Username">
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>Password</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="password" id="settingEvePass" placeholder="Eve Password" style="flex: 1;">
+                        <button onclick="togglePasswordVisibility('settingEvePass')"
+                            style="padding: 10px; width: 40px;">👁️</button>
+                    </div>
+                    <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+                        <button onclick="runBotUpdate()"
+                            style="background-color: #ff9800; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                            🤖 Run Bot Now
+                        </button>
+                        <span id="botStatus" style="font-size: 12px; color: #666;">(ทดสอบระบบ Active Update)</span>
+                    </div>
+                </div>
                 <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
                 <h3 style="font-size: 1.1em; margin-bottom: 15px; color: #28a745;">🔄 อัปเดตข้อมูลสาขา</h3>
                 <div class="form-group" style="margin-bottom: 15px;">
@@ -587,36 +612,57 @@
 
         // ฟังก์ชันดึงรายการสาขา
         // ฟังก์ชันดึงรายการสาขา (ใช้ข้อมูล Hardcode จาก branches-data.js)
-        function loadBranches() {
+        // ฟังก์ชันดึงรายการสาขา (API)
+        async function loadBranches() {
             const branchSelect = document.getElementById('branchSelect');
             const reportBranchSelect = document.getElementById('reportBranchSelect');
             const branchStatus = document.getElementById('branchStatus');
             const reportBranchStatus = document.getElementById('reportBranchStatus');
 
-            // ตรวจสอบว่ามีข้อมูล BRANCHES_DATA หรือไม่
-            if (typeof BRANCHES_DATA === 'undefined' || !BRANCHES_DATA || BRANCHES_DATA.length === 0) {
-                console.error('❌ ไม่พบข้อมูล BRANCHES_DATA');
-                branchStatus.textContent = '❌ ไม่พบข้อมูลสาขา';
+            branchStatus.textContent = '⏳ กำลังโหลด...';
+            reportBranchStatus.textContent = '⏳ กำลังโหลด...';
+
+            try {
+                // 1. ลองดึงจาก API (Database)
+                const response = await fetch('/api/branches');
+                const result = await response.json();
+
+                if (result.success && result.branches && result.branches.length > 0) {
+                    console.log(`✅ Loaded ${result.branches.length} branches from ${result.source}`);
+                    populateBranchDropdown(result.branches);
+                    return;
+                }
+            } catch (error) {
+                console.warn('⚠️ API load failed, trying fallback:', error);
+            }
+
+            // 2. Fallback: ถ้า API พัง ให้ลองใช้ตัวแปร global (ถ้ามี)
+            if (typeof BRANCHES_DATA !== 'undefined' && BRANCHES_DATA && BRANCHES_DATA.length > 0) {
+                console.log('⚠️ Using static BRANCHES_DATA fallback');
+                populateBranchDropdown(BRANCHES_DATA);
+
+                // Passive Update: ข้อมูลอาจจะเก่า ลอง trigger update แบบเงียบๆ
+                autoUpdateBranches(true);
+            } else {
+                console.error('❌ ไม่พบข้อมูลสาขาเลย');
+                // Try passive update even if everything failed, maybe we have a session
+                await autoUpdateBranches(true);
+
+                // Check again
+                const retryResponse = await fetch('/api/branches');
+                const retryResult = await retryResponse.json();
+                if (retryResult.success && retryResult.branches && retryResult.branches.length > 0) {
+                    populateBranchDropdown(retryResult.branches);
+                    return;
+                }
+
+                branchStatus.textContent = '❌ ไม่พบข้อมูลสาขา (กรุณาลอง Login ใหม่)';
                 branchStatus.className = 'form-text text-danger';
                 reportBranchStatus.textContent = '❌ ไม่พบข้อมูลสาขา';
                 reportBranchStatus.className = 'form-text text-danger';
-                return;
             }
-
-            // แสดงข้อมูลใน dropdown
-            populateBranchDropdown(BRANCHES_DATA);
-
-            // อัพเดทสถานะ
-            branchStatus.textContent = `✅ โหลด ${BRANCHES_DATA.length} สาขา`;
-            branchStatus.className = 'form-text text-success';
-            reportBranchStatus.textContent = `✅ โหลด ${BRANCHES_DATA.length} สาขา`;
-            reportBranchStatus.className = 'form-text text-success';
-
-            console.log(`✅ โหลดสาขาสำเร็จ: ${BRANCHES_DATA.length} สาขา`);
-
-            // โหลด Zone dropdown
-            loadZones();
         }
+
 
         // ฟังก์ชันโหลด Zone dropdown
         async function loadZones() {
@@ -738,23 +784,33 @@
 
 
         // ฟังก์ชันอัปเดตสาขา (Hybrid)
-        async function autoUpdateBranches() {
+        // ฟังก์ชันอัปเดตสาขา (Hybrid)
+        async function autoUpdateBranches(silent = false) {
             const sessionIdInput = document.getElementById('settingSessionId');
             const resultElem = document.getElementById('updateBranchResult');
-            const sessionId = sessionIdInput.value.trim();
+            let sessionId = sessionIdInput.value.trim();
+
+            // ถ้าเป็น silent mode และไม่มี value ใน input ให้ลองดูใน localStorage
+            if (silent && !sessionId) {
+                sessionId = localStorage.getItem('sessionId');
+            }
 
             if (!sessionId) {
-                alert('กรุณากรอก Session ID ก่อนกดอัปเดต');
-                sessionIdInput.focus();
+                if (!silent) {
+                    alert('กรุณากรอก Session ID ก่อนกดอัปเดต');
+                    sessionIdInput.focus();
+                }
                 return;
             }
 
-            if (!confirm('ต้องการดึงรายชื่อสาขาล่าสุดจากระบบใช่หรือไม่?\n(อาจใช้เวลาสักครู่)')) {
+            if (!silent && !confirm('ต้องการดึงรายชื่อสาขาล่าสุดจากระบบใช่หรือไม่?\n(อาจใช้เวลาสักครู่)')) {
                 return;
             }
 
-            resultElem.textContent = '⏳ กำลังติดต่อ Server...';
-            resultElem.className = 'form-text text-info';
+            if (!silent) {
+                resultElem.textContent = '⏳ กำลังติดต่อ Server...';
+                resultElem.className = 'form-text text-info';
+            }
 
             try {
                 const response = await fetch('/api/admin/update-branches', {
@@ -768,30 +824,33 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    if (result.manual_copy_needed) {
-                        // กรณีเขียนไฟล์ไม่ได้ (Vercel)
-                        resultElem.innerHTML = `✅ ${result.message}<br><textarea style="width:100%; height:100px; margin-top:10px; font-size:10px;">${result.branches_json}</textarea>`;
-                        resultElem.className = 'form-text text-warning';
-                        alert(`✅ ดึงข้อมูลสำเร็จ! แต่ Server เขียนไฟล์ไม่ได้\n\nกรุณา Copy ข้อมูลในช่อง Textbox ส่งให้ Developer อัปเดตไฟล์ครับ`);
-                    } else {
-                        // กรณีเขียนไฟล์ได้ปกติ
-                        resultElem.textContent = `✅ ${result.message}`;
+                    console.log(`✅ Branch update successful: ${result.count} branches`);
+                    if (!silent) {
+                        resultElem.textContent = `✅ อัปเดตสำเร็จ! (${result.count} สาขา)`;
                         resultElem.className = 'form-text text-success';
-                        alert(`✅ สำเร็จ!\nพบทั้งหมด ${result.count} สาขา\n\nระบบจะรีโหลดหน้าเว็บเพื่อใช้ข้อมูลใหม่...`);
-                        location.reload();
+                        alert(`✅ อัปเดตข้อมูลสาขาเรียบร้อย (${result.count} สาขา)`);
+                        // Reload branches via API call
+                        loadBranches();
+                    } else {
+                        // Silent update success -> reload dropdown
+                        populateBranchDropdown(await (await fetch('/api/branches')).json().then(r => r.branches));
                     }
                 } else {
-                    resultElem.textContent = `❌ ${result.error}`;
-                    resultElem.className = 'form-text text-danger';
-                    alert(`❌ เกิดข้อผิดพลาด: ${result.error}`);
+                    if (!silent) {
+                        resultElem.textContent = `❌ ${result.error}`;
+                        resultElem.className = 'form-text text-danger';
+                    }
+                    console.warn('Branch update failed:', result.error);
                 }
             } catch (error) {
-                console.error('Update branches error:', error);
-                resultElem.textContent = `❌ เชื่อมต่อ Server ไม่เลสำเร็จ`;
-                resultElem.className = 'form-text text-danger';
-                alert('❌ ไม่สามารถติดต่อ Server ได้');
+                console.error('Error updating branches:', error);
+                if (!silent) {
+                    resultElem.textContent = `❌ Error: ${error.message}`;
+                    resultElem.className = 'form-text text-danger';
+                }
             }
         }
+
         document.addEventListener('DOMContentLoaded', () => {
             const branchSelect = document.getElementById('branchSelect');
             const reportBranchSelect = document.getElementById('reportBranchSelect');
@@ -1176,13 +1235,24 @@
             document.getElementById('settingsModal').classList.remove('show');
         }
 
-        function saveSettings() {
+        function togglePasswordVisibility(id) {
+            const input = document.getElementById(id);
+            if (input.type === 'password') {
+                input.type = 'text';
+            } else {
+                input.type = 'password';
+            }
+        }
+
+        async function saveSettings() {
             const empCode = document.getElementById('settingEmpCode').value;
             const empName = document.getElementById('settingEmpName').value;
             const empPhone = document.getElementById('settingEmpPhone').value;
             const cancelType = document.getElementById('settingCancelType').value;
             const reasonCancel = document.getElementById('settingReasonCancel').value;
             const sessionId = document.getElementById('settingSessionId').value;
+            const eveUser = document.getElementById('settingEveUser').value;
+            const evePass = document.getElementById('settingEvePass').value;
 
             if (!empCode || !empName || !empPhone) {
                 alert('⚠️ กรุณากรอกข้อมูลพนักงานให้ครบถ้วน');
@@ -1194,6 +1264,28 @@
                 return;
             }
 
+            // ส่งค่า Eve Credentials ไปยัง Server (ถ้ามีการกรอก)
+            if (eveUser || evePass) {
+                try {
+                    const response = await fetch('/api/admin/system-settings', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            eve_username: eveUser,
+                            eve_password: evePass
+                        })
+                    });
+                    const result = await response.json();
+                    if (!result.success) {
+                        console.error('❌ Error saving system settings:', result.error);
+                    }
+                } catch (error) {
+                    console.error('❌ Error saving system settings:', error);
+                }
+            }
+
             // บันทึกลง localStorage
             localStorage.setItem('empCode', empCode);
             localStorage.setItem('empName', empName);
@@ -1201,6 +1293,7 @@
             localStorage.setItem('cancelType', cancelType);
             localStorage.setItem('reasonCancel', reasonCancel);
             localStorage.setItem('sessionId', sessionId);
+            // ไม่ save eve pass ใน local storage เพื่อความปลอดภัย
 
             alert('✅ บันทึกข้อมูลเรียบร้อย');
             closeSettings();
@@ -1303,6 +1396,49 @@
                 if (!zone) {
                     alert('❌ ไม่พบ Zone ที่เลือก');
                     return;
+                }
+
+                async function runBotUpdate() {
+                    const botStatus = document.getElementById('botStatus');
+                    const eveUser = document.getElementById('settingEveUser').value;
+                    const evePass = document.getElementById('settingEvePass').value;
+
+                    if (!eveUser || !evePass) {
+                        alert('⚠️ กรุณากรอก Username และ Password ก่อนทดสอบ Bot');
+                        return;
+                    }
+
+                    // Auto Save Credentials first before running
+                    await saveSettings();
+
+                    if (!confirm('ต้องการให้ Bot ลอง Login และดึงข้อมูลหรือไม่?\n(ขั้นตอนนี้อาจใช้เวลา 10-30 วินาที)')) {
+                        return;
+                    }
+
+                    botStatus.innerHTML = '⏳ กำลังทำงาน... (Bot กำลัง Login)';
+                    botStatus.style.color = '#ff9800';
+
+                    try {
+                        const response = await fetch('/api/admin/run-bot', {
+                            method: 'POST'
+                        });
+                        const result = await response.json();
+
+                        if (result.success) {
+                            botStatus.innerHTML = `✅ สำเร็จ! Updated ${result.count} branches`;
+                            botStatus.style.color = 'green';
+                            alert(`✅ Bot Login สำเร็จ!\n\nดึงข้อมูลมาได้ทั้งหมด ${result.count} สาขา`);
+                            // Refresh current view
+                            loadBranches();
+                        } else {
+                            botStatus.innerHTML = `❌ ล้มเหลว: ${result.error}`;
+                            botStatus.style.color = 'red';
+                            alert(`❌ Bot Login ล้มเหลว\n\nสาเหตุ: ${result.error}\n\nกรุณาเช็ค Username/Password หรือลองกด Login เองเพื่อให้แน่ใจว่ารหัสถูก`);
+                        }
+                    } catch (error) {
+                        botStatus.innerHTML = `❌ Error: ${error.message}`;
+                        botStatus.style.color = 'red';
+                    }
                 }
 
                 closeAnnualReportModal();

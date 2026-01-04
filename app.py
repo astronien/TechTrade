@@ -58,15 +58,25 @@ def init_database():
             )
         """)
         
-        # สร้างตาราง admin_users
+        # สร้างตาราง cached_branches (เก็บรายชื่อสาขา)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS admin_users (
+            CREATE TABLE IF NOT EXISTS cached_branches (
                 id SERIAL PRIMARY KEY,
-                username VARCHAR(255) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                branch_data JSONB NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # สร้างตาราง system_settings (เก็บ Session ID และ User/Pass ของ Eve)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key VARCHAR(255) PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # สร้างตาราง admin_users
         
         # สร้าง admin user เริ่มต้น
         default_password = hashlib.sha256('teehid1234'.encode()).hexdigest()
@@ -96,7 +106,256 @@ except Exception as e:
     print(f"⚠️ Database initialization failed: {e}")
     print("⚠️ App will continue without database support")
 
-# API Configuration
+# ==========================================
+# Database Helper Functions for Branch & Settings
+# ==========================================
+
+from flask import g
+
+def save_branches_to_db(branches_list):
+    """บันทึกรายชื่อสาขาลง Database (cached_branches)"""
+    conn = get_db_connection()
+    if not conn:
+        print("⚠️ No database connection, falling back to memory/file")
+        return False
+        
+    try:
+        cur = conn.cursor()
+        # ลบข้อมูลเก่าทิ้ง (เราเก็บแค่ version ล่าสุดก็พอ)
+        cur.execute("TRUNCATE TABLE cached_branches")
+        
+        # บันทึกข้อมูลใหม่
+        cur.execute("""
+            INSERT INTO cached_branches (branch_data)
+            VALUES (%s)
+        """, (json.dumps(branches_list, ensure_ascii=False),))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"✅ Saved {len(branches_list)} branches to database")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving branches to DB: {e}")
+        if conn: conn.close()
+        return False
+
+def get_branches_from_db():
+    """ดึงรายชื่อสาขาจาก Database"""
+    conn = get_db_connection()
+    if not conn:
+        return []
+        
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT branch_data FROM cached_branches ORDER BY updated_at DESC LIMIT 1")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            return row['branch_data']
+        return []
+    except Exception as e:
+        print(f"❌ Error fetching branches from DB: {e}")
+        if conn: conn.close()
+        return []
+
+def save_system_setting(key, value):
+    """บันทึกการตั้งค่าระบบลง DB"""
+    conn = get_db_connection()
+    if not conn: return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (key) 
+            DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+        """, (key, value))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Error saving setting {key}: {e}")
+        if conn: conn.close()
+        return False
+
+def get_system_setting(key):
+    """ดึงการตั้งค่าระบบจาก DB"""
+    conn = get_db_connection()
+    if not conn: return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            return row['value']
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching setting {key}: {e}")
+        if conn: conn.close()
+        return None
+
+def trigger_branch_update(session_id):
+    """ฟังก์ชันกลางสำหรับสั่งอัปเดตสาขา"""
+    try:
+        print(f"🔄 Triggering branch update with Session ID: {session_id[:10]}...")
+        url = 'https://eve.techswop.com/TI/inventory/stock-view-list.aspx/GetDropDownBranch'
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cookie': f'ASP.NET_SessionId={session_id}'
+        }
+        
+        response = requests.post(url, headers=headers, json={})
+        
+        if response.status_code == 200:
+            result = response.json()
+            branches_list = []
+            
+            # Extract Data
+            if 'd' in result:
+                raw_data = result['d']
+                if isinstance(raw_data, str):
+                    branches_list = json.loads(raw_data)
+                elif isinstance(raw_data, list):
+                    branches_list = raw_data
+                elif isinstance(raw_data, dict) and 'data' in raw_data:
+                    branches_list = raw_data['data']
+            elif isinstance(result, list):
+                branches_list = result
+                
+            if branches_list:
+                # Format Data
+                formatted_branches = []
+                for b in branches_list:
+                    bid = b.get('BRANCH_ID') or b.get('branch_id') or b.get('Value') or b.get('Id')
+                    bname = b.get('BRANCH_NAME') or b.get('branch_name') or b.get('Text') or b.get('Name')
+                    if bid and bname:
+                        formatted_branches.append({"branch_id": bid, "branch_name": bname})
+                
+                # Save to DB
+                if formatted_branches:
+                    save_branches_to_db(formatted_branches)
+                    return True, len(formatted_branches)
+                    
+        return False, 0
+    except Exception as e:
+        print(f"❌ Trigger update failed: {e}")
+        return False, 0
+
+# ==========================================
+# Bot / Auto-Login Logic
+# ==========================================
+import re
+
+def extract_aspnet_fields(html_content):
+    """Extract ASP.NET hidden fields needed for POST requests"""
+    fields = {}
+    try:
+        if isinstance(html_content, bytes):
+            html_content = html_content.decode('utf-8', errors='ignore')
+            
+        viewstate_match = re.search(r'id="__VIEWSTATE" value="([^"]+)"', html_content)
+        if viewstate_match:
+            fields['__VIEWSTATE'] = viewstate_match.group(1)
+            
+        generator_match = re.search(r'id="__VIEWSTATEGENERATOR" value="([^"]+)"', html_content)
+        if generator_match:
+            fields['__VIEWSTATEGENERATOR'] = generator_match.group(1)
+            
+        validation_match = re.search(r'id="__EVENTVALIDATION" value="([^"]+)"', html_content)
+        if validation_match:
+            fields['__EVENTVALIDATION'] = validation_match.group(1)
+            
+    except Exception as e:
+        print(f"⚠️ Error extracting ASP.NET fields: {e}")
+        
+    return fields
+
+def perform_eve_login():
+    """Log in to Eve System using stored credentials (Bot)"""
+    try:
+        # 1. Get Credentials
+        username = get_system_setting('eve_username')
+        password = get_system_setting('eve_password')
+        
+        if not username or not password:
+            print("❌ Bot Login failed: No credentials stored.")
+            return None
+            
+        print(f"🤖 Bot attempting login as: {username}...")
+        
+        session = requests.Session()
+        login_url = 'https://eve.techswop.com/TI/login.aspx'
+        
+        # 2. GET Login Page (to parse ViewState)
+        response_get = session.get(login_url, timeout=30)
+        if response_get.status_code != 200:
+            print(f"❌ Bot Login failed: GET page returned {response_get.status_code}")
+            return None
+            
+        hidden_fields = extract_aspnet_fields(response_get.content)
+        if '__VIEWSTATE' not in hidden_fields:
+            print("❌ Bot Login failed: Could not find __VIEWSTATE")
+            return None
+            
+        # 3. POST Credentials
+        payload = {
+            'txtUsername': username,
+            'txtPassword': password,
+            'btnLogin': 'Login', 
+            **hidden_fields
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': login_url,
+            'Origin': 'https://eve.techswop.com',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        response_post = session.post(login_url, data=payload, headers=headers, timeout=30)
+        
+        # 4. Check Success
+        cookies = session.cookies.get_dict()
+        session_id = cookies.get('ASP.NET_SessionId')
+        
+        if session_id:
+            print(f"✅ Bot Login Successful! Session ID: {session_id[:10]}...")
+            return session_id
+            
+        print("❌ Bot Login failed: Invalid credentials or captcha?")
+        return None
+
+    except Exception as e:
+        print(f"❌ Bot Login Error: {e}")
+        return None
+
+@app.route('/api/admin/run-bot', methods=['POST'])
+def run_bot_update():
+    """API to manually trigger the Bot"""
+    try:
+        session_id = perform_eve_login()
+        if not session_id:
+            return jsonify({'success': False, 'error': 'Bot Login Failed (Check logs/credentials)'}), 400
+            
+        # Trigger update with new session
+        success, count = trigger_branch_update(session_id)
+        
+        return jsonify({
+            'success': success,
+            'message': f'Bot Login Successful! Updated {count} branches.',
+            'count': count
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 API_URL = "https://eve.techswop.com/ti/index.aspx/Getdata"
 BRANCH_ID = "231"  # สาขาเดิมที่ใช้ได้
 
@@ -2263,8 +2522,8 @@ def generate_annual_excel_from_data():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/admin/update-branches', methods=['POST'])
-def update_branches_data():
+# @app.route('/api/admin/update-branches', methods=['POST']) # DEPRECATED
+def update_branches_data_deprecated():
     """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
     try:
         data = request.get_json()
@@ -2378,6 +2637,83 @@ const BRANCHES_DATA = {json.dumps(formatted_branches, ensure_ascii=False, indent
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
+
+
+# ==========================================
+# New Branch API Endpoints (DB-backed)
+# ==========================================
+
+@app.route('/api/branches', methods=['GET'])
+def get_all_branches():
+    """API endpoint สำหรับดึงรายชื่อสาขา (จาก Database)"""
+    try:
+        # 1. พยายามดึงจาก DB
+        branches = get_branches_from_db()
+        
+        # 2. ถ้าไม่มีใน DB ให้ลองดึงจากไฟล์เดิม (Fallback)
+        if not branches:
+            print("⚠️ No branches in DB, checking static file...")
+            try:
+                json_path = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+                if os.path.exists(json_path):
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        branches = json.load(f)
+            except Exception as e:
+                print(f"⚠️ File fallback failed: {e}")
+        
+        return jsonify({
+            'success': True,
+            'branches': branches,
+            'source': 'database' if branches else 'static_file'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/system-settings', methods=['POST'])
+def save_admin_settings():
+    """API สำหรับบันทึกการตั้งค่า (Eve Credentials)"""
+    try:
+        data = request.get_json()
+        eve_username = data.get('eve_username')
+        eve_password = data.get('eve_password')
+        
+        if eve_username:
+            save_system_setting('eve_username', eve_username)
+        if eve_password:
+            save_system_setting('eve_password', eve_password)
+            
+        return jsonify({'success': True, 'message': 'Settings saved'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/update-branches', methods=['POST'])
+def update_branches_data():
+    """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
+    try:
+        data = request.get_json()
+        session_id = data.get('sessionId')
+        
+        if not session_id:
+            return jsonify({'success': False, 'error': 'กรุณาระบุ Session ID'}), 400
+            
+        # ใช้ Helper Function ใหม่ที่เขียนข้อมูลลง DB
+        print(f"🔄 Updating branches via DB Helper...")
+        success, count = trigger_branch_update(session_id)
+        
+        if success:
+             return jsonify({
+                'success': True, 
+                'message': f'อัปเดตสาขาเรียบร้อย ({count} สาขา)',
+                'count': count
+            })
+        else:
+             return jsonify({'success': False, 'error': 'Failed to update branches from external API'}), 500
+
+    except Exception as e:
+        print(f"❌ Error in update_branches_data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
