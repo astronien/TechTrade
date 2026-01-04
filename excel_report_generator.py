@@ -179,37 +179,44 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     if month:
         # Loop 1-31
         data_range = range(1, num_days + 1)
-        total_by_period = [0] * num_days
+        total_assessed_by_period = [0] * num_days
+        total_agreed_by_period = [0] * num_days
         total_col_idx = num_days + 2
     else:
         # Loop 1-12
         data_range = range(1, 13)
-        total_by_period = [0] * 12
+        total_assessed_by_period = [0] * 12
+        total_agreed_by_period = [0] * 12
         total_col_idx = 14
 
-    grand_total = 0
+    grand_total_assessed = 0
+    grand_total_agreed = 0
 
     for branch in branches_data:
         branch_name_display = branch.get('branch_name', f"สาขา {branch.get('branch_id')}")
         if ' : ' in branch_name_display:
             branch_name_display = branch_name_display.split(' : ')[-1]
         
-        counts = branch.get('monthly_counts', {}) # This will be daily_counts if month is specified
+        counts = branch.get('monthly_counts', {}) 
         
-        # ชื่อสาขา
+        # --- Row 1: Assessed (ส่งประเมิน) ---
         cell = ws.cell(row=row_idx, column=1)
-        cell.value = branch_name_display
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+        cell.value = f"{branch_name_display} (ส่งประเมิน)"
+        cell.font = Font(bold=False)
+        cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid") # Yellow
         cell.alignment = Alignment(horizontal='left', vertical='center')
         
-        branch_total = 0
+        branch_total_assessed = 0
         
-        # ข้อมูลแต่ละเดือน/วัน
         for period_num in data_range:
             col_idx = period_num + 1
-            count = counts.get(period_num, 0)
-            
+            # Handle both int (legacy) and dict (new)
+            val = counts.get(period_num, 0)
+            if isinstance(val, dict):
+                count = val.get('assessed', 0)
+            else:
+                count = val
+                
             cell = ws.cell(row=row_idx, column=col_idx)
             cell.value = count
             cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -219,36 +226,100 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
             if count > 0:
                 cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
             
-            total_by_period[period_num - 1] += count
-            branch_total += count
+            total_assessed_by_period[period_num - 1] += count
+            branch_total_assessed += count
         
-        # คอลัมน์รวมของสาขา
+        # Total Assessed Column
         cell = ws.cell(row=row_idx, column=total_col_idx)
-        cell.value = branch_total
+        cell.value = branch_total_assessed
         cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="d4edda", end_color="d4edda", fill_type="solid")
+        cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
         cell.alignment = Alignment(horizontal='center', vertical='center')
         
-        grand_total += branch_total
+        grand_total_assessed += branch_total_assessed
+        row_idx += 1
+        
+        # --- Row 2: Agreed (ตกลงขาย) ---
+        cell = ws.cell(row=row_idx, column=1)
+        cell.value = f"{branch_name_display} (ตกลงขาย)"
+        cell.font = Font(bold=False)
+        cell.fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Green
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        
+        branch_total_agreed = 0
+        
+        for period_num in data_range:
+            col_idx = period_num + 1
+            # Handle both int (legacy) and dict (new)
+            val = counts.get(period_num, 0)
+            if isinstance(val, dict):
+                count = val.get('agreed', 0)
+            else:
+                count = 0 # Legacy has no agreed count data
+                
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.value = count
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                                top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            # Highlight if count > 0
+            # if count > 0:
+            #    cell.font = Font(color="006100") 
+            
+            total_agreed_by_period[period_num - 1] += count
+            branch_total_agreed += count
+
+        # Total Agreed Column
+        cell = ws.cell(row=row_idx, column=total_col_idx)
+        cell.value = branch_total_agreed
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        grand_total_agreed += branch_total_agreed
         row_idx += 1
     
-    # แถวรวมทั้งหมด
+    # --- Grand Totals ---
+    # Total Assessed
     cell = ws.cell(row=row_idx, column=1)
-    cell.value = 'รวมทั้งหมด'
-    cell.font = Font(bold=True, color="FFFFFF")
-    cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+    cell.value = 'รวมส่งประเมิน'
+    cell.font = Font(bold=True)
+    cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
     cell.alignment = Alignment(horizontal='center', vertical='center')
     
     for period_num in data_range:
         col_idx = period_num + 1
         cell = ws.cell(row=row_idx, column=col_idx)
-        cell.value = total_by_period[period_num - 1]
+        cell.value = total_assessed_by_period[period_num - 1]
         cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="d1ecf1", end_color="d1ecf1", fill_type="solid")
+        cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
         cell.alignment = Alignment(horizontal='center', vertical='center')
     
     cell = ws.cell(row=row_idx, column=total_col_idx)
-    cell.value = grand_total
+    cell.value = grand_total_assessed
+    cell.font = Font(bold=True)
+    cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
+    
+    row_idx += 1
+
+    # Total Agreed
+    cell = ws.cell(row=row_idx, column=1)
+    cell.value = 'รวมตกลงขาย'
+    cell.font = Font(bold=True, color="FFFFFF")
+    cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    for period_num in data_range:
+        col_idx = period_num + 1
+        cell = ws.cell(row=row_idx, column=col_idx)
+        cell.value = total_agreed_by_period[period_num - 1]
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    cell = ws.cell(row=row_idx, column=total_col_idx)
+    cell.value = grand_total_agreed
     cell.font = Font(bold=True, color="FFFFFF")
     cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
     cell.alignment = Alignment(horizontal='center', vertical='center')

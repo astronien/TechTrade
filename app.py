@@ -1956,8 +1956,9 @@ def get_annual_report_data():
         if month:
             # รายงานรายเดือน - นับรายวัน
             num_days = calendar.monthrange(year, month)[1]
-            daily_counts = defaultdict(int)
-            total_records = 0
+            daily_counts = defaultdict(lambda: {'assessed': 0, 'agreed': 0})
+            total_assessed = 0
+            total_agreed = 0
             
             # ดึงข้อมูลทั้งเดือน
             last_day = calendar.monthrange(year, month)[1]
@@ -1974,15 +1975,18 @@ def get_annual_report_data():
             }
             
             print(f"🔍 DEBUG: Fetching daily data for month {month}")
-            print(f"   - date_start: {date_start}")
-            print(f"   - date_end: {date_end}")
             
             # ดึงข้อมูลทั้งหมดของเดือนนั้น
             all_items = fetch_all_for_branch(filters)
-            total_records = len(all_items)
+            total_assessed = len(all_items)
             
             # นับตามวัน
             for item in all_items:
+                # Count Agreed (Status 3)
+                is_agreed = (item.get('status') == 3)
+                if is_agreed:
+                    total_agreed += 1
+
                 doc_date = item.get('document_date', '')
                 if doc_date and doc_date.startswith('/Date('):
                     timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
@@ -1990,17 +1994,21 @@ def get_annual_report_data():
                         timestamp = int(timestamp_match.group(1)) / 1000
                         date_obj = datetime.fromtimestamp(timestamp)
                         if date_obj.year == year and date_obj.month == month:
-                            daily_counts[date_obj.day] += 1
+                            daily_counts[date_obj.day]['assessed'] += 1
+                            if is_agreed:
+                                daily_counts[date_obj.day]['agreed'] += 1
             
             # สร้าง array ข้อมูลรายวัน
             daily_data = []
             for day in range(1, num_days + 1):
                 daily_data.append({
                     'day': day,
-                    'count': daily_counts.get(day, 0)
+                    'count': daily_counts[day]['assessed'], # Backwards compatibility
+                    'assessed': daily_counts[day]['assessed'],
+                    'agreed': daily_counts[day]['agreed']
                 })
             
-            print(f"✅ Total records: {total_records}")
+            print(f"✅ Total Assessed: {total_assessed}, Agreed: {total_agreed}")
             
             # หาชื่อสาขา
             branch_name = None
@@ -2017,18 +2025,20 @@ def get_annual_report_data():
                 'month': month,
                 'branch_id': branch_id,
                 'branch_name': branch_name,
-                'total_records': total_records,
+                'total_records': total_assessed,
+                'total_agreed': total_agreed,
                 'daily_data': daily_data
             })
         else:
             # รายงานรายปี - นับรายเดือน
-            monthly_counts = defaultdict(int)
-            total_records = 0
+            monthly_counts = defaultdict(lambda: {'assessed': 0, 'agreed': 0})
+            total_assessed = 0
+            total_agreed = 0
             
             month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
                            'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
             
-            # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
+            # ดึงข้อมูลทีละเดือน
             for month_num in range(1, 13):
                 # ... (setup logic) ...
                 last_day = calendar.monthrange(year, month_num)[1]
@@ -2044,19 +2054,24 @@ def get_annual_report_data():
                     'branch_id': api_branch_id if api_branch_id else None
                 }
                 
-                # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
-                data = fetch_data_with_retry(start=0, length=1, **filters)
+                # Fetch FULL data for the month to iterate status
+                all_items = fetch_all_for_branch(filters)
+                count_assessed = len(all_items)
+                count_agreed = 0
                 
-                if 'error' not in data:
-                    count = data.get('recordsFiltered', 0)
-                    monthly_counts[month_num] = count
-                    total_records += count
-                    print(f"   🗓️ Month {month_num}: {count} records | Running Total: {total_records}")
-                else:
-                    print(f"   ❌ Month {month_num}: Error - {data.get('error')}")
-                    monthly_counts[month_num] = 0
+                for item in all_items:
+                    if item.get('status') == 3:
+                        count_agreed += 1
+                
+                monthly_counts[month_num]['assessed'] = count_assessed
+                monthly_counts[month_num]['agreed'] = count_agreed
+                
+                total_assessed += count_assessed
+                total_agreed += count_agreed
+                
+                print(f"   🗓️ Month {month_num}: {count_assessed} items ({count_agreed} agreed)")
             
-            print(f"✅ Total records: {total_records}")
+            print(f"✅ Year Total - Assessed: {total_assessed}, Agreed: {total_agreed}")
             
             # สร้าง array ข้อมูล 12 เดือน
             monthly_data = []
@@ -2064,7 +2079,9 @@ def get_annual_report_data():
                 monthly_data.append({
                     'month': month_names[month_num - 1],
                     'month_number': month_num,
-                    'count': monthly_counts.get(month_num, 0)
+                    'count': monthly_counts[month_num]['assessed'], # Backwards compatibility
+                    'assessed': monthly_counts[month_num]['assessed'],
+                    'agreed': monthly_counts[month_num]['agreed']
                 })
             
             # หาชื่อสาขา
@@ -2081,7 +2098,9 @@ def get_annual_report_data():
                 'year': year,
                 'branch_id': branch_id,
                 'branch_name': branch_name,
-                'total_records': total_records,
+                'branch_name': branch_name,
+                'total_records': total_assessed,
+                'total_agreed': total_agreed,
                 'monthly_data': monthly_data
             })
         
@@ -2478,10 +2497,16 @@ def generate_annual_excel_from_data():
                 for item in monthly_data:
                     # ถ้าเป็นรายปี
                     if 'month_number' in item:
-                        counts[int(item['month_number'])] = int(item['count'])
+                        counts[int(item['month_number'])] = {
+                            'assessed': int(item.get('assessed', item.get('count', 0))),
+                            'agreed': int(item.get('agreed', 0))
+                        }
                     elif 'day' in item:
                         # ถ้าเป็นรายเดือน
-                        counts[int(item['day'])] = int(item['count'])
+                        counts[int(item['day'])] = {
+                            'assessed': int(item.get('assessed', item.get('count', 0))),
+                            'agreed': int(item.get('agreed', 0))
+                        }
                 
                 formatted_branches.append({
                     'branch_id': b['branch_id'],
@@ -2498,16 +2523,20 @@ def generate_annual_excel_from_data():
             
         else:
             # รายงานสาขาเดียว (หรือแบบที่ส่ง raw processed data มา)
-            # data ในที่นี้คือ { year, branch_id, monthly_data: [{month:..., count:...}], ... }
+            # data ในที่นี้คือ { year, branch_id, monthly_data: [...], ... }
             
             costs = {}
             monthly_data = data.get('daily_data', data.get('monthly_data', []))
             
             for item in monthly_data:
+                valid_data = {
+                    'assessed': int(item.get('assessed', item.get('count', 0))),
+                    'agreed': int(item.get('agreed', 0))
+                }
                 if 'month_number' in item:
-                    costs[int(item['month_number'])] = int(item['count'])
+                    costs[int(item['month_number'])] = valid_data
                 elif 'day' in item:
-                    costs[int(item['day'])] = int(item['count'])
+                    costs[int(item['day'])] = valid_data
             
             branch_name = data.get('branch_name') or str(data.get('branch_id', 'Unknown'))
 
