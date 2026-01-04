@@ -4,13 +4,25 @@
     {
       "src": "app.py",
       "use": "@vercel/python",
-      "config": { "includeFiles": ["excel_report_generator.py", "templates/**", "static/**"] }
+      "config": {
+        "includeFiles": [
+          "excel_report_generator.py",
+          "templates/**",
+          "static/**"
+        ]
+      }
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
       "dest": "app.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/admin/run-bot",
+      "schedule": "0 0 * * *"
     }
   ]
 }

@@ -370,7 +370,7 @@ def perform_eve_login():
         return None, f"System Error: {str(e)}"
 
 
-@app.route('/api/admin/run-bot', methods=['POST'])
+@app.route('/api/admin/run-bot', methods=['POST', 'GET'])
 def run_bot_update():
     """API to manually trigger the Bot"""
     try:
