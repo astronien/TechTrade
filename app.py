@@ -255,6 +255,7 @@ def trigger_branch_update(session_id):
 # ==========================================
 import re
 
+
 def extract_aspnet_fields(html_content):
     """Extract ASP.NET hidden fields needed for POST requests"""
     fields = {}
@@ -262,17 +263,30 @@ def extract_aspnet_fields(html_content):
         if isinstance(html_content, bytes):
             html_content = html_content.decode('utf-8', errors='ignore')
             
-        viewstate_match = re.search(r'id="__VIEWSTATE" value="([^"]+)"', html_content)
-        if viewstate_match:
-            fields['__VIEWSTATE'] = viewstate_match.group(1)
-            
-        generator_match = re.search(r'id="__VIEWSTATEGENERATOR" value="([^"]+)"', html_content)
-        if generator_match:
-            fields['__VIEWSTATEGENERATOR'] = generator_match.group(1)
-            
-        validation_match = re.search(r'id="__EVENTVALIDATION" value="([^"]+)"', html_content)
-        if validation_match:
-            fields['__EVENTVALIDATION'] = validation_match.group(1)
+        # Regex ที่ยืดหยุ่นขึ้น (รองรับทั้ง id และ name, และสลับตำแหน่ง attribute)
+        patterns = {
+            '__VIEWSTATE': [
+                 r'id="__VIEWSTATE" value="([^"]+)"', 
+                 r'name="__VIEWSTATE" id="__VIEWSTATE" value="([^"]+)"',
+                 r'value="([^"]+)" id="__VIEWSTATE"',
+                 r'value="([^"]+)" name="__VIEWSTATE"'
+            ],
+            '__VIEWSTATEGENERATOR': [
+                r'id="__VIEWSTATEGENERATOR" value="([^"]+)"',
+                r'value="([^"]+)" id="__VIEWSTATEGENERATOR"'
+            ],
+            '__EVENTVALIDATION': [
+                r'id="__EVENTVALIDATION" value="([^"]+)"',
+                r'value="([^"]+)" id="__EVENTVALIDATION"'
+            ]
+        }
+        
+        for field, regex_list in patterns.items():
+            for regex in regex_list:
+                match = re.search(regex, html_content)
+                if match:
+                    fields[field] = match.group(1)
+                    break 
             
     except Exception as e:
         print(f"⚠️ Error extracting ASP.NET fields: {e}")
@@ -303,14 +317,16 @@ def perform_eve_login():
             
         hidden_fields = extract_aspnet_fields(response_get.content)
         if '__VIEWSTATE' not in hidden_fields:
-            print("❌ Bot Login failed: Could not find __VIEWSTATE")
+            print("❌ Bot Login failed: Could not find __VIEWSTATE. Content snippet:")
+            print(response_get.content[:500].decode('utf-8', errors='ignore'))
             return None
             
         # 3. POST Credentials
+        # พบว่าหน้าเว็บใช้ name="btnSignin" (แก้จาก btnLogin)
         payload = {
             'txtUsername': username,
             'txtPassword': password,
-            'btnLogin': 'Login', 
+            'btnSignin': 'เข้าสู่ระบบ',  # สำคัญ: ต้องใส่ value ให้ตรงกับหน้าเว็บ
             **hidden_fields
         }
         
@@ -327,11 +343,19 @@ def perform_eve_login():
         cookies = session.cookies.get_dict()
         session_id = cookies.get('ASP.NET_SessionId')
         
+        # Debug: Check response URL
+        print(f"👉 Post Login URL: {response_post.url}")
+        
         if session_id:
+            # ตรวจสอบเพิ่มเติมว่า Login จริงหรือเปล่า (ถ้าเด้งกลับมาหน้า Login แปลว่าผิด)
+            if '/login.aspx' in response_post.url.lower() and 'เข้าสู่ระบบ' in response_post.text:
+                 print("❌ Bot Login failed: Redirected back to login page (Wrong Credentials?)")
+                 return None
+
             print(f"✅ Bot Login Successful! Session ID: {session_id[:10]}...")
             return session_id
             
-        print("❌ Bot Login failed: Invalid credentials or captcha?")
+        print("❌ Bot Login failed: No Session ID returned.")
         return None
 
     except Exception as e:
