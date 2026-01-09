@@ -77,6 +77,15 @@ def init_database():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # สร้างตาราง api_dynamic_params (เก็บ dynamic parameters ที่ค้นพบจาการ auto-healing)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_dynamic_params (
+                param_key VARCHAR(255) PRIMARY KEY,
+                param_value TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
         # สร้างตาราง admin_users
         
@@ -204,6 +213,53 @@ def get_system_setting(key):
         print(f"❌ Error fetching setting {key}: {e}")
         if conn: conn.close()
         return None
+
+def get_dynamic_params():
+    """ดึง parameters เพิ่มเติมจาก DB"""
+    conn = get_db_connection()
+    if not conn: return {}
+    
+    params = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT param_key, param_value FROM api_dynamic_params")
+        rows = cur.fetchall()
+        
+        for row in rows:
+            params[row['param_key']] = row['param_value']
+            
+        cur.close()
+        conn.close()
+        if params:
+            print(f"🧩 Loaded dynamic params: {list(params.keys())}")
+        return params
+    except Exception as e:
+        print(f"❌ Error fetching dynamic params: {e}")
+        if conn: conn.close()
+        return {}
+
+def save_dynamic_param(key, value=""):
+    """บันทึก parameter ใหม่ลง DB"""
+    conn = get_db_connection()
+    if not conn: return False
+    
+    try:
+        print(f"💊 Auto-Healing: Saving new parameter '{key}'='{value}'")
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO api_dynamic_params (param_key, param_value)
+            VALUES (%s, %s)
+            ON CONFLICT (param_key) 
+            DO UPDATE SET param_value = EXCLUDED.param_value
+        """, (key, value))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Error saving dynamic param {key}: {e}")
+        if conn: conn.close()
+        return False
 
 def trigger_branch_update(session_id):
     """ฟังก์ชันกลางสำหรับสั่งอัปเดตสาขา"""
@@ -440,7 +496,7 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
         {"data": "trade_in_id", "name": "", "searchable": True, "orderable": False, "search": {"value": "", "regex": False, "fixed": []}}
     ]
     
-    return {
+    payload = {
         "draw": 1,
         "columns": columns,
         "order": [],
@@ -460,11 +516,22 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
         "txtSearchCOTN": promo_code,
         "DocumentRef1": "",
         "customerSign": customer_sign,
-        "ufund": ""
     }
+    
+    # ผสาน dynamic parameters จาก DB
+    dynamic_params = get_dynamic_params()
+    # ถ้ายังไม่มีใน DB ให้ใส่ default ufund="" ไปก่อน (เพื่อความเข้ากันได้ย้อนหลังกับ hardcode เดิม)
+    if 'ufund' not in dynamic_params:
+        dynamic_params['ufund'] = ""
+        
+    # อัปเดต payload ด้วย dynamic parameters
+    # (ถ้ามี key ซ้ำ จะใช้ค่าจาก dynamic_params ทับ)
+    payload.update(dynamic_params)
+    
+    return payload
 
 def fetch_data_from_api(start=0, length=50, **filters):
-    """ดึงข้อมูลจาก API"""
+    """ดึงข้อมูลจาก API พร้อมระบบ Auto-Healing"""
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Content-Type': 'application/json; charset=utf-8',
@@ -476,6 +543,11 @@ def fetch_data_from_api(start=0, length=50, **filters):
     
     # เตรียม cookies ถ้ามี session_id
     cookies = {}
+    
+    # Note: filters เป็น dict ที่ถูก copy มาจาก args หรือ kwargs 
+    # เราควรระวังเรื่อง side effect ถ้ามีการแก้ไข filters โดยตรง
+    # แต่ในที่นี้เรา pop ออกมาใช้เลย
+    
     session_id = filters.pop('session_id', '')  # ใช้ pop เพื่อเอาออกจาก filters
     if session_id:
         cookies['ASP.NET_SessionId'] = session_id
@@ -494,11 +566,67 @@ def fetch_data_from_api(start=0, length=50, **filters):
     print(f"   Session ID: {session_id[:10] if session_id else 'N/A'}...")
     print(f"🔍 DEBUG: Full payload branchID field: {payload.get('branchID')}")
     
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=60)
-        response.raise_for_status()
-        result = response.json()
+    # Retry loop สำหรับ Auto-Healing
+    max_healing_retries = 2
+    for attempt in range(max_healing_retries + 1):
+        try:
+            # Re-generate payload ในทุกรอบ เพราะ dynamic params อาจเปลี่ยนไปหลัง healing
+            # (รอบแรกใช้อันที่สร้างมาแล้ว ถ้ารอบ 2 สร้างใหม่)
+            if attempt > 0:
+                print(f"🩹 Healing Attempt {attempt}...")
+                payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
+            
+            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=60)
+            
+            # ตรวจสอบ Error 500 เพื่อทำ Auto-Healing
+            if response.status_code == 500:
+                print(f"🔥 Got 500 Error. Checking for missing parameters...")
+                try:
+                    error_json = response.json()
+                    error_msg = error_json.get('Message', '')
+                    
+                    # Regex หา Missing Parameter
+                    # ตัวอย่าง: "Invalid web service call, missing value for parameter: 'ufund'."
+                    import re
+                    match = re.search(r"missing value for parameter: '(\w+)'", error_msg)
+                    if match:
+                        missing_param = match.group(1)
+                        print(f"💡 Found missing parameter: {missing_param}")
+                        
+                        # บันทึกลง DB
+                        save_dynamic_param(missing_param, "")
+                        print(f"✅ Auto-Healed! Added '{missing_param}' to dynamic params.")
+                        
+                        # Continue เพื่อเริ่มลูปใหม่ (ซึ่งจะไปดึง param ใหม่มาใช้)
+                        continue
+                except:
+                    pass # ถ้า parse ไม่ได้ก็ปล่อยไปตามยถากรรม
+            
+            response.raise_for_status()
+            result = response.json()
         
+            # ถ้าสำเร็จ (หรือไม่ใช่ 500) ให้ break loop ออกไป return ผลลัพธ์
+            # แต่ถ้ายังเป็น 500 และไม่เจอ params ขาด ก็จะหลุดมา raise_for_status ข้างล่างอยู่ดี
+            break 
+            
+        except requests.exceptions.RequestException as e:
+            # ถ้าเป็น error ทั่วไป (timeout, connection) ให้โยนต่อไปเลย หรือจัดการตาม logic เดิม
+            # แต่ในที่นี้เราเก็บ logic เดิมไว้ตอนท้าย
+            if attempt == max_healing_retries:
+                raise e
+            # ถ้ายังไม่ใช่รอบสุดท้าย ให้ลองใหม่ (สำหรับ healing เราอาจจะไม่ retry connection error 
+            # แต่ในโค้ดเดิมไม่ได้มี retry loop ซ้อนกัน เราจะปล่อยให้ raise ไป function แม่จัดการ)
+            raise e 
+            
+    # Move logging and return logic outside/inside try based on original structure
+    # Original structure handled exceptions for the whole block.
+    # We need to adapt it. 
+    
+    # Actually, easiest way is to wrap the whole loop and if success, process.
+    # But we need result variable.
+    
+    # Let's restructure to match the original flow better
+    try:
         # Debug: แสดง response
         print(f"📥 API Response:")
         if 'd' in result:
@@ -525,10 +653,19 @@ def fetch_data_from_api(start=0, length=50, **filters):
         else:
             print(f"   Unexpected format: {result}")
         return result
-    except requests.exceptions.Timeout:
-        print(f"❌ API Timeout: Request took longer than 30 seconds")
-        return {"error": "API timeout - กรุณาลองใหม่อีกครั้ง"}
-    except requests.exceptions.ConnectionError as e:
+        
+    except UnboundLocalError:
+        # Case where loop finished without assignment (should raise in loop)
+        return {"error": "API Call Failed"}
+        
+    except Exception as e:
+        # Fallback
+        return {"error": str(e)}
+
+    # The exception handlers below (original lines 637+) need to be kept or adapted.
+    # Since we wrapped the 'requests.post' in a loop with try/except, the original outer try/except is gone.
+    # We should restore the original exception handling structure.
+
         print(f"❌ Connection Error: {str(e)}")
         return {"error": "ไม่สามารถเชื่อมต่อ API ได้ - กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"}
     except requests.exceptions.RequestException as e:

@@ -90,14 +90,31 @@ def main():
     from datetime import datetime
     today = datetime.now().strftime("%d/%m/%Y")
     
-    # Test 1: Standard Request
+    # Test 1: Standard Request using app.fetch_data_from_api
     print("\n--- Test 1: Standard Request ---")
-    debug_fetch_data(
+    
+    # We call the APP's function directly to verify everything including headers, retries, etc.
+    from app import fetch_data_from_api
+    
+    # Note: app.fetch_data_from_api returns a dict, not a request object
+    result = fetch_data_from_api(
         session_id=session_id,
         branch_id='231',
         date_start=today,
         date_end=today
     )
+    
+    if 'error' in result:
+         print(f"❌ API returned error: {result['error']}")
+    else:
+         print(f"✅ API Success! Records: {result.get('recordsTotal')}")
+         
+    # Optional: Check dynamic params
+    from app import get_dynamic_params
+    params = get_dynamic_params()
+    if params:
+        print(f"ℹ️ Current Dynamic Params: {params}")
+
 
 if __name__ == "__main__":
     main()
