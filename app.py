@@ -459,7 +459,8 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
         "txtSearchRef1": doc_ref_number,
         "txtSearchCOTN": promo_code,
         "DocumentRef1": "",
-        "customerSign": customer_sign
+        "customerSign": customer_sign,
+        "ufund": ""
     }
 
 def fetch_data_from_api(start=0, length=50, **filters):
