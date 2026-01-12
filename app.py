@@ -2175,16 +2175,20 @@ def get_annual_report_data():
             pass # (This block is not being edited, just context)
 
         if not month:
-            # รายงานรายปี - นับรายเดือน
-            monthly_counts = defaultdict(int)
+            # รายงานรายปี - นับรายเดือน (พร้อม agreed/not_agreed)
+            monthly_counts_all = defaultdict(int)
+            monthly_counts_agreed = defaultdict(int)
             total_records = 0
+            total_agreed = 0
             
             month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
                            'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
             
-            # ดึงข้อมูลทีละเดือน (เร็วกว่าดึงทั้งปี)
+            # สถานะที่ถือว่า "ตกลงเทรด"
+            AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+            
+            # ดึงข้อมูลทีละเดือน
             for month_num in range(1, 13):
-                # ... (setup logic) ...
                 last_day = calendar.monthrange(year, month_num)[1]
                 date_start = f"01/{month_num:02d}/{year}"
                 date_end = f"{last_day}/{month_num:02d}/{year}"
@@ -2198,27 +2202,39 @@ def get_annual_report_data():
                     'branch_id': api_branch_id if api_branch_id else None
                 }
                 
-                # เรียก API แค่ครั้งเดียวต่อเดือน (length=1 เพื่อดู recordsFiltered)
-                data = fetch_data_with_retry(start=0, length=1, **filters)
+                # ดึงข้อมูลจริงมานับ agreed/not_agreed
+                all_items = fetch_all_for_branch(filters)
+                month_total = len(all_items)
+                month_agreed = 0
                 
-                if 'error' not in data:
-                    count = data.get('recordsFiltered', 0)
-                    monthly_counts[month_num] = count
-                    total_records += count
-                    print(f"   🗓️ Month {month_num}: {count} records | Running Total: {total_records}")
-                else:
-                    print(f"   ❌ Month {month_num}: Error - {data.get('error')}")
-                    monthly_counts[month_num] = 0
+                for item in all_items:
+                    # ตรวจสอบว่าตกลงเทรดหรือไม่
+                    status = item.get('status')
+                    status_name = item.get('BIDDING_STATUS_NAME', '')
+                    is_agreed = (status == 3 or status_name in AGREED_STATUSES)
+                    if is_agreed:
+                        month_agreed += 1
+                
+                monthly_counts_all[month_num] = month_total
+                monthly_counts_agreed[month_num] = month_agreed
+                total_records += month_total
+                total_agreed += month_agreed
+                
+                print(f"   🗓️ Month {month_num}: {month_total} total, {month_agreed} agreed")
             
-            print(f"✅ Total records: {total_records}")
+            print(f"✅ Total records: {total_records}, Total agreed: {total_agreed}")
             
             # สร้าง array ข้อมูล 12 เดือน
             monthly_data = []
             for month_num in range(1, 13):
+                count_all = monthly_counts_all.get(month_num, 0)
+                count_agreed = monthly_counts_agreed.get(month_num, 0)
                 monthly_data.append({
                     'month': month_names[month_num - 1],
                     'month_number': month_num,
-                    'count': monthly_counts.get(month_num, 0)
+                    'count': count_all,  # backwards compatibility
+                    'agreed': count_agreed,
+                    'not_agreed': count_all - count_agreed
                 })
             
             # หาชื่อสาขา
@@ -2236,6 +2252,8 @@ def get_annual_report_data():
                 'branch_id': branch_id,
                 'branch_name': branch_name,
                 'total_records': total_records,
+                'total_agreed': total_agreed,
+                'total_not_agreed': total_records - total_agreed,
                 'monthly_data': monthly_data
             })
         
@@ -2282,21 +2300,29 @@ def get_annual_report_excel_from_data():
             from excel_report_generator import generate_annual_excel_report_for_zone
             from collections import defaultdict
             
-            # แปลง monthly_data เป็น monthly_counts (หรือ daily_counts ถ้าเป็นรายเดือน)
+            # แปลง monthly_data เป็น monthly_counts_all และ monthly_counts_agreed
             formatted_branches = []
             for branch in branches_data:
-                monthly_counts = {}
+                monthly_counts_all = {}
+                monthly_counts_agreed = {}
+                
                 for item in branch.get('monthly_data', []):
                     # ตรวจสอบว่าเป็น daily_data (มี key 'day') หรือ monthly_data (มี key 'month_number')
                     if 'day' in item:
-                        monthly_counts[item['day']] = item['count']
+                        period_key = item['day']
                     elif 'month_number' in item:
-                        monthly_counts[item['month_number']] = item['count']
+                        period_key = item['month_number']
+                    else:
+                        continue
+                    
+                    monthly_counts_all[period_key] = item.get('count', 0)
+                    monthly_counts_agreed[period_key] = item.get('agreed', 0)
                 
                 formatted_branches.append({
                     'branch_id': branch.get('branch_id'),
                     'branch_name': branch.get('branch_name'),
-                    'monthly_counts': monthly_counts
+                    'monthly_counts_all': monthly_counts_all,
+                    'monthly_counts_agreed': monthly_counts_agreed
                 })
             
             excel_path = generate_annual_excel_report_for_zone(formatted_branches, year, zone_name, month=month)
@@ -2304,34 +2330,54 @@ def get_annual_report_excel_from_data():
             # Single branch report
             from excel_report_generator import generate_annual_excel_report
             
-            # สร้าง dummy trade_data จาก monthly_data หรือ daily_data
-            # (ไม่ต้องมี raw data จริง เพราะเราแค่ต้องการตัวเลข)
+            # สร้าง dummy trade_data พร้อม agreed flag
             report_data = data.get('monthly_data') or data.get('daily_data', [])
             trade_data = []
             
             if month and data.get('daily_data'):
                 # รายเดือน - ใช้ daily_data
                 for day_info in report_data:
-                    count = day_info.get('count', 0)
+                    count_all = day_info.get('count', 0)
+                    count_agreed = day_info.get('agreed', 0)
                     day_num = day_info.get('day')
                     
-                    # สร้าง dummy timestamp สำหรับวันนั้นๆ
-                    for _ in range(count):
+                    # สร้าง dummy records สำหรับ agreed
+                    for _ in range(count_agreed):
                         timestamp = datetime(year, month, day_num, 12, 0, 0).timestamp() * 1000
                         trade_data.append({
-                            'document_date': f'/Date({int(timestamp)})/'
+                            'document_date': f'/Date({int(timestamp)})/',
+                            'agreed': True
+                        })
+                    # สร้าง dummy records สำหรับ not agreed
+                    for _ in range(count_all - count_agreed):
+                        timestamp = datetime(year, month, day_num, 12, 0, 0).timestamp() * 1000
+                        trade_data.append({
+                            'document_date': f'/Date({int(timestamp)})/',
+                            'agreed': False
                         })
             else:
                 # รายปี - ใช้ monthly_data
                 for month_info in report_data:
-                    count = month_info.get('count', 0)
+                    count_all = month_info.get('count', 0)
+                    count_agreed = month_info.get('agreed', 0)
                     month_num = month_info.get('month_number')
                     
-                    # สร้าง dummy timestamp สำหรับเดือนนั้นๆ
-                    for _ in range(count):
+                    if not month_num:
+                        continue
+                    
+                    # สร้าง dummy records สำหรับ agreed
+                    for _ in range(count_agreed):
                         timestamp = datetime(year, month_num, 15).timestamp() * 1000
                         trade_data.append({
-                            'document_date': f'/Date({int(timestamp)})/'
+                            'document_date': f'/Date({int(timestamp)})/',
+                            'agreed': True
+                        })
+                    # สร้าง dummy records สำหรับ not agreed
+                    for _ in range(count_all - count_agreed):
+                        timestamp = datetime(year, month_num, 15).timestamp() * 1000
+                        trade_data.append({
+                            'document_date': f'/Date({int(timestamp)})/',
+                            'agreed': False
                         })
             
             excel_path = generate_annual_excel_report(trade_data, year, data.get('branch_id'), branch_name, month=month)

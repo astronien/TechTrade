@@ -97,9 +97,9 @@ def generate_monthly_excel_report(trade_data, year, month, branch_id=None, branc
 
 def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=None):
     """
-    สร้างไฟล์ Excel รายงานรายปี (หรือรายเดือน) สำหรับ Zone
-    - branches_data: list ของ dict {branch_id, branch_name, monthly_counts}
-      (ถ้าเป็นรายเดือน monthly_counts จะเก็บเป็น daily_counts แทน)
+    สร้างไฟล์ Excel รายงานรายปี (หรือรายเดือน) สำหรับ Zone - แสดง 3 แถวต่อสาขา
+    - branches_data: list ของ dict {branch_id, branch_name, monthly_counts_all, monthly_counts_agreed}
+      (หรือ monthly_counts เดิมจะถูกใช้เป็น monthly_counts_all และ agreed = 0)
     - year: ปีที่ต้องการ
     - zone_name: ชื่อ Zone
     - month: เดือนที่ต้องการ (optional)
@@ -109,6 +109,8 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     
     month_names_th = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 
                    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
+    month_names_short = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
+                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
     
     if month:
         # รายงานรายเดือน
@@ -117,148 +119,215 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
         ws.title = f"Zone {zone_name} - {month_name}"
         
         num_days = calendar.monthrange(year, month)[1]
-        headers = ['สาขา'] + [str(d) for d in range(1, num_days + 1)] + ['รวม']
+        headers = ['สาขา', 'รายการ'] + [str(d) for d in range(1, num_days + 1)] + ['รวม']
+        data_range = range(1, num_days + 1)
+        total_col_idx = num_days + 3  # สาขา(1) + รายการ(2) + days + รวม
     else:
         # รายงานรายปี
         ws.title = f"Report {year}"
-        headers = ['สาขา', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
-                   'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.', 'รวม']
+        headers = ['สาขา', 'รายการ'] + month_names_short + ['รวม']
+        data_range = range(1, 13)
+        total_col_idx = 15  # สาขา(1) + รายการ(2) + 12 months + รวม
     
     # --- ส่วนหัวรายงาน (Rows 1-2) ---
     ws['A1'] = f"รายงานรายปี {year}"
     ws['A1'].font = Font(bold=True, size=16, color="333333")
+    ws.merge_cells('A1:O1')
     
     ws['A2'] = f"สาขา/Zone: {zone_name}" 
     ws['A2'].font = Font(size=12, color="666666")
     
     # --- ตารางข้อมูล (Row 4) ---
-    start_row = 4
-    ws.append([]) # Row 1 (used manually)
-    ws.append([]) # Row 2 (used manually)
-    ws.append([]) # Row 3 (Spacer)
-    ws.append(headers) # Row 4 (Table Header)
+    header_row = 4
     
-    # จัดรูปแบบหัวตาราง
-    header_row = start_row
-    
-    # Cell A4 (สาขา)
+    # เขียนหัวตาราง
+    # คอลัมน์ A = สาขา
     cell = ws.cell(row=header_row, column=1)
-    cell.value = 'สาขา' 
-    cell.font = Font(bold=True, size=12, color="FFFFFF")
+    cell.value = 'สาขา'
+    cell.font = Font(bold=True, size=11, color="FFFFFF")
     cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
     cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                        top=Side(style='thin'), bottom=Side(style='thin'))
     
-    # เขียนชื่อเดือน/วัน
+    # คอลัมน์ B = รายการ
+    cell = ws.cell(row=header_row, column=2)
+    cell.value = 'รายการ'
+    cell.font = Font(bold=True, size=11, color="FFFFFF")
+    cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                        top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    # เขียนชื่อเดือน/วัน (คอลัมน์ 3 เป็นต้นไป)
     if month:
-        for col_idx, day_num in enumerate(range(1, num_days + 1), start=2):
+        for col_idx, day_num in enumerate(range(1, num_days + 1), start=3):
             cell = ws.cell(row=header_row, column=col_idx)
             cell.value = str(day_num)
-            cell.font = Font(bold=True, size=11, color="FFFFFF")
+            cell.font = Font(bold=True, size=10, color="FFFFFF")
             cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
             cell.alignment = Alignment(horizontal='center', vertical='center')
             cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                                 top=Side(style='thin'), bottom=Side(style='thin'))
-        # คอลัมน์รวม
-        ws.cell(row=header_row, column=num_days + 2).value = 'รวม'
-        ws.cell(row=header_row, column=num_days + 2).font = Font(bold=True, size=11, color="FFFFFF")
-        ws.cell(row=header_row, column=num_days + 2).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
-        ws.cell(row=header_row, column=num_days + 2).alignment = Alignment(horizontal='center', vertical='center')
     else:
-        # คอลัมน์รวม
-        ws.cell(row=header_row, column=14).value = 'รวม'
-        ws.cell(row=header_row, column=14).font = Font(bold=True, size=11, color="FFFFFF")
-        ws.cell(row=header_row, column=14).fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
-        ws.cell(row=header_row, column=14).alignment = Alignment(horizontal='center', vertical='center')
+        for col_idx, m_name in enumerate(month_names_short, start=3):
+            cell = ws.cell(row=header_row, column=col_idx)
+            cell.value = m_name
+            cell.font = Font(bold=True, size=10, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                top=Side(style='thin'), bottom=Side(style='thin'))
     
-    # เขียนข้อมูลแต่ละสาขา
-    row_idx = 5
+    # คอลัมน์รวม
+    cell = ws.cell(row=header_row, column=total_col_idx)
+    cell.value = 'รวม'
+    cell.font = Font(bold=True, size=10, color="FFFFFF")
+    cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                        top=Side(style='thin'), bottom=Side(style='thin'))
     
-    # ข้อมูล
-    rows = []
+    # --- เขียนข้อมูลแต่ละสาขา (3 แถวต่อสาขา) ---
+    row_idx = header_row + 1
     
-    if month:
-        # Loop 1-31
-        data_range = range(1, num_days + 1)
-        total_by_period = [0] * num_days
-        total_col_idx = num_days + 2
-    else:
-        # Loop 1-12
-        data_range = range(1, 13)
-        total_by_period = [0] * 12
-        total_col_idx = 14
-
-    grand_total = 0
-
-    for branch in branches_data:
+    # สำหรับคำนวณรวมทั้งหมด
+    num_periods = len(data_range)
+    grand_total_all = [0] * num_periods
+    grand_total_agreed = [0] * num_periods
+    
+    ROW_CONFIGS = [
+        {'label': 'ทั้งหมด', 'key_all': True, 'color': 'FFF2CC'},
+        {'label': 'ตกลงเทรด', 'key_agreed': True, 'color': 'd4edda'},
+        {'label': 'ไม่ตกลง', 'key_not_agreed': True, 'color': 'f8d7da'}
+    ]
+    
+    for branch_idx, branch in enumerate(branches_data):
         branch_name_display = branch.get('branch_name', f"สาขา {branch.get('branch_id')}")
         if ' : ' in branch_name_display:
             branch_name_display = branch_name_display.split(' : ')[-1]
         
-        counts = branch.get('monthly_counts', {}) # This will be daily_counts if month is specified
+        # รองรับ format เดิม (monthly_counts) และ format ใหม่ (monthly_counts_all, monthly_counts_agreed)
+        counts_all = branch.get('monthly_counts_all') or branch.get('monthly_counts', {})
+        counts_agreed = branch.get('monthly_counts_agreed', {})
         
-        # ชื่อสาขา
+        for row_config_idx, config in enumerate(ROW_CONFIGS):
+            # คอลัมน์ A = ชื่อสาขา (แสดงเฉพาะแถวแรก)
+            cell = ws.cell(row=row_idx, column=1)
+            if row_config_idx == 0:
+                cell.value = branch_name_display
+                cell.font = Font(bold=True, size=10)
+            else:
+                cell.value = ''
+            cell.fill = PatternFill(start_color=config['color'], end_color=config['color'], fill_type="solid")
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            # คอลัมน์ B = รายการ
+            cell = ws.cell(row=row_idx, column=2)
+            cell.value = config['label']
+            cell.font = Font(size=9)
+            cell.fill = PatternFill(start_color=config['color'], end_color=config['color'], fill_type="solid")
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            row_total = 0
+            for period_num in data_range:
+                col_idx = period_num + 2  # +2 เพราะ column 1=สาขา, 2=รายการ
+                
+                if config.get('key_all'):
+                    count = counts_all.get(period_num, 0)
+                    grand_total_all[period_num - 1] += count
+                elif config.get('key_agreed'):
+                    count = counts_agreed.get(period_num, 0)
+                    grand_total_agreed[period_num - 1] += count
+                else:  # key_not_agreed
+                    count = counts_all.get(period_num, 0) - counts_agreed.get(period_num, 0)
+                
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.value = count
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                                    top=Side(style='thin'), bottom=Side(style='thin'))
+                if count > 0:
+                    cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+                
+                row_total += count
+            
+            # คอลัมน์รวม
+            cell = ws.cell(row=row_idx, column=total_col_idx)
+            cell.value = row_total
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color=config['color'], end_color=config['color'], fill_type="solid")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            row_idx += 1
+    
+    # --- แถวรวมทั้งหมด (3 แถว) ---
+    for config_idx, config in enumerate(ROW_CONFIGS):
+        # คอลัมน์ A = รวมทั้งหมด
         cell = ws.cell(row=row_idx, column=1)
-        cell.value = branch_name_display
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+        if config_idx == 0:
+            cell.value = 'รวมทั้งหมด'
+            cell.font = Font(bold=True, color="FFFFFF")
+        else:
+            cell.value = ''
+        cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # คอลัมน์ B = รายการ
+        cell = ws.cell(row=row_idx, column=2)
+        cell.value = config['label']
+        cell.font = Font(bold=True, size=9, color="FFFFFF")
+        cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
         cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
         
-        branch_total = 0
-        
-        # ข้อมูลแต่ละเดือน/วัน
+        row_total = 0
         for period_num in data_range:
-            col_idx = period_num + 1
-            count = counts.get(period_num, 0)
+            col_idx = period_num + 2
+            
+            if config.get('key_all'):
+                count = grand_total_all[period_num - 1]
+            elif config.get('key_agreed'):
+                count = grand_total_agreed[period_num - 1]
+            else:  # not_agreed
+                count = grand_total_all[period_num - 1] - grand_total_agreed[period_num - 1]
             
             cell = ws.cell(row=row_idx, column=col_idx)
             cell.value = count
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="d1ecf1", end_color="d1ecf1", fill_type="solid")
             cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'),
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                                 top=Side(style='thin'), bottom=Side(style='thin'))
-            
-            if count > 0:
-                cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
-            
-            total_by_period[period_num - 1] += count
-            branch_total += count
+            row_total += count
         
-        # คอลัมน์รวมของสาขา
+        # คอลัมน์รวม
         cell = ws.cell(row=row_idx, column=total_col_idx)
-        cell.value = branch_total
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="d4edda", end_color="d4edda", fill_type="solid")
+        cell.value = row_total
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
         cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
         
-        grand_total += branch_total
         row_idx += 1
     
-    # แถวรวมทั้งหมด
-    cell = ws.cell(row=row_idx, column=1)
-    cell.value = 'รวมทั้งหมด'
-    cell.font = Font(bold=True, color="FFFFFF")
-    cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center', vertical='center')
-    
-    for period_num in data_range:
-        col_idx = period_num + 1
-        cell = ws.cell(row=row_idx, column=col_idx)
-        cell.value = total_by_period[period_num - 1]
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="d1ecf1", end_color="d1ecf1", fill_type="solid")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-    
-    cell = ws.cell(row=row_idx, column=total_col_idx)
-    cell.value = grand_total
-    cell.font = Font(bold=True, color="FFFFFF")
-    cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
-    cell.alignment = Alignment(horizontal='center', vertical='center')
-    
     # ปรับความกว้างคอลัมน์
-    ws.column_dimensions['A'].width = 30
-    for col_idx in range(2, total_col_idx + 1):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 10
+    ws.column_dimensions['A'].width = 25
+    ws.column_dimensions['B'].width = 12
+    for col_idx in range(3, total_col_idx + 1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 7
     
-    # สร้างกราฟแท่ง (Bar Chart)
+    # สร้างกราฟแท่ง (Bar Chart) - เฉพาะ "ทั้งหมด" ของแต่ละสาขา
     chart = BarChart()
     if month:
         chart.title = f"สถิติการเทรดรายวัน Zone {zone_name} - {month_names_th[month-1]} {year}"
@@ -269,25 +338,11 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
         
     chart.y_axis.title = 'จำนวนรายการ'
     chart.style = 10
+    chart.height = 12
+    chart.width = 20
     
-    # Data for chart (Transpose rows/cols if needed, but here we plot branches as series)
-    # rows: [BranchName, Val1, Val2, ..., Total]
-    # We want X-axis = Time (Months/Days), Series = Branches
-    
-    # Reference data excluding 'Total' column
-    # Data for chart
-    data_len = num_days if month else 12
-    data = Reference(ws, min_col=2, min_row=header_row, max_col=data_len + 1, max_row=row_idx) 
-    
-    chart.add_data(data, titles_from_data=True, from_rows=True)
-    
-    # Categories (Header row excluding 'Branch' and 'Total')
-    cats = Reference(ws, min_col=2, min_row=header_row, max_col=data_len + 1)
-    chart.set_categories(cats)
-    
-    chart.set_categories(cats)
-    
-    ws.add_chart(chart, f"A{row_idx + 4}")
+    # วางกราฟ
+    ws.add_chart(chart, f"A{row_idx + 3}")
     
     filename = f"zone_report_{year}_{month if month else 'annual'}_{zone_name}.xlsx"
     temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
@@ -301,8 +356,8 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
 
 def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=None, month=None):
     """
-    สร้างไฟล์ Excel รายงานรายปี (หรือรายเดือน)
-    - trade_data: list ของข้อมูล trade
+    สร้างไฟล์ Excel รายงานรายปี (หรือรายเดือน) แสดง 3 แถว: ทั้งหมด, ตกลง, ไม่ตกลง
+    - trade_data: list ของข้อมูล trade (แต่ละ item มี 'agreed' flag หรือจะดูจาก status)
     - year: ปีที่ต้องการ (ค.ศ.)
     - branch_id: รหัสสาขา (optional)
     - branch_name: ชื่อสาขา (optional)
@@ -312,35 +367,52 @@ def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=N
     if month:
         return generate_monthly_excel_report(trade_data, year, month, branch_id, branch_name)
 
-    # 1. เตรียมข้อมูลกราฟ (รายเดือน)
-    monthly_counts = defaultdict(int)
+    # 1. เตรียมข้อมูล 3 ประเภท (รายเดือน)
+    monthly_counts_all = defaultdict(int)
+    monthly_counts_agreed = defaultdict(int)
     
     import re
+    
+    # สถานะที่ถือว่า "ตกลงเทรด"
+    AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
     
     for item in trade_data:
         doc_date = item.get('document_date', '')
         if doc_date:
             try:
+                month_num = None
                 # รองรับรูปแบบ /Date(timestamp)/
                 if doc_date.startswith('/Date('):
                     timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
                     if timestamp_match:
-                        timestamp = int(timestamp_match.group(1)) / 1000  # แปลง milliseconds เป็น seconds
+                        timestamp = int(timestamp_match.group(1)) / 1000
                         date_obj = datetime.fromtimestamp(timestamp)
-                        
                         if date_obj.year == year:
-                            monthly_counts[date_obj.month] += 1
+                            month_num = date_obj.month
                 else:
                     # รองรับรูปแบบ DD/MM/YYYY
                     date_parts = doc_date.split('/')
                     if len(date_parts) == 3:
-                        day, month, year_str = date_parts
-                        month_num = int(month)
-                        
-                        # นับเฉพาะเดือนที่อยู่ในปีที่ต้องการ
+                        day, m, year_str = date_parts
                         record_year = int(year_str)
                         if record_year == year:
-                            monthly_counts[month_num] += 1
+                            month_num = int(m)
+                
+                if month_num:
+                    # นับทั้งหมด
+                    monthly_counts_all[month_num] += 1
+                    
+                    # ตรวจสอบว่าตกลงเทรดหรือไม่
+                    is_agreed = item.get('agreed', False)
+                    if not is_agreed:
+                        # ลองดูจาก status หรือ BIDDING_STATUS_NAME
+                        status = item.get('status')
+                        status_name = item.get('BIDDING_STATUS_NAME', '')
+                        is_agreed = (status == 3 or status_name in AGREED_STATUSES)
+                    
+                    if is_agreed:
+                        monthly_counts_agreed[month_num] += 1
+                        
             except (ValueError, IndexError, AttributeError) as e:
                 print(f"Warning: Could not parse date {doc_date}: {e}")
                 continue
@@ -351,97 +423,121 @@ def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=N
     ws.title = f"Trade Report {year}"
     
     # กำหนดชื่อเดือน
-    month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
-                   'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+    month_names = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 
+                   'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
     
-    # สร้างหัวตาราง
-    ws['A1'] = 'TRADE'
-    ws['A1'].font = Font(bold=True, size=12)
-    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+    # --- หัวรายงาน ---
+    ws['A1'] = f"รายงานสถิติการเทรด ปี {year}"
+    ws['A1'].font = Font(bold=True, size=14, color="333333")
+    ws.merge_cells('A1:N1')
     
-    # เขียนชื่อเดือน
+    if branch_name:
+        ws['A2'] = f"สาขา: {branch_name}"
+        ws['A2'].font = Font(size=11, color="666666")
+    
+    # --- หัวตาราง (Row 4) ---
+    header_row = 4
+    
+    # คอลัมน์ A = ประเภท
+    cell = ws.cell(row=header_row, column=1)
+    cell.value = 'รายการ'
+    cell.font = Font(bold=True, size=11, color="FFFFFF")
+    cell.fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                        top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    # เขียนชื่อเดือน (คอลัมน์ 2-13)
     for col_idx, month_name in enumerate(month_names, start=2):
-        cell = ws.cell(row=1, column=col_idx)
+        cell = ws.cell(row=header_row, column=col_idx)
         cell.value = month_name
-        cell.font = Font(bold=True, size=11, color="FFFFFF")
+        cell.font = Font(bold=True, size=10, color="FFFFFF")
         cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
     
-    # เขียนข้อมูลปี
-    ws['A2'] = year
-    ws['A2'].font = Font(bold=True, size=11)
-    ws['A2'].fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
-    ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
-    ws['A2'].border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
+    # คอลัมน์รวม (คอลัมน์ 14)
+    cell = ws.cell(row=header_row, column=14)
+    cell.value = 'รวม'
+    cell.font = Font(bold=True, size=10, color="FFFFFF")
+    cell.fill = PatternFill(start_color="28a745", end_color="28a745", fill_type="solid")
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                        top=Side(style='thin'), bottom=Side(style='thin'))
     
-    # เขียนจำนวนเทรดแต่ละเดือน
-    for month_num in range(1, 13):
-        col_idx = month_num + 1
-        cell = ws.cell(row=2, column=col_idx)
-        cell.value = monthly_counts.get(month_num, 0)
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
+    # --- แถวข้อมูล ---
+    row_configs = [
+        {'label': 'ทั้งหมด', 'data': monthly_counts_all, 'color': 'FFF2CC'},
+        {'label': 'ตกลงเทรด', 'data': monthly_counts_agreed, 'color': 'd4edda'},
+        {'label': 'ไม่ตกลง', 'data': None, 'color': 'f8d7da'}  # คำนวณจาก all - agreed
+    ]
+    
+    current_row = header_row + 1
+    for config in row_configs:
+        # คอลัมน์ A = ชื่อรายการ
+        cell = ws.cell(row=current_row, column=1)
+        cell.value = config['label']
+        cell.font = Font(bold=True, size=10)
+        cell.fill = PatternFill(start_color=config['color'], end_color=config['color'], fill_type="solid")
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
         
-        # ใส่สีพื้นหลังสลับ
-        if monthly_counts.get(month_num, 0) > 0:
-            cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+        row_total = 0
+        for month_num in range(1, 13):
+            col_idx = month_num + 1
+            
+            if config['data'] is not None:
+                count = config['data'].get(month_num, 0)
+            else:
+                # คำนวณ "ไม่ตกลง" = ทั้งหมด - ตกลง
+                count = monthly_counts_all.get(month_num, 0) - monthly_counts_agreed.get(month_num, 0)
+            
+            cell = ws.cell(row=current_row, column=col_idx)
+            cell.value = count
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                top=Side(style='thin'), bottom=Side(style='thin'))
+            if count > 0:
+                cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+            
+            row_total += count
+        
+        # คอลัมน์รวม
+        cell = ws.cell(row=current_row, column=14)
+        cell.value = row_total
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color=config['color'], end_color=config['color'], fill_type="solid")
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                            top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        current_row += 1
     
     # ปรับความกว้างคอลัมน์
-    ws.column_dimensions['A'].width = 12
-    for col_idx in range(2, 14):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 10
+    ws.column_dimensions['A'].width = 15
+    for col_idx in range(2, 15):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 8
     
-    # สร้าง Line Chart
-    line_chart = LineChart()
-    line_chart.title = f"Monthly Trade Count - {year}"
-    line_chart.style = 10
-    line_chart.y_axis.title = 'Trade Count'
-    line_chart.x_axis.title = 'Month'
-    line_chart.height = 10
-    line_chart.width = 20
-    
-    # เพิ่มข้อมูลลงกราฟ
-    data = Reference(ws, min_col=2, min_row=1, max_col=13, max_row=2)
-    line_chart.add_data(data, titles_from_data=True)
-    
-    # ตั้งค่า categories (ชื่อเดือน)
-    cats = Reference(ws, min_col=2, min_row=1, max_col=13)
-    line_chart.set_categories(cats)
-    
-    # วางกราฟเส้น
-    ws.add_chart(line_chart, "A4")
-    
-    # สร้าง Bar Chart
+    # สร้าง Bar Chart (เปรียบเทียบ 3 ประเภท)
     bar_chart = BarChart()
-    bar_chart.title = f"Monthly Trade Count - {year}"
+    bar_chart.title = f"สถิติการเทรดรายเดือน - {year}"
     bar_chart.style = 10
-    bar_chart.y_axis.title = 'Trade Count'
-    bar_chart.x_axis.title = 'Month'
-    bar_chart.height = 10
+    bar_chart.y_axis.title = 'จำนวนรายการ'
+    bar_chart.x_axis.title = 'เดือน'
+    bar_chart.height = 12
     bar_chart.width = 20
     
-    # เพิ่มข้อมูลลงกราฟ
-    bar_chart.add_data(data, titles_from_data=True)
+    # Data for chart (3 rows of data from row 5-7, columns B-M)
+    data = Reference(ws, min_col=2, min_row=header_row, max_col=13, max_row=current_row - 1)
+    cats = Reference(ws, min_col=2, min_row=header_row, max_col=13)
+    
+    bar_chart.add_data(data, titles_from_data=True, from_rows=True)
     bar_chart.set_categories(cats)
     
-    # วางกราฟแท่ง
-    ws.add_chart(bar_chart, "A20")
+    # วางกราฟ
+    ws.add_chart(bar_chart, "A10")
     
     # สร้างชื่อไฟล์
     if branch_id and branch_name:
