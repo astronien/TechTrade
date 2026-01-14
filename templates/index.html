@@ -1438,167 +1438,293 @@
             document.getElementById('annualReportModal').classList.remove('show');
         }
 
+        // Helper Function: ดึงข้อมูลรายปีของ 1 สาขา (โดยแบ่งดึงทีละเดือน)
+        // Helper Function: ดึงข้อมูลรายปีของ 1 สาขา (Parallel Fetching)
+        // เพื่อความเร็ว: แบ่งดึงทีละ 4 เดือนพร้อมกัน (Batch Size = 4)
+        async function fetchAnnualBranchData(year, branchId, onProgress) {
+            const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+                'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+            // เตรียม Array ว่างไว้ 12 ช่อง (index 0-11)
+            const monthlyData = new Array(12).fill(null);
+
+            let totalRecords = 0;
+            let totalAgreed = 0;
+
+            // Function สำหรับดึง 1 เดือน
+            const fetchMonth = async (m) => {
+                const params = new URLSearchParams({
+                    year: year,
+                    month: m,
+                    branchId: branchId || '',
+                    sessionId: localStorage.getItem('sessionId') || ''
+                });
+
+                try {
+                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        console.error(`Error fetching month ${m}:`, result.error);
+                        return { month: monthNames[m - 1], month_number: m, count: 0, agreed: 0, not_agreed: 0 };
+                    }
+
+                    if (result.success && result.daily_data) {
+                        let mCount = 0;
+                        let mAgreed = 0;
+                        result.daily_data.forEach(d => {
+                            mCount += (d.count || 0);
+                            mAgreed += (d.agreed || 0);
+                        });
+                        return {
+                            month: monthNames[m - 1],
+                            month_number: m,
+                            count: mCount,
+                            agreed: mAgreed,
+                            not_agreed: mCount - mAgreed
+                        };
+                    }
+                } catch (e) {
+                    console.error(`Exception fetching month ${m}:`, e);
+                }
+                return { month: monthNames[m - 1], month_number: m, count: 0, agreed: 0, not_agreed: 0 };
+            };
+
+            // แบ่งทำเป็นชุด ชุดละ 3 เดือน (Optimized for 100% success)
+            const batches = [
+                [1, 2, 3],
+                [4, 5, 6],
+                [7, 8, 9],
+                [10, 11, 12]
+            ];
+
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+
+                // Update UI ก่อนเริ่ม Batch
+                if (onProgress) {
+                    // โชว์เดือนแรกของ Batch
+                    onProgress(batch[0], 12, `${monthNames[batch[0] - 1]} - ${monthNames[batch[batch.length - 1] - 1]}`);
+                }
+
+                // รันพร้อมกัน 3 เดือน
+                const results = await Promise.all(batch.map(m => fetchMonth(m)));
+
+                // เก็บผลลัพธ์ลง Array
+                results.forEach((res, idx) => {
+                    const monthIndex = batch[idx] - 1; // 0-based index
+                    monthlyData[monthIndex] = res;
+                    totalRecords += res.count;
+                    totalAgreed += res.agreed;
+                });
+
+                // พักระหว่าง Batch (safe rate limit: 4000ms)
+                if (i < batches.length - 1) {
+                    await new Promise(r => setTimeout(r, 4000));
+                }
+            }
+
+            // หาชื่อสาขา (ถ้ามี)
+            let branchName = 'Unknown Branch';
+            if (branchId) {
+                const branch = BRANCHES_DATA.find(b => b.branch_id == branchId || b.branch_id == String(branchId));
+                if (branch) branchName = branch.branch_name;
+                else branchName = `สาขา ${branchId}`;
+            } else {
+                branchName = 'ทุกสาขา';
+            }
+
+            return {
+                branch_id: branchId,
+                branch_name: branchName,
+                total_records: totalRecords,
+                total_agreed: totalAgreed,
+                total_not_agreed: totalRecords - totalAgreed,
+                monthly_data: monthlyData
+            };
+        }
+
         async function generateAnnualReport() {
             const yearInput = document.getElementById('annualReportYear').value;
             const month = document.getElementById('annualReportMonth').value;
             const zoneId = document.getElementById('annualReportZone').value;
             const branchId = document.getElementById('annualReportBranch').value;
 
-            if (!yearInput) {
-                alert('⚠️ กรุณาระบุปี');
-                return;
-            }
+            if (!yearInput) { alert('⚠️ กรุณาระบุปี'); return; }
 
-            // แปลงปี (รองรับทั้ง พ.ศ. และ ค.ศ.)
             let year = parseInt(yearInput);
-            if (year > 2500) {
-                year = year - 543; // แปลง พ.ศ. เป็น ค.ศ.
-            }
+            if (year > 2500) year = year - 543;
 
-            // ตรวจสอบปีที่ถูกต้อง
             const currentYear = new Date().getFullYear();
             if (year < 2020 || year > currentYear + 1) {
-                alert(`⚠️ กรุณาระบุปีระหว่าง 2020-${currentYear + 1} (ค.ศ.) หรือ 2563-${currentYear + 544} (พ.ศ.)`);
+                alert(`⚠️ กรุณาระบุปีระหว่าง 2020-${currentYear + 1}`);
                 return;
             }
 
-            // ถ้าเลือก Zone → ดึงข้อมูลทีละสาขา
             if (zoneId) {
                 const zone = ZONES_DATA.find(z => z.zone_id === zoneId);
-                if (!zone) {
-                    alert('❌ ไม่พบ Zone ที่เลือก');
-                    return;
-                }
-
-
-
+                if (!zone) { alert('❌ ไม่พบ Zone ที่เลือก'); return; }
                 closeAnnualReportModal();
                 await generateAnnualReportForZone(year, zone, month);
                 return;
             }
 
-            // ปิด modal
             closeAnnualReportModal();
-
-            // แสดง loading ในหน้ารายงาน
             const container = document.getElementById('reportContainer');
-            container.innerHTML = `
-                <div class="loading">
-                    <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
-                    <h3>กำลังสร้างรายงานรายปี ${year}</h3>
-                    <p style="color: #666; margin-top: 10px;">โปรดรอสักครู่... (ประมาณ 5-10 วินาที)</p>
-                </div>
-            `;
 
             try {
-                // ดึงข้อมูลสาขาเดียวหรือทุกสาขา
-                const params = new URLSearchParams({
-                    year: year,
-                    sessionId: localStorage.getItem('sessionId') || ''
+                // กรณีเลือกเดือน (Single Month) -> ใช้ API เดิมได้เลย ไม่ต้อง loop
+                if (month) {
+                    container.innerHTML = `
+                        <div class="loading">
+                            <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+                            <h3>กำลังสร้างรายงานรายเดือน ${month}/${year}</h3>
+                            <p style="color: #666; margin-top: 10px;">โปรดรอสักครู่...</p>
+                        </div>
+                    `;
+                    const params = new URLSearchParams({
+                        year: year,
+                        month: month,
+                        branchId: branchId || '',
+                        sessionId: localStorage.getItem('sessionId') || ''
+                    });
+                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                    const result = await response.json();
+                    if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+                    displayAnnualReportTable(result);
+                    return;
+                }
+
+                // กรณีเลือกทั้งปี (Annual) -> ใช้ Loop Fetch 12 เดือน
+                const result = await fetchAnnualBranchData(year, branchId, (current, total, monthName) => {
+                    const progress = Math.round(((current - 1) / total) * 100);
+                    container.innerHTML = `
+                        <div class="loading">
+                            <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+                            <h3>กำลังดึงข้อมูลรายปี ${year}</h3>
+                            <p style="color: #666; margin-top: 10px;">กำลังประมวลผลเดือน ${current}/${total} (${monthName})</p>
+                            <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 20px; margin-top: 15px; overflow: hidden;">
+                                <div style="width: ${progress}%; background: #667eea; height: 100%; transition: width 0.3s;"></div>
+                            </div>
+                            <p style="color: #999; font-size: 12px; margin-top: 10px;">ดึงข้อมูลทีละเดือนเพื่อป้องกัน Timeout</p>
+                        </div>
+                    `;
                 });
 
-                if (month) {
-                    params.append('month', month);
-                }
+                // result จาก fetchAnnualBranchData ไม่มี success: true ใส่เข้าไปด้วย
+                const finalResult = {
+                    success: true,
+                    year: year,
+                    branch_id: result.branch_id,
+                    branch_name: result.branch_name,
+                    total_records: result.total_records,
+                    total_agreed: result.total_agreed,
+                    total_not_agreed: result.total_not_agreed,
+                    monthly_data: result.monthly_data
+                };
 
-                if (branchId) {
-                    params.append('branchId', branchId);
-                }
-
-                const response = await fetch(`/api/annual-report-data?${params.toString()}`);
-                const result = await response.json();
-
-                console.log('📊 DEBUG: API Response:', result);
-                console.log('📊 DEBUG: Has daily_data?', result.daily_data !== undefined);
-                console.log('📊 DEBUG: Has monthly_data?', result.monthly_data !== undefined);
-
-                if (!response.ok || !result.success) {
-                    throw new Error(result.error || `HTTP ${response.status}`);
-                }
-
-                // แสดงตารางและกราฟ
-                displayAnnualReportTable(result);
+                displayAnnualReportTable(finalResult);
 
             } catch (error) {
-                console.error('Error generating annual report:', error);
-                container.innerHTML = `
-                    <div class="error-message">
-                        <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
-                        <h3>เกิดข้อผิดพลาด</h3>
-                        <p>${error.message}</p>
-                    </div>
-                `;
+                console.error('Error:', error);
+                container.innerHTML = `<div class="error-message"><h3>❌ เกิดข้อผิดพลาด</h3><p>${error.message}</p></div>`;
             }
         }
+
+        // Helper function เพื่อหาชื่อสาขา (เพราะ API รายเดือนอาจจะไม่ส่งชื่อสาขากลับมา หรือส่งมาซ้ำๆ)
+        async function getBranchName(branchId) {
+            if (!branchId) return 'ทุกสาขา';
+            const branch = BRANCHES_DATA.find(b => b.branch_id == branchId || b.branch_id == String(branchId));
+            return branch ? branch.branch_name : `สาขา ${branchId}`;
+        }
+
 
         async function generateAnnualReportForZone(year, zone, month = null) {
             const container = document.getElementById('reportContainer');
             const branchIds = zone.branch_ids;
-
-            // ดึงข้อมูลทุกสาขาใน Zone (ทีละสาขา)
-            const branchesData = [];
+            const branchesData = []; // จะเก็บผลลัพธ์ทั้งหมด
             let totalRecords = 0;
 
-            for (let i = 0; i < branchIds.length; i++) {
-                const branchId = branchIds[i];
+            // Helper function to process one branch
+            const processBranch = async (branchId, index) => {
+                try {
+                    if (month) {
+                        // Case: Single Month (Parallel Safe)
+                        const params = new URLSearchParams({
+                            year: year,
+                            month: month,
+                            branchId: branchId,
+                            sessionId: localStorage.getItem('sessionId') || ''
+                        });
+                        const response = await fetch(`/api/annual-report-data?${params.toString()}`);
+                        const result = await response.json();
+                        if (response.ok && result.success) {
+                            return {
+                                branch_id: result.branch_id,
+                                branch_name: result.branch_name,
+                                total_records: result.total_records,
+                                monthly_data: result.monthly_data || result.daily_data
+                            };
+                        } else {
+                            const bName = await getBranchName(branchId);
+                            return { branch_id: branchId, branch_name: bName, total_records: 0, monthly_data: [] };
+                        }
+                    } else {
+                        // Case: Annual
+                        // ใช้ fetchAnnualBranchData helper (ซึ่ง fetch ทีละ 4 เดือน แบบ Parallel ภายในอยู่แล้ว)
+                        // แต่รอบนี้เราจะรันหลายๆ Store พร้อมกันด้วย
+                        const result = await fetchAnnualBranchData(year, branchId, null);
+                        return result;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    const bName = await getBranchName(branchId);
+                    return { branch_id: branchId, branch_name: bName, total_records: 0, monthly_data: [] };
+                }
+            };
+
+            // Chunk branches into batches of 3 (Optimized: 3 branches * 3 months = 9 concurrent requests safe)
+            const batchSize = 3;
+            for (let i = 0; i < branchIds.length; i += batchSize) {
+                const batch = branchIds.slice(i, i + batchSize);
+
+                // Update Progress UI (Batch Level)
+                const currentBatch = Math.floor(i / batchSize) + 1;
+                const totalBatches = Math.ceil(branchIds.length / batchSize);
                 const progress = Math.round((i / branchIds.length) * 100);
+
                 container.innerHTML = `
                     <div class="loading">
-                        <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
-                        <h3>กำลังดึงข้อมูล Zone: ${zone.zone_name}</h3>
-                        <p style="color: #666; margin-top: 10px;">สาขา ${i + 1}/${branchIds.length} (${progress}%)</p>
+                        <div style="font-size: 48px; margin-bottom: 20px;">⚡</div>
+                        <h3>กำลังดึงข้อมูล Zone: ${zone.zone_name} (Turbo Mode)</h3>
+                        <p style="color: #333; font-weight: bold; margin-top: 10px;">กำลังประมวลผลชุดที่ ${currentBatch} / ${totalBatches}</p>
+                        <p style="color: #666; font-size: 14px; margin-top: 5px;">
+                            (สาขาที่ ${i + 1} - ${Math.min(i + batchSize, branchIds.length)} จากทั้งหมด ${branchIds.length} สาขา)
+                        </p>
                         <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 20px; margin-top: 15px; overflow: hidden;">
                             <div style="width: ${progress}%; background: #667eea; height: 100%; transition: width 0.3s;"></div>
                         </div>
-                        <p style="color: #999; font-size: 12px; margin-top: 10px;">กำลังประมวลผล... (ประมาณ ${Math.ceil((branchIds.length - i) * 5)} วินาที)</p>
+                        <p style="color: #999; font-size: 12px; margin-top: 10px;">ระบบกำลังดึงข้อมูลหลายสาขาพร้อมกันเพื่อความรวดเร็ว...</p>
                     </div>
                 `;
 
-                try {
-                    const params = new URLSearchParams({
-                        year: year,
-                        branchId: branchId,
-                        sessionId: localStorage.getItem('sessionId') || ''
-                    });
+                // Run batch in parallel
+                const results = await Promise.all(batch.map((bid, idx) => processBranch(bid, i + idx)));
 
-                    if (month) {
-                        params.append('month', month);
+                results.forEach(res => {
+                    if (res) {
+                        totalRecords += (res.total_records || 0);
+                        branchesData.push(res);
                     }
+                });
 
-                    const response = await fetch(`/api/annual-report-data?${params.toString()}`);
-                    const result = await response.json();
-
-                    if (response.ok && result.success) {
-                        totalRecords += result.total_records;
-                        branchesData.push({
-                            branch_id: result.branch_id,
-                            branch_name: result.branch_name,
-                            total_records: result.total_records,
-                            monthly_data: result.monthly_data || result.daily_data // รองรับทั้ง monthly และ daily
-                        });
-                    } else {
-                        console.error(`Error fetching branch ${branchId}:`, result.error);
-                        // เพิ่มข้อมูลว่างถ้า error
-                        branchesData.push({
-                            branch_id: branchId,
-                            branch_name: `สาขา ${branchId} (Error)`,
-                            total_records: 0,
-                            monthly_data: Array.from({ length: 12 }, (_, i) => ({
-                                month: ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][i],
-                                month_number: i + 1,
-                                count: 0
-                            }))
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Error fetching branch ${branchId}:`, error);
-                }
+                // Short break to be gentle
+                await new Promise(r => setTimeout(r, 100));
             }
 
             const combinedResult = {
                 success: true,
                 year: year,
-                month: month, // เพิ่ม month parameter
+                month: month,
                 zone_id: zone.zone_id,
                 zone_name: zone.zone_name,
                 branch_count: branchIds.length,
@@ -1606,7 +1732,6 @@
                 branches_data: branchesData
             };
 
-            // แสดงตารางและกราฟ
             displayAnnualReportTableForZone(combinedResult);
         }
 
@@ -1629,17 +1754,25 @@
             const month_names_th = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
                 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
+            // คำนวณ totals
+            let totalAll = 0, totalAgreed = 0;
+            reportData.forEach(item => {
+                totalAll += (item.count || 0);
+                totalAgreed += (item.agreed || 0);
+            });
+            const totalNotAgreed = totalAll - totalAgreed;
+
             // สร้าง HTML ตาราง
             let html = `
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
                     <h3 style="margin: 0; color: #667eea;">📊 ${isMonthlyReport ? 'รายงานรายเดือน ' + month_names_th[data.month - 1] : 'รายงานรายปี'} ${data.year}</h3>
-                    <p style="margin: 5px 0 0 0; color: #666;">${branchInfo} | รวม ${data.total_records} รายการ</p>
+                    <p style="margin: 5px 0 0 0; color: #666;">${branchInfo} | รวม ${totalAll} รายการ (ตกลง ${totalAgreed} | ไม่ตกลง ${totalNotAgreed})</p>
                 </div>
                 
                 <div style="text-align: right; margin-bottom: 15px;">
                     <button onclick="exportAnnualReportToExcelFromData()" 
                             style="background: #28a745; padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
-                        📥 Export Excel (จากหน้าจอ)
+                        📥 Export Excel
                     </button>
                 </div>
                 
@@ -1647,39 +1780,55 @@
                     <table>
                         <thead>
                             <tr>
-                                <th style="background: #667eea; color: white;">${isMonthlyReport ? 'วัน' : 'เดือน'}</th>
+                                <th style="background: #667eea; color: white;">รายการ</th>
             `;
 
             // สร้างหัวตาราง
             if (isMonthlyReport) {
-                // รายเดือน - แสดงวันที่
                 reportData.forEach(day => {
                     html += `<th style="background: #4472C4; color: white;">${day.day}</th>`;
                 });
             } else {
-                // รายปี - แสดงเดือน
                 reportData.forEach(month => {
                     html += `<th style="background: #4472C4; color: white;">${month.month}</th>`;
                 });
             }
+            html += `<th style="background: #28a745; color: white;">รวม</th></tr></thead><tbody>`;
 
-            html += `
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td style="background: #FFF2CC; font-weight: bold;">${isMonthlyReport ? month_names_th[data.month - 1] : data.year}</td>
-            `;
-
-            // สร้างข้อมูลแต่ละวัน/เดือน
+            // แถว 1: ทั้งหมด
+            html += `<tr><td style="background: #FFF2CC; font-weight: bold;">ทั้งหมด</td>`;
+            let rowTotalAll = 0;
             reportData.forEach(item => {
                 const count = item.count || 0;
                 const bgColor = count > 0 ? '#E7E6E6' : '';
                 html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
+                rowTotalAll += count;
             });
+            html += `<td style="text-align: center; background: #FFF2CC; font-weight: bold;">${rowTotalAll}</td></tr>`;
+
+            // แถว 2: ตกลงเทรด
+            html += `<tr><td style="background: #d4edda; font-weight: bold;">ตกลงเทรด</td>`;
+            let rowTotalAgreed = 0;
+            reportData.forEach(item => {
+                const count = item.agreed || 0;
+                const bgColor = count > 0 ? '#E7E6E6' : '';
+                html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
+                rowTotalAgreed += count;
+            });
+            html += `<td style="text-align: center; background: #d4edda; font-weight: bold;">${rowTotalAgreed}</td></tr>`;
+
+            // แถว 3: ไม่ตกลง
+            html += `<tr><td style="background: #f8d7da; font-weight: bold;">ไม่ตกลง</td>`;
+            let rowTotalNotAgreed = 0;
+            reportData.forEach(item => {
+                const count = (item.count || 0) - (item.agreed || 0);
+                const bgColor = count > 0 ? '#E7E6E6' : '';
+                html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
+                rowTotalNotAgreed += count;
+            });
+            html += `<td style="text-align: center; background: #f8d7da; font-weight: bold;">${rowTotalNotAgreed}</td></tr>`;
 
             html += `
-                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -1708,11 +1857,21 @@
             const month_names_th = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
                 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
+            // คำนวณ totals
+            let grandTotalAll = 0, grandTotalAgreed = 0;
+            data.branches_data.forEach(branch => {
+                branch.monthly_data.forEach(item => {
+                    grandTotalAll += (item.count || 0);
+                    grandTotalAgreed += (item.agreed || 0);
+                });
+            });
+            const grandTotalNotAgreed = grandTotalAll - grandTotalAgreed;
+
             // สร้าง HTML ตาราง
             let html = `
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #667eea;">
                     <h3 style="margin: 0; color: #667eea;">📊 ${isMonthlyReport ? 'รายงานรายเดือน ' + month_names_th[(data.month || 1) - 1] : 'รายงานรายปี'} ${data.year}</h3>
-                    <p style="margin: 5px 0 0 0; color: #666;">🗺️ Zone: ${data.zone_name} (${data.branch_count} สาขา) | รวม ${data.total_records} รายการ</p>
+                    <p style="margin: 5px 0 0 0; color: #666;">🗺️ Zone: ${data.zone_name} (${data.branch_count} สาขา) | รวม ${grandTotalAll} (ตกลง ${grandTotalAgreed} | ไม่ตกลง ${grandTotalNotAgreed})</p>
                 </div>
                 
                 <div style="text-align: right; margin-bottom: 15px;">
@@ -1727,19 +1886,18 @@
                         <thead>
                             <tr>
                                 <th style="background: #667eea; color: white;">สาขา</th>
+                                <th style="background: #667eea; color: white;">รายการ</th>
             `;
 
             // สร้างหัวตารางตามประเภทรายงาน
             let numCols;
             if (isMonthlyReport) {
-                // รายเดือน - แสดงวันที่
                 const sampleData = firstBranch.monthly_data;
                 numCols = sampleData.length;
                 sampleData.forEach(day => {
                     html += `<th style="background: #4472C4; color: white;">${day.day}</th>`;
                 });
             } else {
-                // รายปี - แสดงเดือน
                 const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
                 numCols = 12;
                 monthNames.forEach(month => {
@@ -1747,45 +1905,83 @@
                 });
             }
 
-            html += `
-                                <th style="background: #28a745; color: white;">รวม</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
+            html += `<th style="background: #28a745; color: white;">รวม</th></tr></thead><tbody>`;
 
-            // สร้างแถวข้อมูลแต่ละสาขา
-            let totalByPeriod = new Array(numCols).fill(0);
-            let grandTotal = 0;
+            // ค่ารวมสำหรับแถว total
+            let totalAllByPeriod = new Array(numCols).fill(0);
+            let totalAgreedByPeriod = new Array(numCols).fill(0);
+
+            // สร้างแถวข้อมูลแต่ละสาขา (3 แถวต่อสาขา)
+            const rowConfigs = [
+                { label: 'ทั้งหมด', key: 'count', color: '#FFF2CC' },
+                { label: 'ตกลงเทรด', key: 'agreed', color: '#d4edda' },
+                { label: 'ไม่ตกลง', key: 'not_agreed', color: '#f8d7da' }
+            ];
 
             data.branches_data.forEach(branch => {
                 const branchName = branch.branch_name ? branch.branch_name.split(' : ').pop() : `สาขา ${branch.branch_id}`;
-                let branchTotal = 0;
 
-                html += `<tr><td style="background: #FFF2CC; font-weight: bold;">${branchName}</td>`;
+                rowConfigs.forEach((config, configIdx) => {
+                    html += `<tr>`;
 
-                branch.monthly_data.forEach((item, idx) => {
-                    const count = item.count || 0;
-                    const bgColor = count > 0 ? '#E7E6E6' : '';
-                    html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
-                    totalByPeriod[idx] += count;
-                    branchTotal += count;
+                    // คอลัมน์สาขา (แสดงเฉพาะแถวแรก)
+                    if (configIdx === 0) {
+                        html += `<td style="background: ${config.color}; font-weight: bold;" rowspan="3">${branchName}</td>`;
+                    }
+
+                    // คอลัมน์รายการ
+                    html += `<td style="background: ${config.color}; font-size: 11px;">${config.label}</td>`;
+
+                    let rowTotal = 0;
+                    branch.monthly_data.forEach((item, idx) => {
+                        let count;
+                        if (config.key === 'count') {
+                            count = item.count || 0;
+                            totalAllByPeriod[idx] += count;
+                        } else if (config.key === 'agreed') {
+                            count = item.agreed || 0;
+                            totalAgreedByPeriod[idx] += count;
+                        } else {
+                            count = (item.count || 0) - (item.agreed || 0);
+                        }
+
+                        const bgColor = count > 0 ? '#E7E6E6' : '';
+                        html += `<td style="text-align: center; background: ${bgColor};">${count}</td>`;
+                        rowTotal += count;
+                    });
+
+                    html += `<td style="text-align: center; background: ${config.color}; font-weight: bold;">${rowTotal}</td>`;
+                    html += `</tr>`;
                 });
+            });
 
-                html += `<td style="text-align: center; background: #d4edda; font-weight: bold;">${branchTotal}</td>`;
+            // แถวรวมทั้งหมด (3 แถว)
+            rowConfigs.forEach((config, configIdx) => {
+                html += `<tr style="font-weight: bold;">`;
+
+                if (configIdx === 0) {
+                    html += `<td style="background: #667eea; color: white;" rowspan="3">รวมทั้งหมด</td>`;
+                }
+
+                html += `<td style="background: #667eea; color: white; font-size: 11px;">${config.label}</td>`;
+
+                let rowTotal = 0;
+                for (let i = 0; i < numCols; i++) {
+                    let count;
+                    if (config.key === 'count') {
+                        count = totalAllByPeriod[i];
+                    } else if (config.key === 'agreed') {
+                        count = totalAgreedByPeriod[i];
+                    } else {
+                        count = totalAllByPeriod[i] - totalAgreedByPeriod[i];
+                    }
+                    html += `<td style="text-align: center; background: #d1ecf1;">${count}</td>`;
+                    rowTotal += count;
+                }
+
+                html += `<td style="text-align: center; background: #28a745; color: white;">${rowTotal}</td>`;
                 html += `</tr>`;
-
-                grandTotal += branchTotal;
             });
-
-            // แถวรวม
-            html += `<tr style="background: #f8f9fa; font-weight: bold;">`;
-            html += `<td style="background: #667eea; color: white;">รวมทั้งหมด</td>`;
-            totalByPeriod.forEach(count => {
-                html += `<td style="text-align: center; background: #d1ecf1;">${count}</td>`;
-            });
-            html += `<td style="text-align: center; background: #28a745; color: white;">${grandTotal}</td>`;
-            html += `</tr>`;
 
             html += `
                         </tbody>
@@ -1802,13 +1998,13 @@
             // สร้างกราฟรวม
             let chartData;
             if (isMonthlyReport) {
-                chartData = totalByPeriod.map((count, idx) => ({
+                chartData = totalAllByPeriod.map((count, idx) => ({
                     day: idx + 1,
                     count: count
                 }));
             } else {
                 const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-                chartData = totalByPeriod.map((count, idx) => ({
+                chartData = totalAllByPeriod.map((count, idx) => ({
                     month: monthNames[idx],
                     count: count
                 }));

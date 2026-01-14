@@ -2274,6 +2274,8 @@ def get_annual_report_excel_from_data():
             return jsonify({'error': 'ไม่พบข้อมูล'}), 400
         
         year = data.get('year')
+        if year:
+            year = int(year)  # แปลง year เป็น int
         month = data.get('month')  # เพิ่ม month parameter
         if month:
             month = int(month)  # แปลงเป็น int
@@ -2281,7 +2283,7 @@ def get_annual_report_excel_from_data():
         branch_name = data.get('branch_name')
         branches_data = data.get('branches_data')
         
-        print(f"📊 Generating Excel from existing data for year {year}{f', month {month}' if month else ''}")
+        print(f"📊 Generating Excel from existing data for year {year} (type: {type(year)})")
         print(f"🔍 DEBUG: branches_data exists? {branches_data is not None}")
         print(f"🔍 DEBUG: Number of branches? {len(branches_data) if branches_data else 0}")
         if branches_data and len(branches_data) > 0:
@@ -2358,12 +2360,13 @@ def get_annual_report_excel_from_data():
             else:
                 # รายปี - ใช้ monthly_data
                 for month_info in report_data:
-                    count_all = month_info.get('count', 0)
-                    count_agreed = month_info.get('agreed', 0)
+                    count_all = int(month_info.get('count', 0) or 0)
+                    count_agreed = int(month_info.get('agreed', 0) or 0)
                     month_num = month_info.get('month_number')
                     
                     if not month_num:
                         continue
+                    month_num = int(month_num)
                     
                     # สร้าง dummy records สำหรับ agreed
                     for _ in range(count_agreed):
@@ -2373,7 +2376,8 @@ def get_annual_report_excel_from_data():
                             'agreed': True
                         })
                     # สร้าง dummy records สำหรับ not agreed
-                    for _ in range(count_all - count_agreed):
+                    not_agreed_count = count_all - count_agreed
+                    for _ in range(max(0, not_agreed_count)):
                         timestamp = datetime(year, month_num, 15).timestamp() * 1000
                         trade_data.append({
                             'document_date': f'/Date({int(timestamp)})/',

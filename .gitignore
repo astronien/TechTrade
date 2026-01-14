@@ -33,3 +33,4 @@ Thumbs.db
 
 # Custom zones data (user-specific)
 custom_zones.json
+.env*.local

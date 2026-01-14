@@ -2,6 +2,7 @@
 from openpyxl import Workbook
 from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
 from datetime import datetime
 from collections import defaultdict
 import os
@@ -325,7 +326,7 @@ def generate_annual_excel_report_for_zone(branches_data, year, zone_name, month=
     ws.column_dimensions['A'].width = 25
     ws.column_dimensions['B'].width = 12
     for col_idx in range(3, total_col_idx + 1):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 7
+        ws.column_dimensions[get_column_letter(col_idx)].width = 7
     
     # สร้างกราฟแท่ง (Bar Chart) - เฉพาะ "ทั้งหมด" ของแต่ละสาขา
     chart = BarChart()
@@ -518,7 +519,7 @@ def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=N
     # ปรับความกว้างคอลัมน์
     ws.column_dimensions['A'].width = 15
     for col_idx in range(2, 15):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 8
+        ws.column_dimensions[get_column_letter(col_idx)].width = 8
     
     # สร้าง Bar Chart (เปรียบเทียบ 3 ประเภท)
     bar_chart = BarChart()
