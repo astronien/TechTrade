@@ -1682,8 +1682,8 @@
                 }
             };
 
-            // Chunk branches into batches of 3 (Optimized: 3 branches * 3 months = 9 concurrent requests safe)
-            const batchSize = 3;
+            // Chunk branches into batches of 1 (Safe Mode: Sequential branches, Parallel Months)
+            const batchSize = 1;
             for (let i = 0; i < branchIds.length; i += batchSize) {
                 const batch = branchIds.slice(i, i + batchSize);
 

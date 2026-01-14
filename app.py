@@ -576,7 +576,7 @@ def fetch_data_from_api(start=0, length=50, **filters):
                 print(f"🩹 Healing Attempt {attempt}...")
                 payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
             
-            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=60)
+            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=120)
             
             # ตรวจสอบ Error 500 เพื่อทำ Auto-Healing
             if response.status_code == 500:
@@ -881,7 +881,7 @@ def fetch_all_for_branch(filters):
     
     # ปรับ timeout ตามสภาพแวดล้อม
     is_vercel = os.environ.get('VERCEL', False)
-    max_time = 20 if is_vercel else 60
+    max_time = 100 if is_vercel else 120  # increased from 20/60
     max_items = 10000 if is_vercel else 50000
     
     length = 1000
