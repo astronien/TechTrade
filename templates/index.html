@@ -1682,8 +1682,8 @@
                 }
             };
 
-            // Chunk branches into batches of 1 (Safe Mode: Sequential branches, Parallel Months)
-            const batchSize = 1;
+            // Chunk branches into batches of 2 (Safe Limit: 2 branches * 3 months = 6 concurrent requests = Browser Limit)
+            const batchSize = 2;
             for (let i = 0; i < branchIds.length; i += batchSize) {
                 const batch = branchIds.slice(i, i + batchSize);
 
