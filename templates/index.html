@@ -1489,12 +1489,14 @@
                 return { month: monthNames[m - 1], month_number: m, count: 0, agreed: 0, not_agreed: 0 };
             };
 
-            // แบ่งทำเป็นชุด ชุดละ 3 เดือน (Optimized for 100% success)
+            // แบ่งทำเป็นชุด ชุดละ 2 เดือน (Reduced Load for Stability)
             const batches = [
-                [1, 2, 3],
-                [4, 5, 6],
-                [7, 8, 9],
-                [10, 11, 12]
+                [1, 2],
+                [3, 4],
+                [5, 6],
+                [7, 8],
+                [9, 10],
+                [11, 12]
             ];
 
             for (let i = 0; i < batches.length; i++) {
@@ -1682,7 +1684,7 @@
                 }
             };
 
-            // Chunk branches into batches of 2 (Safe Limit: 2 branches * 3 months = 6 concurrent requests = Browser Limit)
+            // Chunk branches into batches of 2 (Safe Limit: 2 branches * 2 months = 4 concurrent requests)
             const batchSize = 2;
             for (let i = 0; i < branchIds.length; i += batchSize) {
                 const batch = branchIds.slice(i, i + batchSize);
