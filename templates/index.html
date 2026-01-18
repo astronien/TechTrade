@@ -745,16 +745,33 @@
             }
 
             // เพิ่ม options
+            console.log('🔍 Zones data received:', zones);
             zones.forEach(zone => {
+                // แปลง branch_ids เป็น array ถ้าเป็น string
+                let branchIds = zone.branch_ids;
+                if (typeof branchIds === 'string') {
+                    try {
+                        branchIds = JSON.parse(branchIds);
+                    } catch (e) {
+                        console.error('Error parsing branch_ids:', e);
+                        branchIds = [];
+                    }
+                }
+                zone.branch_ids = branchIds || [];
+
+                const branchCount = Array.isArray(zone.branch_ids) ? zone.branch_ids.length : 0;
+
                 const option1 = document.createElement('option');
                 option1.value = zone.zone_id;
-                option1.textContent = `${zone.zone_name} (${zone.branch_ids.length} สาขา)`;
+                option1.textContent = `${zone.zone_name} (${branchCount} สาขา)`;
                 zoneSelect.appendChild(option1);
 
                 const option2 = document.createElement('option');
                 option2.value = zone.zone_id;
-                option2.textContent = `${zone.zone_name} (${zone.branch_ids.length} สาขา)`;
+                option2.textContent = `${zone.zone_name} (${branchCount} สาขา)`;
                 reportZoneSelect.appendChild(option2);
+
+                console.log(`   ✓ Added zone: ${zone.zone_id} - ${zone.zone_name} (${branchCount} branches)`);
             });
 
             console.log(`✅ โหลด ${zones.length} Zones (รวม custom zones)`);
