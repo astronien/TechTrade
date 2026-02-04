@@ -12,6 +12,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'techtrade_dev_secret_key_fixed_12345')
 app.permanent_session_lifetime = timedelta(days=7) # Remember login for 7 days
 
+# Global Cache for Dynamic Params
+DYNAMIC_PARAMS_CACHE = {
+    'data': None,
+    'timestamp': 0
+}
+CACHE_DURATION = 300 # 5 minutes
+
 # Supabase Database Connection
 def get_db_connection():
     """สร้าง connection ไปยัง Supabase PostgreSQL"""
@@ -215,9 +222,21 @@ def get_system_setting(key):
         return None
 
 def get_dynamic_params():
-    """ดึง parameters เพิ่มเติมจาก DB"""
+    """ดึง parameters เพิ่มเติมจาก DB (Cached)"""
+    global DYNAMIC_PARAMS_CACHE
+    import time
+    
+    current_time = time.time()
+    
+    # Check cache validity
+    if DYNAMIC_PARAMS_CACHE['data'] is not None and \
+       (current_time - DYNAMIC_PARAMS_CACHE['timestamp'] < CACHE_DURATION):
+        return DYNAMIC_PARAMS_CACHE['data']
+        
     conn = get_db_connection()
-    if not conn: return {}
+    if not conn: 
+        # Return cached data if DB fails (fallback)
+        return DYNAMIC_PARAMS_CACHE['data'] or {}
     
     params = {}
     try:
@@ -230,13 +249,18 @@ def get_dynamic_params():
             
         cur.close()
         conn.close()
+        
+        # Update Cache
+        DYNAMIC_PARAMS_CACHE['data'] = params
+        DYNAMIC_PARAMS_CACHE['timestamp'] = current_time
+        
         if params:
-            print(f"🧩 Loaded dynamic params: {list(params.keys())}")
+            print(f"🧩 Loaded dynamic params (Updated Cache): {list(params.keys())}")
         return params
     except Exception as e:
         print(f"❌ Error fetching dynamic params: {e}")
         if conn: conn.close()
-        return {}
+        return DYNAMIC_PARAMS_CACHE['data'] or {}
 
 def save_dynamic_param(key, value=""):
     """บันทึก parameter ใหม่ลง DB"""
@@ -576,7 +600,7 @@ def fetch_data_from_api(start=0, length=50, **filters):
                 print(f"🩹 Healing Attempt {attempt}...")
                 payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
             
-            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=180)
+            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=45)
             
             # ตรวจสอบ Error 500 เพื่อทำ Auto-Healing
             if response.status_code == 500:
