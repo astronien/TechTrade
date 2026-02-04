@@ -662,15 +662,7 @@ def fetch_data_from_api(start=0, length=50, **filters):
         # Fallback
         return {"error": str(e)}
 
-    # The exception handlers below (original lines 637+) need to be kept or adapted.
-    # Since we wrapped the 'requests.post' in a loop with try/except, the original outer try/except is gone.
-    # We should restore the original exception handling structure.
 
-        print(f"❌ Connection Error: {str(e)}")
-        return {"error": "ไม่สามารถเชื่อมต่อ API ได้ - กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"}
-    except requests.exceptions.RequestException as e:
-        print(f"❌ API Error: {str(e)}")
-        return {"error": str(e)}
 
 def fetch_data_with_retry(start=0, length=50, max_retries=3, **filters):
     """ดึงข้อมูลจาก API พร้อม retry mechanism"""
