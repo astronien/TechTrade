@@ -599,15 +599,6 @@ def fetch_data_from_api(start=0, length=50, **filters):
     
     # ใช้ Session เพื่อ reuse connection
     with requests.Session() as session:
-        # รองรับ Proxy (ถ้ามี)
-        proxy_url = os.environ.get('PROXY_URL')
-        if proxy_url:
-            session.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            print(f"🌐 Using Proxy: {proxy_url}")
-            
         # Retry loop สำหรับ Auto-Healing
         max_healing_retries = 2
         for attempt in range(max_healing_retries + 1):
