@@ -563,7 +563,13 @@ def fetch_data_from_api(start=0, length=50, **filters):
         'Origin': 'https://eve.techswop.com',
         'Referer': 'https://eve.techswop.com/ti/index.aspx',
         'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin'
     }
     
     # เตรียม cookies ถ้ามี session_id
@@ -591,61 +597,63 @@ def fetch_data_from_api(start=0, length=50, **filters):
     print(f"   Session ID: {session_id[:10] if session_id else 'N/A'}...")
     print(f"🔍 DEBUG: Full payload branchID field: {payload.get('branchID')}")
     
-    # Retry loop สำหรับ Auto-Healing
-    max_healing_retries = 2
-    for attempt in range(max_healing_retries + 1):
-        try:
-            # Re-generate payload ในทุกรอบ เพราะ dynamic params อาจเปลี่ยนไปหลัง healing
-            # (รอบแรกใช้อันที่สร้างมาแล้ว ถ้ารอบ 2 สร้างใหม่)
-            if attempt > 0:
-                print(f"🩹 Healing Attempt {attempt}...")
-                payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
-            
-            response = requests.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=45)
-            
-            # ตรวจสอบ Error 500 เพื่อทำ Auto-Healing
-            if response.status_code == 500:
-                print(f"🔥 Got 500 Error. Checking for missing parameters...")
-                try:
-                    error_json = response.json()
-                    error_msg = error_json.get('Message', '')
-                    
-                    # Regex หา Missing Parameter
-                    # ตัวอย่าง: "Invalid web service call, missing value for parameter: 'ufund'."
-                    import re
-                    match = re.search(r"missing value for parameter: '(\w+)'", error_msg)
-                    if match:
-                        missing_param = match.group(1)
-                        print(f"💡 Found missing parameter: {missing_param}")
-                        
-                        # บันทึกลง DB
-                        save_dynamic_param(missing_param, "")
-                        print(f"✅ Auto-Healed! Added '{missing_param}' to dynamic params.")
-                        
-                        # Continue เพื่อเริ่มลูปใหม่ (ซึ่งจะไปดึง param ใหม่มาใช้)
-                        continue
-                except:
-                    pass # ถ้า parse ไม่ได้ก็ปล่อยไปตามยถากรรม
-            
-            response.raise_for_status()
-            result = response.json()
-        
-            # ถ้าสำเร็จ (หรือไม่ใช่ 500) ให้ break loop ออกไป return ผลลัพธ์
-            # แต่ถ้ายังเป็น 500 และไม่เจอ params ขาด ก็จะหลุดมา raise_for_status ข้างล่างอยู่ดี
-            break 
-            
-        except requests.exceptions.RequestException as e:
-            # ถ้าเป็น error ทั่วไป (timeout, connection)
-            print(f"⚠️ API Error (Attempt {attempt}): {e}")
-            
-            if attempt < max_healing_retries:
-                import time
-                time.sleep(1) # รอสักครู่ก่อนลองใหม่
-                continue
+    # ใช้ Session เพื่อ reuse connection
+    with requests.Session() as session:
+        # Retry loop สำหรับ Auto-Healing
+        max_healing_retries = 2
+        for attempt in range(max_healing_retries + 1):
+            try:
+                # Re-generate payload ในทุกรอบ เพราะ dynamic params อาจเปลี่ยนไปหลัง healing
+                # (รอบแรกใช้อันที่สร้างมาแล้ว ถ้ารอบ 2 สร้างใหม่)
+                if attempt > 0:
+                    print(f"🩹 Healing Attempt {attempt}...")
+                    payload = get_datatables_payload(start, length, branch_id=branch_id, **filters)
                 
-            # ถ้าเป็นรอบสุดท้าย ให้ return error
-            print(f"❌ API Failed after {max_healing_retries} retries: {e}")
-            return {"error": str(e)} 
+                response = session.post(API_URL, headers=headers, json=payload, cookies=cookies, timeout=45)
+                
+                # ตรวจสอบ Error 500 เพื่อทำ Auto-Healing
+                if response.status_code == 500:
+                    print(f"🔥 Got 500 Error. Checking for missing parameters...")
+                    try:
+                        error_json = response.json()
+                        error_msg = error_json.get('Message', '')
+                        
+                        # Regex หา Missing Parameter
+                        # ตัวอย่าง: "Invalid web service call, missing value for parameter: 'ufund'."
+                        import re
+                        match = re.search(r"missing value for parameter: '(\w+)'", error_msg)
+                        if match:
+                            missing_param = match.group(1)
+                            print(f"💡 Found missing parameter: {missing_param}")
+                            
+                            # บันทึกลง DB
+                            save_dynamic_param(missing_param, "")
+                            print(f"✅ Auto-Healed! Added '{missing_param}' to dynamic params.")
+                            
+                            # Continue เพื่อเริ่มลูปใหม่ (ซึ่งจะไปดึง param ใหม่มาใช้)
+                            continue
+                    except:
+                        pass # ถ้า parse ไม่ได้ก็ปล่อยไปตามยถากรรม
+                
+                response.raise_for_status()
+                result = response.json()
+            
+                # ถ้าสำเร็จ (หรือไม่ใช่ 500) ให้ break loop ออกไป return ผลลัพธ์
+                # แต่ถ้ายังเป็น 500 และไม่เจอ params ขาด ก็จะหลุดมา raise_for_status ข้างล่างอยู่ดี
+                break 
+                
+            except requests.exceptions.RequestException as e:
+                # ถ้าเป็น error ทั่วไป (timeout, connection)
+                print(f"⚠️ API Error (Attempt {attempt}): {e}")
+                
+                if attempt < max_healing_retries:
+                    import time
+                    time.sleep(1) # รอสักครู่ก่อนลองใหม่
+                    continue
+                    
+                # ถ้าเป็นรอบสุดท้าย ให้ return error
+                print(f"❌ API Failed after {max_healing_retries} retries: {e}")
+                return {"error": str(e)} 
             
     # Move logging and return logic outside/inside try based on original structure
     # Original structure handled exceptions for the whole block.
