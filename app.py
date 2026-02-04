@@ -33,7 +33,8 @@ def get_db_connection():
         from psycopg2.extras import RealDictCursor
         conn = psycopg2.connect(
             db_url,
-            cursor_factory=RealDictCursor
+            cursor_factory=RealDictCursor,
+            connect_timeout=10
         )
         print("✅ Database connected successfully")
         return conn
