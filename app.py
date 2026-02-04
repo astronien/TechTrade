@@ -634,13 +634,17 @@ def fetch_data_from_api(start=0, length=50, **filters):
             break 
             
         except requests.exceptions.RequestException as e:
-            # ถ้าเป็น error ทั่วไป (timeout, connection) ให้โยนต่อไปเลย หรือจัดการตาม logic เดิม
-            # แต่ในที่นี้เราเก็บ logic เดิมไว้ตอนท้าย
-            if attempt == max_healing_retries:
-                raise e
-            # ถ้ายังไม่ใช่รอบสุดท้าย ให้ลองใหม่ (สำหรับ healing เราอาจจะไม่ retry connection error 
-            # แต่ในโค้ดเดิมไม่ได้มี retry loop ซ้อนกัน เราจะปล่อยให้ raise ไป function แม่จัดการ)
-            raise e 
+            # ถ้าเป็น error ทั่วไป (timeout, connection)
+            print(f"⚠️ API Error (Attempt {attempt}): {e}")
+            
+            if attempt < max_healing_retries:
+                import time
+                time.sleep(1) # รอสักครู่ก่อนลองใหม่
+                continue
+                
+            # ถ้าเป็นรอบสุดท้าย ให้ return error
+            print(f"❌ API Failed after {max_healing_retries} retries: {e}")
+            return {"error": str(e)} 
             
     # Move logging and return logic outside/inside try based on original structure
     # Original structure handled exceptions for the whole block.
