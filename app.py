@@ -845,7 +845,7 @@ def download_extension():
 def get_data():
     """API endpoint สำหรับดึงข้อมูล"""
     start = request.args.get('start', 0, type=int)
-    length = request.args.get('length', 1000, type=int)  # เพิ่มเป็น 1000
+    length = request.args.get('length', 50, type=int)  # ลดเหลือ 50 เพื่อป้องกัน Timeout
     session_id = request.args.get('sessionId', '')  # รับ Session ID จาก client
     
     # รับพารามิเตอร์จากฟอร์ม
@@ -913,7 +913,7 @@ def fetch_all_for_branch(filters):
     max_time = 160 if is_vercel else 120
     max_items = 10000 if is_vercel else 50000
     
-    length = 1000
+    length = 100
     start = 0
     all_items = []
     batch_count = 0
