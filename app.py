@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import os
 import secrets
 import hashlib
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 app = Flask(__name__)
 # Use a fixed secret key for development to avoid session invalidation on restart
@@ -99,6 +101,40 @@ def init_database():
                 param_key VARCHAR(255) PRIMARY KEY,
                 param_value TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # สร้างตาราง auto_cancel_config
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS auto_cancel_config (
+                id SERIAL PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                schedule_time VARCHAR(5) DEFAULT '23:00',
+                branch_ids TEXT DEFAULT '',
+                emp_code VARCHAR(50) DEFAULT '',
+                emp_name VARCHAR(100) DEFAULT '',
+                emp_phone VARCHAR(20) DEFAULT '',
+                cancel_type VARCHAR(5) DEFAULT '1',
+                reason_cancel VARCHAR(5) DEFAULT '1',
+                description TEXT DEFAULT '-',
+                telegram_bot_token TEXT DEFAULT '',
+                telegram_chat_id TEXT DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # สร้างตาราง auto_cancel_log
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS auto_cancel_log (
+                id SERIAL PRIMARY KEY,
+                run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                branch_ids TEXT DEFAULT '',
+                total_found INTEGER DEFAULT 0,
+                total_cancelled INTEGER DEFAULT 0,
+                total_skipped INTEGER DEFAULT 0,
+                total_failed INTEGER DEFAULT 0,
+                details TEXT DEFAULT '',
+                telegram_sent BOOLEAN DEFAULT FALSE
             )
         """)
         
@@ -2966,6 +3002,440 @@ def update_branches_data():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# Auto-Cancel Scheduler System
+# ============================================================
+
+scheduler = BackgroundScheduler(timezone='Asia/Bangkok')
+
+def get_auto_cancel_config():
+    """ดึง config auto-cancel จาก DB"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM auto_cancel_config ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            columns = ['id', 'enabled', 'schedule_time', 'branch_ids', 'emp_code', 'emp_name',
+                       'emp_phone', 'cancel_type', 'reason_cancel', 'description',
+                       'telegram_bot_token', 'telegram_chat_id', 'updated_at']
+            return dict(zip(columns, row))
+        return None
+    except Exception as e:
+        print(f"❌ Error getting auto-cancel config: {e}")
+        return None
+
+def save_auto_cancel_config(config):
+    """บันทึก config auto-cancel ลง DB"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        cur = conn.cursor()
+        
+        # ลบ config เก่า แล้ว insert ใหม่ (single row)
+        cur.execute("DELETE FROM auto_cancel_config")
+        cur.execute("""
+            INSERT INTO auto_cancel_config 
+            (enabled, schedule_time, branch_ids, emp_code, emp_name, emp_phone,
+             cancel_type, reason_cancel, description, telegram_bot_token, telegram_chat_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            config.get('enabled', False),
+            config.get('schedule_time', '23:00'),
+            config.get('branch_ids', ''),
+            config.get('emp_code', ''),
+            config.get('emp_name', ''),
+            config.get('emp_phone', ''),
+            config.get('cancel_type', '1'),
+            config.get('reason_cancel', '1'),
+            config.get('description', '-'),
+            config.get('telegram_bot_token', ''),
+            config.get('telegram_chat_id', '')
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Error saving auto-cancel config: {e}")
+        return False
+
+def save_auto_cancel_log(log_data):
+    """บันทึก log การรัน auto-cancel"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO auto_cancel_log 
+            (branch_ids, total_found, total_cancelled, total_skipped, total_failed, details, telegram_sent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            log_data.get('branch_ids', ''),
+            log_data.get('total_found', 0),
+            log_data.get('total_cancelled', 0),
+            log_data.get('total_skipped', 0),
+            log_data.get('total_failed', 0),
+            log_data.get('details', ''),
+            log_data.get('telegram_sent', False)
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"❌ Error saving auto-cancel log: {e}")
+
+def send_telegram_notification(bot_token, chat_id, message):
+    """ส่งแจ้งเตือน Telegram"""
+    try:
+        if not bot_token or not chat_id:
+            print("⚠️ Telegram not configured, skipping notification")
+            return False
+        url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+        response = requests.post(url, json={
+            'chat_id': chat_id,
+            'text': message,
+            'parse_mode': 'HTML'
+        })
+        result = response.json()
+        if result.get('ok'):
+            print("✅ Telegram notification sent")
+            return True
+        else:
+            print(f"❌ Telegram error: {result.get('description')}")
+            return False
+    except Exception as e:
+        print(f"❌ Telegram error: {e}")
+        return False
+
+def run_auto_cancel():
+    """ฟังก์ชันหลัก: ยกเลิกรายการเทรดอัตโนมัติ"""
+    print("\n" + "="*60)
+    print(f"⏰ Auto-Cancel Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("="*60)
+    
+    config = get_auto_cancel_config()
+    if not config or not config.get('enabled'):
+        print("⚠️ Auto-cancel is disabled, skipping")
+        return
+    
+    branch_ids_str = config.get('branch_ids', '')
+    if not branch_ids_str:
+        print("⚠️ No branches configured, skipping")
+        return
+    
+    branch_ids = [b.strip() for b in branch_ids_str.split(',') if b.strip()]
+    emp_code = config.get('emp_code', '')
+    emp_name = config.get('emp_name', '')
+    emp_phone = config.get('emp_phone', '')
+    cancel_type = config.get('cancel_type', '1')
+    reason_cancel = config.get('reason_cancel', '1')
+    description = config.get('description', '-')
+    
+    # Eve session
+    session_id = get_eve_session()
+    if not session_id:
+        print("❌ Cannot get Eve session, aborting")
+        return
+    
+    eve_cookies = {'ASP.NET_SessionId': session_id}
+    headers = {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Origin': 'https://eve.techswop.com',
+        'Referer': 'https://eve.techswop.com/ti/index.aspx',
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15'
+    }
+    
+    today = datetime.now().strftime('%d/%m/%Y')
+    total_found = 0
+    total_cancelled = 0
+    total_skipped = 0
+    total_failed = 0
+    details_list = []
+    
+    for branch_id in branch_ids:
+        print(f"\n🔍 Processing branch: {branch_id}")
+        try:
+            # ดึงข้อมูลเทรดวันนี้
+            result = fetch_data_from_api(
+                start=0, length=200,
+                branch_id=branch_id,
+                date_start=today,
+                date_end=today
+            )
+            
+            if not result or 'data' not in result:
+                print(f"  ⚠️ No data for branch {branch_id}")
+                continue
+            
+            items = result['data']
+            # กรองเฉพาะ "รอผู้ขายยืนยันราคา"
+            pending_items = [item for item in items 
+                           if item.get('BIDDING_STATUS_NAME') == 'รอผู้ขายยืนยันราคา']
+            
+            print(f"  📊 Found {len(pending_items)}/{len(items)} items with status 'รอผู้ขายยืนยันราคา'")
+            total_found += len(pending_items)
+            
+            for item in pending_items:
+                trade_in_id = item.get('trade_in_id', '')
+                doc_no = item.get('document_no', trade_in_id)
+                
+                try:
+                    # Pre-check
+                    check_resp = requests.post(
+                        'https://eve.techswop.com/ti/index.aspx/CheckAllowCancel',
+                        headers=headers,
+                        json={"trade_in_id": int(trade_in_id)},
+                        cookies=eve_cookies
+                    )
+                    
+                    if check_resp.status_code == 200:
+                        check_result = check_resp.json()
+                        d = check_result.get('d', {})
+                        can_cancel = d.get('is_success', False) or d.get('allow_cancel', False) or d.get('success', False)
+                        
+                        if not can_cancel:
+                            total_skipped += 1
+                            msg = d.get('message', 'ไม่อนุญาต')
+                            if isinstance(msg, list):
+                                msg = ', '.join(msg)
+                            details_list.append(f"⏭️ {doc_no}: {msg}")
+                            print(f"  ⏭️ Skip {doc_no}: {msg}")
+                            continue
+                    else:
+                        total_skipped += 1
+                        details_list.append(f"⏭️ {doc_no}: check failed HTTP {check_resp.status_code}")
+                        continue
+                    
+                    # ยกเลิกจริง
+                    cancel_payload = {
+                        "param": {
+                            "TRADE_IN_ID": str(trade_in_id),
+                            "EMP_CODE": emp_code,
+                            "EMP_FULL_NAME": emp_name,
+                            "EMP_PHONE_NUMBER": emp_phone,
+                            "REASON": description,
+                            "CANCEL_STATUS": cancel_type,
+                            "REASON_CANCEL": reason_cancel,
+                            "DESCRIPTION": description
+                        }
+                    }
+                    
+                    cancel_resp = requests.post(
+                        'https://eve.techswop.com/ti/index.aspx/CancelData',
+                        headers=headers,
+                        json=cancel_payload,
+                        cookies=eve_cookies
+                    )
+                    
+                    if cancel_resp.status_code == 200:
+                        cancel_result = cancel_resp.json()
+                        d = cancel_result.get('d', {})
+                        is_success = d.get('is_success', False) or d.get('success', False)
+                        
+                        if is_success:
+                            total_cancelled += 1
+                            details_list.append(f"✅ {doc_no}: ยกเลิกสำเร็จ")
+                            print(f"  ✅ Cancelled {doc_no}")
+                        else:
+                            total_failed += 1
+                            msg = d.get('message', 'ไม่ทราบสาเหตุ')
+                            if isinstance(msg, list):
+                                msg = ', '.join(msg)
+                            details_list.append(f"❌ {doc_no}: {msg}")
+                            print(f"  ❌ Failed {doc_no}: {msg}")
+                    else:
+                        total_failed += 1
+                        details_list.append(f"❌ {doc_no}: HTTP {cancel_resp.status_code}")
+                
+                except Exception as e:
+                    total_failed += 1
+                    details_list.append(f"❌ {doc_no}: {str(e)}")
+                    print(f"  ❌ Error {doc_no}: {e}")
+                
+                # Delay ระหว่างรายการ
+                import time
+                time.sleep(0.5)
+        
+        except Exception as e:
+            print(f"  ❌ Error processing branch {branch_id}: {e}")
+            details_list.append(f"❌ Branch {branch_id}: {str(e)}")
+    
+    # สรุปผล
+    summary = f"""⏰ <b>Auto-Cancel Report</b>
+📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}
+🏪 สาขา: {', '.join(branch_ids)}
+👤 พนักงาน: {emp_name} ({emp_code})
+
+📊 <b>สรุป:</b>
+🔍 พบทั้งหมด: {total_found} รายการ
+✅ ยกเลิกสำเร็จ: {total_cancelled}
+⏭️ ข้าม (ยกเลิกไปแล้ว): {total_skipped}
+❌ ล้มเหลว: {total_failed}"""
+    
+    if details_list:
+        summary += "\n\n📋 <b>รายละเอียด:</b>\n" + "\n".join(details_list[:20])
+        if len(details_list) > 20:
+            summary += f"\n... และอีก {len(details_list) - 20} รายการ"
+    
+    print(f"\n📊 Summary: Found={total_found}, Cancelled={total_cancelled}, Skipped={total_skipped}, Failed={total_failed}")
+    
+    # ส่ง Telegram
+    telegram_sent = send_telegram_notification(
+        config.get('telegram_bot_token', ''),
+        config.get('telegram_chat_id', ''),
+        summary
+    )
+    
+    # บันทึก log
+    save_auto_cancel_log({
+        'branch_ids': branch_ids_str,
+        'total_found': total_found,
+        'total_cancelled': total_cancelled,
+        'total_skipped': total_skipped,
+        'total_failed': total_failed,
+        'details': '\n'.join(details_list[:50]),
+        'telegram_sent': telegram_sent
+    })
+    
+    print(f"⏰ Auto-Cancel Completed\n")
+
+def start_auto_cancel_scheduler():
+    """เริ่ม scheduler จาก config ใน DB"""
+    try:
+        config = get_auto_cancel_config()
+        if not config or not config.get('enabled'):
+            print("⏰ Auto-cancel scheduler: disabled")
+            return
+        
+        schedule_time = config.get('schedule_time', '23:00')
+        hour, minute = schedule_time.split(':')
+        
+        # ลบ job เก่า (ถ้ามี)
+        if scheduler.get_job('auto_cancel'):
+            scheduler.remove_job('auto_cancel')
+        
+        scheduler.add_job(
+            run_auto_cancel,
+            'cron',
+            hour=int(hour),
+            minute=int(minute),
+            id='auto_cancel',
+            replace_existing=True
+        )
+        
+        if not scheduler.running:
+            scheduler.start()
+            atexit.register(lambda: scheduler.shutdown())
+        
+        print(f"⏰ Auto-cancel scheduler: enabled at {schedule_time}")
+    except Exception as e:
+        print(f"❌ Error starting auto-cancel scheduler: {e}")
+
+def reschedule_auto_cancel():
+    """Reschedule job เมื่อ config เปลี่ยน"""
+    try:
+        # ลบ job เก่า
+        if scheduler.get_job('auto_cancel'):
+            scheduler.remove_job('auto_cancel')
+        
+        config = get_auto_cancel_config()
+        if not config or not config.get('enabled'):
+            print("⏰ Auto-cancel scheduler: disabled (removed job)")
+            return
+        
+        schedule_time = config.get('schedule_time', '23:00')
+        hour, minute = schedule_time.split(':')
+        
+        scheduler.add_job(
+            run_auto_cancel,
+            'cron',
+            hour=int(hour),
+            minute=int(minute),
+            id='auto_cancel',
+            replace_existing=True
+        )
+        
+        if not scheduler.running:
+            scheduler.start()
+            atexit.register(lambda: scheduler.shutdown())
+        
+        print(f"⏰ Auto-cancel rescheduled to {schedule_time}")
+    except Exception as e:
+        print(f"❌ Error rescheduling auto-cancel: {e}")
+
+# API Routes for Auto-Cancel Config
+@app.route('/api/admin/auto-cancel-config', methods=['GET', 'POST'])
+def manage_auto_cancel_config():
+    """API สำหรับจัดการ config auto-cancel"""
+    if request.method == 'GET':
+        config = get_auto_cancel_config()
+        if config:
+            config['updated_at'] = str(config.get('updated_at', ''))
+            return jsonify({'success': True, 'config': config})
+        return jsonify({'success': True, 'config': None})
+    
+    # POST - save config
+    try:
+        data = request.get_json()
+        success = save_auto_cancel_config(data)
+        if success:
+            reschedule_auto_cancel()
+            return jsonify({'success': True, 'message': 'บันทึกสำเร็จ'})
+        return jsonify({'success': False, 'error': 'บันทึกไม่สำเร็จ'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-cancel-test', methods=['POST'])
+def test_auto_cancel():
+    """ทดสอบรัน auto-cancel ทันที"""
+    try:
+        import threading
+        thread = threading.Thread(target=run_auto_cancel)
+        thread.start()
+        return jsonify({'success': True, 'message': 'เริ่มรัน auto-cancel แล้ว ดูผลลัพธ์ใน Telegram และ log'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-cancel-logs', methods=['GET'])
+def get_auto_cancel_logs():
+    """ดึง log การรัน auto-cancel"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM auto_cancel_log ORDER BY run_at DESC LIMIT 10")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        logs = []
+        columns = ['id', 'run_at', 'branch_ids', 'total_found', 'total_cancelled',
+                   'total_skipped', 'total_failed', 'details', 'telegram_sent']
+        for row in rows:
+            log = dict(zip(columns, row))
+            log['run_at'] = str(log['run_at'])
+            logs.append(log)
+        
+        return jsonify({'success': True, 'logs': logs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# เริ่ม scheduler เมื่อ app start (เฉพาะ non-debug reloader)
+import os as _os
+if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+    start_auto_cancel_scheduler()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)

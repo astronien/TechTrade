@@ -26,6 +26,8 @@
                     ค้นหาข้อมูล</a></li>
             <li><a href="#" onclick="showPage('report', event); return false;"><span>📈</span> รายงานยอดเทรด</a></li>
             <li><a href="#" onclick="showPage('zones', event); return false;"><span>🗺️</span> จัดการ Zone</a></li>
+            <li><a href="#" onclick="showPage('autocancel', event); return false;"><span>⏰</span> ยกเลิกอัตโนมัติ</a>
+            </li>
             <li><a href="#" onclick="openSettings(); return false;"><span>⚙️</span> ตั้งค่า</a></li>
             <li><a href="#" onclick="showTelegramSetup(); return false;"><span>📱</span> ตั้งค่า Telegram</a></li>
             <li style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
@@ -267,6 +269,129 @@
             </div>
         </div>
         <!-- End Zone Management Page -->
+
+        <!-- Auto-Cancel Page -->
+        <div id="autocancelPage" class="page-section">
+            <div class="container">
+                <h1>⏰ ยกเลิกอัตโนมัติ</h1>
+
+                <div class="search-panel">
+                    <!-- Toggle -->
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <div>
+                            <h3 style="margin:0; color: var(--text-main);">Auto-Cancel</h3>
+                            <small style="color: var(--text-muted);">ยกเลิกรายการ "รอผู้ขายยืนยันราคา"
+                                อัตโนมัติตามเวลาที่ตั้ง</small>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="acEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                            <span id="acStatusText" style="font-weight: 600; color: var(--text-muted);">ปิดอยู่</span>
+                        </label>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- เวลา -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>⏰ เวลายกเลิก</label>
+                            <input type="time" id="acTime" value="23:00" class="form-control">
+                        </div>
+                    </div>
+
+                    <!-- สาขา -->
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label>🏪 สาขา (เลือกได้หลายสาขา)</label>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <select id="acBranchSelect" class="form-control" style="flex: 1;">
+                                <option value="">-- เลือกสาขา --</option>
+                            </select>
+                            <button onclick="addAutoCancelBranch()"
+                                style="padding: 8px 16px; font-size: 13px; white-space: nowrap;">➕ เพิ่ม</button>
+                        </div>
+                        <div id="acSelectedBranches" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- ข้อมูลพนักงาน -->
+                    <h3 style="color: var(--primary); margin-bottom: 15px;">👤 ข้อมูลพนักงาน</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>รหัสพนักงาน</label>
+                            <input type="text" id="acEmpCode" placeholder="เช่น 12345" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>ชื่อพนักงาน</label>
+                            <input type="text" id="acEmpName" placeholder="ชื่อ-นามสกุล" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>เบอร์โทร</label>
+                            <input type="text" id="acEmpPhone" placeholder="เช่น 081-234-5678" class="form-control">
+                        </div>
+                    </div>
+
+                    <!-- ประเภท/สาเหตุ -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>ประเภทการยกเลิก</label>
+                            <select id="acCancelType" class="form-control">
+                                <option value="1">โดนยกเลิกจากผู้ขาย</option>
+                                <option value="2">อื่นๆ</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>สาเหตุการยกเลิก</label>
+                            <select id="acReasonCancel" class="form-control">
+                                <option value="1">ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง</option>
+                                <option value="2">ราคาไม่ตรงตามที่ต้องการ</option>
+                                <option value="3">อื่นๆ</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label>เหตุผลเพิ่มเติม</label>
+                        <input type="text" id="acDescription" placeholder="ระบุเหตุผล (ถ้ามี)" class="form-control">
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- Telegram -->
+                    <h3 style="color: #0088cc; margin-bottom: 15px;">📱 แจ้งเตือน Telegram</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Bot Token</label>
+                            <input type="text" id="acTelegramToken" placeholder="Bot Token" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>Chat ID</label>
+                            <input type="text" id="acTelegramChatId" placeholder="Chat ID" class="form-control">
+                        </div>
+                    </div>
+
+                    <!-- ปุ่ม -->
+                    <div style="display: flex; gap: 15px; margin-top: 25px;">
+                        <button onclick="saveAutoCancelConfig()" style="padding: 12px 30px;">💾 บันทึก</button>
+                        <button onclick="testAutoCancel()" class="secondary"
+                            style="padding: 12px 30px; background: #f59e0b; color: white; border: none;">🧪
+                            ทดสอบรันเดี๋ยวนี้</button>
+                    </div>
+                </div>
+
+                <!-- Log -->
+                <div class="data-container">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">📋 ประวัติการรัน</h3>
+                        <button onclick="loadAutoCancelLogs()" class="secondary"
+                            style="padding: 8px 16px; font-size: 13px;">🔄 รีเฟรช</button>
+                    </div>
+                    <div id="acLogsContainer">กดรีเฟรชเพื่อดูประวัติ</div>
+                </div>
+            </div>
+        </div>
+        <!-- End Auto-Cancel Page -->
     </div>
 
     <!-- Modal เพิ่ม/แก้ไข Zone -->
@@ -911,6 +1036,9 @@
             } else if (pageName === 'zones') {
                 document.getElementById('zonesPage').classList.add('active');
                 loadZonesManagement();
+            } else if (pageName === 'autocancel') {
+                document.getElementById('autocancelPage').classList.add('active');
+                loadAutoCancelConfig();
             }
 
             // อัพเดทเมนู active
@@ -1210,6 +1338,206 @@
         });
 
         // ==================== End Zone Management Functions ====================
+
+        // ==================== Auto-Cancel Functions ====================
+        let acSelectedBranchIds = [];
+
+        document.getElementById('acEnabled').addEventListener('change', function () {
+            document.getElementById('acStatusText').textContent = this.checked ? '✅ เปิดใช้งาน' : 'ปิดอยู่';
+            document.getElementById('acStatusText').style.color = this.checked ? '#16a34a' : 'var(--text-muted)';
+        });
+
+        function populateAutoCancelBranches() {
+            const select = document.getElementById('acBranchSelect');
+            // ใช้ branchesData ที่มีอยู่แล้วใน page
+            if (typeof branchesData !== 'undefined' && branchesData.length > 0) {
+                branchesData.forEach(b => {
+                    const option = document.createElement('option');
+                    option.value = b.id || b.branch_id;
+                    option.textContent = `${b.id || b.branch_id} - ${b.name || b.branch_name || ''}`;
+                    select.appendChild(option);
+                });
+            }
+        }
+
+        function addAutoCancelBranch() {
+            const select = document.getElementById('acBranchSelect');
+            const branchId = select.value;
+            if (!branchId) return;
+            if (acSelectedBranchIds.includes(branchId)) {
+                alert('สาขานี้เพิ่มแล้ว');
+                return;
+            }
+
+            acSelectedBranchIds.push(branchId);
+            const branchName = select.options[select.selectedIndex].textContent;
+            renderSelectedBranches();
+            select.value = '';
+        }
+
+        function removeAutoCancelBranch(branchId) {
+            acSelectedBranchIds = acSelectedBranchIds.filter(id => id !== branchId);
+            renderSelectedBranches();
+        }
+
+        function renderSelectedBranches() {
+            const container = document.getElementById('acSelectedBranches');
+            if (acSelectedBranchIds.length === 0) {
+                container.innerHTML = '<span style="color: var(--text-muted); font-size: 14px;">ยังไม่ได้เลือกสาขา</span>';
+                return;
+            }
+
+            container.innerHTML = acSelectedBranchIds.map(id => {
+                // หาชื่อสาขา
+                let name = id;
+                const select = document.getElementById('acBranchSelect');
+                for (let opt of select.options) {
+                    if (opt.value === id) {
+                        name = opt.textContent;
+                        break;
+                    }
+                }
+                return `<span style="background: var(--primary-light); color: var(--primary); 
+                    padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 500;
+                    display: inline-flex; align-items: center; gap: 6px;">
+                    ${name}
+                    <span onclick="removeAutoCancelBranch('${id}')" 
+                        style="cursor: pointer; font-size: 16px; line-height: 1;">&times;</span>
+                </span>`;
+            }).join('');
+        }
+
+        async function loadAutoCancelConfig() {
+            try {
+                populateAutoCancelBranches();
+                const response = await fetch('/api/admin/auto-cancel-config');
+                const result = await response.json();
+
+                if (result.success && result.config) {
+                    const c = result.config;
+                    document.getElementById('acEnabled').checked = c.enabled;
+                    document.getElementById('acEnabled').dispatchEvent(new Event('change'));
+                    document.getElementById('acTime').value = c.schedule_time || '23:00';
+                    document.getElementById('acEmpCode').value = c.emp_code || '';
+                    document.getElementById('acEmpName').value = c.emp_name || '';
+                    document.getElementById('acEmpPhone').value = c.emp_phone || '';
+                    document.getElementById('acCancelType').value = c.cancel_type || '1';
+                    document.getElementById('acReasonCancel').value = c.reason_cancel || '1';
+                    document.getElementById('acDescription').value = c.description || '';
+                    document.getElementById('acTelegramToken').value = c.telegram_bot_token || '';
+                    document.getElementById('acTelegramChatId').value = c.telegram_chat_id || '';
+
+                    // โหลดสาขาที่เลือกไว้
+                    if (c.branch_ids) {
+                        acSelectedBranchIds = c.branch_ids.split(',').map(s => s.trim()).filter(s => s);
+                    } else {
+                        acSelectedBranchIds = [];
+                    }
+                    renderSelectedBranches();
+                }
+                loadAutoCancelLogs();
+            } catch (error) {
+                console.error('Error loading auto-cancel config:', error);
+            }
+        }
+
+        async function saveAutoCancelConfig() {
+            const config = {
+                enabled: document.getElementById('acEnabled').checked,
+                schedule_time: document.getElementById('acTime').value,
+                branch_ids: acSelectedBranchIds.join(','),
+                emp_code: document.getElementById('acEmpCode').value,
+                emp_name: document.getElementById('acEmpName').value,
+                emp_phone: document.getElementById('acEmpPhone').value,
+                cancel_type: document.getElementById('acCancelType').value,
+                reason_cancel: document.getElementById('acReasonCancel').value,
+                description: document.getElementById('acDescription').value || '-',
+                telegram_bot_token: document.getElementById('acTelegramToken').value,
+                telegram_chat_id: document.getElementById('acTelegramChatId').value
+            };
+
+            if (config.enabled && !config.branch_ids) {
+                alert('⚠️ กรุณาเลือกสาขาอย่างน้อย 1 สาขา');
+                return;
+            }
+            if (config.enabled && (!config.emp_code || !config.emp_name || !config.emp_phone)) {
+                alert('⚠️ กรุณากรอกข้อมูลพนักงานให้ครบ');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/auto-cancel-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`✅ บันทึกสำเร็จ!\n\nระบบจะยกเลิกอัตโนมัติ ${config.enabled ? 'เวลา ' + config.schedule_time + ' น. ทุกวัน' : '(ปิดอยู่)'}`);
+                } else {
+                    alert('❌ ' + (result.error || 'บันทึกไม่สำเร็จ'));
+                }
+            } catch (error) {
+                alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+            }
+        }
+
+        async function testAutoCancel() {
+            if (!confirm('🧪 ทดสอบรัน Auto-Cancel เดี๋ยวนี้?\n\nระบบจะยกเลิกรายการจริง ตามสาขาที่ตั้งไว้')) return;
+
+            try {
+                const response = await fetch('/api/admin/auto-cancel-test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ เริ่มรัน Auto-Cancel แล้ว!\n\nรอดูผลลัพธ์ใน Telegram และกดรีเฟรช Log');
+                } else {
+                    alert('❌ ' + (result.error || 'ไม่สำเร็จ'));
+                }
+            } catch (error) {
+                alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+            }
+        }
+
+        async function loadAutoCancelLogs() {
+            const container = document.getElementById('acLogsContainer');
+            container.innerHTML = '⏳ กำลังโหลด...';
+
+            try {
+                const response = await fetch('/api/admin/auto-cancel-logs');
+                const result = await response.json();
+
+                if (result.success && result.logs && result.logs.length > 0) {
+                    let html = '<table class="data-table"><thead><tr>';
+                    html += '<th>เวลา</th><th>สาขา</th><th>พบ</th><th>✅ สำเร็จ</th><th>⏭️ ข้าม</th><th>❌ ล้มเหลว</th><th>Telegram</th>';
+                    html += '</tr></thead><tbody>';
+
+                    result.logs.forEach(log => {
+                        const runDate = new Date(log.run_at);
+                        const dateStr = runDate.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+                        html += `<tr>
+                            <td>${dateStr}</td>
+                            <td>${log.branch_ids}</td>
+                            <td>${log.total_found}</td>
+                            <td style="color: #16a34a; font-weight: 600;">${log.total_cancelled}</td>
+                            <td>${log.total_skipped}</td>
+                            <td style="color: ${log.total_failed > 0 ? '#dc2626' : 'inherit'};">${log.total_failed}</td>
+                            <td>${log.telegram_sent ? '✅' : '❌'}</td>
+                        </tr>`;
+                    });
+
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 20px;">ยังไม่มีประวัติการรัน</p>';
+                }
+            } catch (error) {
+                container.innerHTML = '<p style="color: #dc2626;">❌ โหลดประวัติไม่สำเร็จ</p>';
+            }
+        }
+        // ==================== End Auto-Cancel Functions ====================
 
         // checkExtensionAndSession() และ dismissBanner() ถูกลบออกแล้ว — ระบบใช้ Auto-Login
 
