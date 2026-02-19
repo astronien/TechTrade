@@ -3188,10 +3188,12 @@ def run_auto_cancel(force=False):
             # Debug: แสดง field names ของ item แรก
             if items:
                 first_item = items[0]
-                print(f"  🔑 First item keys: {list(first_item.keys())[:10]}")
+                keys_sample = list(first_item.keys())[:5]
                 # แสดงสถานะทั้งหมดที่เจอ
                 all_statuses = set(item.get('BIDDING_STATUS_NAME', 'N/A') for item in items)
-                print(f"  📋 All statuses found: {all_statuses}")
+                print(f"  Clipboard: {all_statuses}")
+                details_list.append(f"🔍 Debug Branch {branch_id}: Statuses={all_statuses}")
+                details_list.append(f"🔍 Debug Keys: {keys_sample}")
             
             # กรองเฉพาะ "รอผู้ขายยืนยันราคา"
             pending_items = [item for item in items 
@@ -3400,41 +3402,6 @@ def reschedule_auto_cancel():
         print(f"❌ Error rescheduling auto-cancel: {e}")
 
 # API Routes for Auto-Cancel Config
-@app.route('/api/admin/debug-branch-data', methods=['GET'])
-def debug_branch_data():
-    """Debug Endpoint: ดูข้อมูลดิบของสาขา (20 รายการแรก)"""
-    branch_id = request.args.get('branch_id', '231')
-    try:
-        today = datetime.now().strftime('%d/%m/%Y')
-        result = fetch_data_from_api(
-            start=0, length=20,
-            branch_id=branch_id,
-            date_start=today,
-            date_end=today
-        )
-        
-        if not result or 'data' not in result:
-            return jsonify({'success': False, 'message': 'No data found', 'result': result})
-            
-        items = result['data']
-        debug_info = []
-        for item in items:
-            debug_info.append({
-                'trade_in_id': item.get('trade_in_id'),
-                'document_no': item.get('document_no'),
-                'status_name': item.get('BIDDING_STATUS_NAME'),
-                'all_keys': list(item.keys())[:5] # Show first 5 keys
-            })
-            
-        return jsonify({
-            'success': True,
-            'count': len(items),
-            'debug_info': debug_info,
-            'all_statuses': list(set(item.get('BIDDING_STATUS_NAME', 'N/A') for item in items))
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/admin/auto-cancel-config', methods=['GET', 'POST'])
 def manage_auto_cancel_config():
     """API สำหรับจัดการ config auto-cancel"""
