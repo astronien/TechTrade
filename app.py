@@ -3434,6 +3434,8 @@ def debug_branch_data():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-cancel-config', methods=['GET', 'POST'])
 def manage_auto_cancel_config():
     """API สำหรับจัดการ config auto-cancel"""
     if request.method == 'GET':
