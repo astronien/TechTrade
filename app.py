@@ -572,7 +572,7 @@ BRANCH_ID = "231"  # สาขาเดิมที่ใช้ได้
 
 def get_datatables_payload(start=0, length=50, date_start=None, date_end=None, 
                           sale_code="", status="", brands=None, series="", 
-                          doc_ref_number="", promo_code="", customer_sign="0", branch_id=None):
+                          doc_ref_number="", promo_code="", customer_sign="0", branch_id=None, **kwargs):
     """สร้าง DataTables payload"""
     
     # ถ้าไม่ระบุวันที่ ใช้วันนี้
