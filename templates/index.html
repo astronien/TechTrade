@@ -1533,12 +1533,18 @@
 
                 if (result.success && result.logs && result.logs.length > 0) {
                     let html = '<table class="data-table"><thead><tr>';
-                    html += '<th>เวลา</th><th>สาขา</th><th>พบ</th><th>✅ สำเร็จ</th><th>⏭️ ข้าม</th><th>❌ ล้มเหลว</th><th>Telegram</th>';
+                    html += '<th>เวลา</th><th>สาขา</th><th>พบ</th><th>✅ สำเร็จ</th><th>⏭️ ข้าม</th><th>❌ ล้มเหลว</th><th>รายละเอียด</th><th>Telegram</th>';
                     html += '</tr></thead><tbody>';
 
                     result.logs.forEach(log => {
                         const runDate = new Date(log.run_at);
                         const dateStr = runDate.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+                        // Truncate details if too long
+                        let details = log.details || '-';
+                        if (details.length > 50) {
+                            details = `<span title="${details.replace(/"/g, '&quot;')}">${details.substring(0, 50)}...</span>`;
+                        }
+
                         html += `<tr>
                             <td>${dateStr}</td>
                             <td>${log.branch_ids}</td>
@@ -1546,6 +1552,7 @@
                             <td style="color: #16a34a; font-weight: 600;">${log.total_cancelled}</td>
                             <td>${log.total_skipped}</td>
                             <td style="color: ${log.total_failed > 0 ? '#dc2626' : 'inherit'};">${log.total_failed}</td>
+                            <td style="font-size: 12px; color: #666;">${details}</td>
                             <td>${log.telegram_sent ? '✅' : '❌'}</td>
                         </tr>`;
                     });
