@@ -3176,9 +3176,19 @@ def run_auto_cancel():
             
             if not result or 'data' not in result:
                 print(f"  ⚠️ No data for branch {branch_id}")
+                details_list.append(f"⚠️ Branch {branch_id}: ไม่มีข้อมูล")
                 continue
             
             items = result['data']
+            
+            # Debug: แสดง field names ของ item แรก
+            if items:
+                first_item = items[0]
+                print(f"  🔑 First item keys: {list(first_item.keys())[:10]}")
+                # แสดงสถานะทั้งหมดที่เจอ
+                all_statuses = set(item.get('BIDDING_STATUS_NAME', 'N/A') for item in items)
+                print(f"  📋 All statuses found: {all_statuses}")
+            
             # กรองเฉพาะ "รอผู้ขายยืนยันราคา"
             pending_items = [item for item in items 
                            if item.get('BIDDING_STATUS_NAME') == 'รอผู้ขายยืนยันราคา']
@@ -3187,8 +3197,11 @@ def run_auto_cancel():
             total_found += len(pending_items)
             
             for item in pending_items:
-                trade_in_id = item.get('trade_in_id', '')
-                doc_no = item.get('document_no', trade_in_id)
+                # ลอง field names หลายแบบ
+                trade_in_id = item.get('trade_in_id') or item.get('TRADE_IN_ID') or item.get('tradeInId', '')
+                doc_no = item.get('document_no') or item.get('DOCUMENT_NO') or item.get('documentNo', str(trade_in_id))
+                
+                print(f"  🔄 Processing: trade_in_id={trade_in_id}, doc_no={doc_no}")
                 
                 try:
                     # Pre-check
