@@ -4,6 +4,42 @@ from collections import defaultdict
 import json
 import os
 
+import hmac
+import hashlib
+import base64
+import requests
+
+def verify_line_signature(channel_secret, body, signature):
+    """Verify LINE Webhook signature manually (HMAC-SHA256)"""
+    hash = hmac.new(channel_secret.encode('utf-8'), body.encode('utf-8'), hashlib.sha256).digest()
+    expected_signature = base64.b64encode(hash).decode('utf-8')
+    return hmac.compare_digest(expected_signature, signature)
+
+def send_line_reply(channel_access_token, reply_token, messages):
+    """Send reply message to LINE API manually"""
+    url = 'https://api.line.me/v2/bot/message/reply'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {channel_access_token}'
+    }
+    
+    if isinstance(messages, str):
+        messages = [{'type': 'text', 'text': messages}]
+    elif isinstance(messages, dict):
+        messages = [messages]
+        
+    data = {
+        'replyToken': reply_token,
+        'messages': messages
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"❌ Error sending LINE reply: {e}")
+        return False
 def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zone_func, find_branch_func, parse_month_func, get_date_range_func):
     """
     จัดการข้อความจาก LINE และส่งกลับ response message

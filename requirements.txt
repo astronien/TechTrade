@@ -4,4 +4,4 @@ psycopg2-binary==2.9.9
 openpyxl==3.1.5
 gunicorn==21.2.0
 APScheduler==3.10.4
-line-bot-sdk<3.0.0 # Force v2 to match code style and avoid aiohttp dependency/conflict
+# line-bot-sdk removed due to dependency hell with aiohttp/python3.12
