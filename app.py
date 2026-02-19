@@ -3451,11 +3451,11 @@ def get_auto_cancel_logs():
         conn.close()
         
         logs = []
-        columns = ['id', 'run_at', 'branch_ids', 'total_found', 'total_cancelled',
-                   'total_skipped', 'total_failed', 'details', 'telegram_sent']
         for row in rows:
-            log = dict(zip(columns, row))
-            log['run_at'] = str(log['run_at'])
+            # row is RealDictRow, convert to dict
+            log = dict(row)
+            if log.get('run_at'):
+                log['run_at'] = str(log['run_at'])
             logs.append(log)
         
         return jsonify({'success': True, 'logs': logs})
