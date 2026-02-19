@@ -1347,16 +1347,24 @@
             document.getElementById('acStatusText').style.color = this.checked ? '#16a34a' : 'var(--text-muted)';
         });
 
-        function populateAutoCancelBranches() {
+        async function populateAutoCancelBranches() {
             const select = document.getElementById('acBranchSelect');
-            // ใช้ branchesData ที่มีอยู่แล้วใน page
-            if (typeof branchesData !== 'undefined' && branchesData.length > 0) {
-                branchesData.forEach(b => {
-                    const option = document.createElement('option');
-                    option.value = b.id || b.branch_id;
-                    option.textContent = `${b.id || b.branch_id} - ${b.name || b.branch_name || ''}`;
-                    select.appendChild(option);
-                });
+            // ป้องกันโหลดซ้ำ
+            if (select.options.length > 1) return;
+
+            try {
+                const response = await fetch('/api/branches');
+                const result = await response.json();
+                if (result.success && result.branches && result.branches.length > 0) {
+                    result.branches.forEach(b => {
+                        const option = document.createElement('option');
+                        option.value = b.branch_id;
+                        option.textContent = `${b.branch_id} - ${b.branch_name || ''}`;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading branches for auto-cancel:', error);
             }
         }
 
