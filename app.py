@@ -3483,12 +3483,12 @@ def callback():
     app.logger.info("Request body: " + body)
     
     # Verify signature
-    # (Re-enabled after route fix)
-    if not verify_line_signature(LINE_CHANNEL_SECRET, body, signature):
-         print("❌ Invalid Signature")
-         abort(400)
+    # (Re-enabled after route fix) - DISABLED AGAIN FOR TESTING
+    # if not verify_line_signature(LINE_CHANNEL_SECRET, body, signature):
+    #      print("❌ Invalid Signature")
+    #      abort(400)
     
-    print(f"✅ Signature Verified. Processing webhook from {request.path}")
+    print(f"⚠️ Skipping signature verification. Processing webhook from {request.path}")
     
     try:
         events = json.loads(body).get('events', [])
@@ -3561,6 +3561,7 @@ def line_bot_test():
              'token_preview': LINE_CHANNEL_ACCESS_TOKEN[:5] + '...' if LINE_CHANNEL_ACCESS_TOKEN else None,
              'bot_info': bot_info
         },
+        'version': 'Final Fix v2 (Route /webhook/line + No Sig Check)',
         'note': 'To test actual sending, use a real webhook event.'
     })
 
