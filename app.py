@@ -3467,8 +3467,8 @@ import os as _os
 # Line Bot Webhook (Manual Implementation - No SDK)
 # ============================================================
 
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '').strip()
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -3535,10 +3535,32 @@ def line_bot_test():
         get_month_date_range
     )
     
+    # Validate Token
+    token_status = "Unknown"
+    bot_info = {}
+    try:
+        import requests
+        headers = {'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
+        resp = requests.get('https://api.line.me/v2/bot/info', headers=headers, timeout=5)
+        token_status = f"{resp.status_code} {resp.reason}"
+        if resp.status_code == 200:
+             bot_info = resp.json()
+        else:
+             bot_info = resp.text
+    except Exception as e:
+        token_status = f"Error: {e}"
+
     return jsonify({
         'success': True,
         'input_message': msg,
-        'reply': reply
+        'reply': reply,
+        'token_validation': {
+             'status': token_status,
+             'token_length': len(LINE_CHANNEL_ACCESS_TOKEN),
+             'token_preview': LINE_CHANNEL_ACCESS_TOKEN[:5] + '...' if LINE_CHANNEL_ACCESS_TOKEN else None,
+             'bot_info': bot_info
+        },
+        'note': 'To test actual sending, use a real webhook event.'
     })
 
 if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
