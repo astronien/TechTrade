@@ -3557,6 +3557,16 @@ def view_debug_logs():
         conn = get_db_connection()
         if conn:
             cur = conn.cursor()
+            # Ensure table exists (in case hook never fired)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS debug_logs (
+                    id SERIAL PRIMARY KEY,
+                    message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            
             cur.execute("SELECT message FROM debug_logs ORDER BY id DESC LIMIT 50")
             rows = cur.fetchall()
             logs = [row['message'] for row in rows] # RealDictCursor returns dict
