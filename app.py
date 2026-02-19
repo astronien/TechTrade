@@ -10,13 +10,30 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
 
-# Debug Log Buffer (In-Memory)
-LOG_BUFFER = []
+# Debug Log to Database (Persistent)
 def log_debug(msg):
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    LOG_BUFFER.append(f"[{timestamp}] {msg}")
-    if len(LOG_BUFFER) > 50:
-        LOG_BUFFER.pop(0)
+    try:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        final_msg = f"[{timestamp}] {msg}"
+        print(final_msg) # Still print to console just in case
+        
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS debug_logs (
+                    id SERIAL PRIMARY KEY,
+                    message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("INSERT INTO debug_logs (message) VALUES (%s)", (final_msg,))
+            conn.commit()
+            cur.close()
+            conn.close()
+    except Exception as e:
+        print(f"❌ Error logging to DB: {e}")
+
 
 
 app = Flask(__name__)
@@ -3535,9 +3552,22 @@ def callback():
 
 @app.route("/api/admin/logs", methods=['GET'])
 def view_debug_logs():
+    logs = []
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("SELECT message FROM debug_logs ORDER BY id DESC LIMIT 50")
+            rows = cur.fetchall()
+            logs = [row['message'] for row in rows] # RealDictCursor returns dict
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logs = [f"Error reading logs: {e}"]
+        
     return jsonify({
-        "logs": LOG_BUFFER,
-        "version": "v3 with Logging"
+        "logs": logs,
+        "version": "v4 DB Logging"
     })
 
 @app.route("/api/admin/line-bot-test", methods=['GET'])
