@@ -4,5 +4,5 @@ psycopg2-binary==2.9.9
 openpyxl==3.1.5
 gunicorn==21.2.0
 APScheduler==3.10.4
-line-bot-sdk==3.5.0
+line-bot-sdk>=3.5.0 # Unpinned to allow newer version compatible with aiohttp>=3.9
 aiohttp>=3.9.3 # For Python 3.12 compatibility
