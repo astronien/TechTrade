@@ -10,6 +10,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
 
+# Debug Log Buffer (In-Memory)
+LOG_BUFFER = []
+def log_debug(msg):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    LOG_BUFFER.append(f"[{timestamp}] {msg}")
+    if len(LOG_BUFFER) > 50:
+        LOG_BUFFER.pop(0)
+
+
 app = Flask(__name__)
 # Use a fixed secret key for development to avoid session invalidation on restart
 app.secret_key = os.environ.get('SECRET_KEY', 'techtrade_dev_secret_key_fixed_12345')
@@ -3470,34 +3479,32 @@ import os as _os
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '').strip()
 
-@app.route("/webhook/line", methods=['POST'])
 @app.route("/callback", methods=['POST'])
 def callback():
+    log_debug(f"Webhook called: {request.path}")
     if not LINE_CHANNEL_SECRET or not LINE_CHANNEL_ACCESS_TOKEN:
-        print("❌ Line Bot credentials not found")
+        log_debug("❌ Credentials missing")
         return 'Line Bot not configured', 500
 
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
     
-    app.logger.info("Request body: " + body)
+    log_debug(f"Body: {body[:100]}...")  # Log first 100 chars
     
-    # Verify signature
-    # (Re-enabled after route fix) - DISABLED AGAIN FOR TESTING
-    # if not verify_line_signature(LINE_CHANNEL_SECRET, body, signature):
-    #      print("❌ Invalid Signature")
-    #      abort(400)
-    
-    print(f"⚠️ Skipping signature verification. Processing webhook from {request.path}")
+    # Verify signature disabled
+    log_debug("Skipping Sig Check for debugging")
     
     try:
         events = json.loads(body).get('events', [])
+        log_debug(f"Events count: {len(events)}")
+        
         for event in events:
             if event['type'] == 'message' and event['message']['type'] == 'text':
                 reply_token = event['replyToken']
                 user_message = event['message']['text']
+                log_debug(f"Msg: {user_message}")
                 
-                # Logic เดิม
+                # Logic
                 reply = handle_line_message(
                     user_message,
                     fetch_data_from_api,
@@ -3508,17 +3515,30 @@ def callback():
                     get_month_date_range
                 )
                 
+                log_debug(f"Logic Result: {str(reply)[:50]}...")
+                
                 if reply:
                     if isinstance(reply, dict) and reply.get('type') == 'excel_annual':
-                         send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, "ฟีเจอร์ Excel ยังไม่เปิดใช้งานในเวอร์ชันนี้")
+                         res = send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, "ฟีเจอร์ Excel ยังไม่เปิดใช้งานในเวอร์ชันนี้")
                     else:
-                         send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, reply)
+                         res = send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, reply)
+                    
+                    log_debug(f"Send Reply Result: {res}")
+            else:
+                log_debug(f"Ignored event type: {event.get('type')}")
 
     except Exception as e:
-        print(f"❌ Error processing Line Webhook: {e}")
+        log_debug(f"❌ Error processing webhook: {e}")
         return 'Error', 500
 
     return 'OK'
+
+@app.route("/api/admin/logs", methods=['GET'])
+def view_debug_logs():
+    return jsonify({
+        "logs": LOG_BUFFER,
+        "version": "v3 with Logging"
+    })
 
 @app.route("/api/admin/line-bot-test", methods=['GET'])
 def line_bot_test():
