@@ -1417,7 +1417,7 @@
 
         async function loadAutoCancelConfig() {
             try {
-                populateAutoCancelBranches();
+                await populateAutoCancelBranches();
                 const response = await fetch('/api/admin/auto-cancel-config');
                 const result = await response.json();
 
@@ -1425,7 +1425,11 @@
                     const c = result.config;
                     document.getElementById('acEnabled').checked = c.enabled;
                     document.getElementById('acEnabled').dispatchEvent(new Event('change'));
-                    document.getElementById('acTime').value = c.schedule_time || '23:00';
+
+                    // Format time to HH:mm
+                    let timeVal = c.schedule_time || '23:00';
+                    if (timeVal.length > 5) timeVal = timeVal.substring(0, 5);
+                    document.getElementById('acTime').value = timeVal;
                     document.getElementById('acEmpCode').value = c.emp_code || '';
                     document.getElementById('acEmpName').value = c.emp_name || '';
                     document.getElementById('acEmpPhone').value = c.emp_phone || '';
@@ -1491,16 +1495,26 @@
         }
 
         async function testAutoCancel() {
-            if (!confirm('🧪 ทดสอบรัน Auto-Cancel เดี๋ยวนี้?\n\nระบบจะยกเลิกรายการจริง ตามสาขาที่ตั้งไว้')) return;
+            if (!confirm('🧪 ทดสอบรัน Auto-Cancel เดี๋ยวนี้?\n\nระบบจะยกเลิกรายการจริง ตามสาขาที่ตั้งไว้\nกรุณาบันทึก config ก่อนกดทดสอบ')) return;
 
             try {
+                const btn = event.target;
+                btn.disabled = true;
+                btn.textContent = '⏳ กำลังรัน...';
+
                 const response = await fetch('/api/admin/auto-cancel-test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
                 const result = await response.json();
+
+                btn.disabled = false;
+                btn.textContent = '🧪 ทดสอบรันเดี๋ยวนี้';
+
                 if (result.success) {
-                    alert('✅ เริ่มรัน Auto-Cancel แล้ว!\n\nรอดูผลลัพธ์ใน Telegram และกดรีเฟรช Log');
+                    const r = result.result || {};
+                    alert(`✅ รัน Auto-Cancel เสร็จแล้ว!\n\n🔍 พบ: ${r.total_found || 0} รายการ\n✅ ยกเลิกสำเร็จ: ${r.total_cancelled || 0}\n⏭️ ข้าม: ${r.total_skipped || 0}\n❌ ล้มเหลว: ${r.total_failed || 0}\n\nดูรายละเอียดใน Telegram และ Log`);
+                    loadAutoCancelLogs();
                 } else {
                     alert('❌ ' + (result.error || 'ไม่สำเร็จ'));
                 }
