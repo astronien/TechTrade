@@ -157,6 +157,10 @@ h1 {
     transition: transform 0.3s ease;
 }
 
+.data-container {
+    overflow-x: auto;
+}
+
 .search-panel:hover {
     box-shadow: 0 15px 40px rgba(0, 0, 0, 0.08);
     /* Minimal lift */
