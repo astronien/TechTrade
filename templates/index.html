@@ -1023,6 +1023,9 @@
 
         // ฟังก์ชันสลับหน้า
         function showPage(pageName, event) {
+            // Update URL hash
+            window.location.hash = pageName;
+
             // ซ่อนทุกหน้า
             document.querySelectorAll('.page-section').forEach(section => {
                 section.classList.remove('active');
@@ -1045,10 +1048,23 @@
             document.querySelectorAll('.sidebar-menu a').forEach(link => {
                 link.classList.remove('active');
             });
-            if (event) {
-                event.target.closest('a').classList.add('active');
+
+            // Highlight menu item corresponding to pageName
+            const activeLink = document.querySelector(`.sidebar-menu a[onclick*="'${pageName}'"]`);
+            if (activeLink) {
+                activeLink.classList.add('active');
             }
         }
+
+        // Initialize Page on Load
+        document.addEventListener('DOMContentLoaded', () => {
+            const hash = window.location.hash.substring(1);
+            if (hash) {
+                showPage(hash);
+            } else {
+                showPage('search'); // Default
+            }
+        });
 
         // ==================== Zone Management Functions ====================
 
@@ -1417,7 +1433,13 @@
 
         async function loadAutoCancelConfig() {
             try {
-                await populateAutoCancelBranches();
+                // Ensure branches are loaded, but don't block everything if it fails
+                try {
+                    await populateAutoCancelBranches();
+                } catch (e) {
+                    console.error("Failed to populate branches:", e);
+                }
+
                 const response = await fetch('/api/admin/auto-cancel-config');
                 const result = await response.json();
 
