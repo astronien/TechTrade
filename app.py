@@ -8,6 +8,7 @@ import secrets
 import hashlib
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+import os as _os  # Moved to top for safety
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
 
 # Debug Log to Database (Persistent)
@@ -3488,7 +3489,7 @@ def get_auto_cancel_logs():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # เริ่ม scheduler เมื่อ app start (เฉพาะ non-debug reloader)
-import os as _os
+# import os as _os # Moved to top
 # ============================================================
 # Line Bot Webhook (Manual Implementation - No SDK)
 # ============================================================
@@ -3643,8 +3644,13 @@ def line_bot_test():
     })
 
 
-if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-    start_auto_cancel_scheduler()
+try:
+    if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+        start_auto_cancel_scheduler()
+except Exception as e:
+    print(f"❌ CRITICAL STARTUP ERROR: {e}")
+    # Don't crash the app, just log it.
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
