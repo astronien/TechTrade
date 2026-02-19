@@ -3516,6 +3516,28 @@ def callback():
 
     return 'OK'
 
+@app.route("/api/admin/line-bot-test", methods=['GET'])
+def line_bot_test():
+    """Endpoint สำหรับทดสอบ Logic ของ Line Bot (ไม่ต้องผ่าน Webhook)"""
+    msg = request.args.get('msg', 'วิธีใช้')
+    
+    # จำลองการทำงานเหมือน Webhook
+    reply = handle_line_message(
+        msg,
+        fetch_data_from_api,
+        load_zones_data,
+        find_zone_by_name,
+        find_branch_by_id,
+        parse_thai_month,
+        get_month_date_range
+    )
+    
+    return jsonify({
+        'success': True,
+        'input_message': msg,
+        'reply': reply
+    })
+
 if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     start_auto_cancel_scheduler()
 
