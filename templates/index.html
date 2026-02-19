@@ -2508,91 +2508,118 @@
             const reasonCancelText = reasonCancel === '1' ? 'ลูกค้าเปลี่ยนใจเก็บเครื่องไว้ใช้เอง' :
                 reasonCancel === '2' ? 'ราคาไม่ตรงตามที่ต้องการ' : 'อื่นๆ';
 
+
             const reason = prompt('เหตุผลเพิ่มเติม (ถ้ามี):', reasonCancelText);
             if (reason === null) return;
 
-            const confirmMsg = `คุณต้องการยกเลิก ${checkboxes.length} รายการใช่หรือไม่?\n\nเลขที่คำสั่งเทรด:\n${docNos.slice(0, 5).join('\n')}${docNos.length > 5 ? '\n...' : ''}\n\nพนักงาน: ${empName} (${empCode})\nเบอร์: ${empPhone}\nประเภท: ${cancelTypeText}\nสาเหตุ: ${reasonCancelText}\nเหตุผลเพิ่มเติม: ${reason || '-'}`;
-
-            if (!confirm(confirmMsg)) {
-                return;
-            }
-
-            // แสดง loading
+            // === ขั้นตอน 1: Pre-check ทุกรายการก่อนแสดง confirm ===
             const originalBtn = event.target;
             originalBtn.disabled = true;
-            originalBtn.textContent = '⏳ กำลังยกเลิก...';
+            originalBtn.textContent = '🔍 กำลังตรวจสอบสถานะ...';
 
-            let successCount = 0;
-            let failedCount = 0;
-            const errors = [];
+            const canCancelIds = [];
+            const canCancelDocs = [];
+            const alreadyCancelled = [];
 
-            // ยกเลิกทีละรายการผ่าน backend (session จัดการอัตโนมัติโดย backend)
-            for (const tradeInId of tradeInIds) {
+            for (let i = 0; i < tradeInIds.length; i++) {
+                const tradeInId = tradeInIds[i];
+                const docNo = docNos[i] || tradeInId;
                 try {
-                    // ตรวจสอบก่อนว่ายกเลิกได้หรือไม่
                     const checkResponse = await fetch('/api/check-cancel', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            tradeInId: tradeInId
-                        })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tradeInId: tradeInId })
                     });
 
                     if (checkResponse.ok) {
                         const checkResult = await checkResponse.json();
                         const canCancel = checkResult.d?.is_success || checkResult.d?.allow_cancel || checkResult.d?.success;
 
-                        if (!canCancel) {
-                            failedCount++;
+                        if (canCancel) {
+                            canCancelIds.push(tradeInId);
+                            canCancelDocs.push(docNo);
+                        } else {
                             const msg = checkResult.d?.message || 'ไม่สามารถยกเลิกได้';
-                            errors.push(`ID ${tradeInId}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
-                            continue;
+                            alreadyCancelled.push(`${docNo}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
                         }
+                    } else {
+                        alreadyCancelled.push(`${docNo}: ตรวจสอบไม่สำเร็จ`);
+                    }
+                } catch (error) {
+                    alreadyCancelled.push(`${docNo}: ${error.message}`);
+                }
+            }
 
-                        // ยกเลิกจริง
-                        const cancelPayload = {
-                            param: {
-                                TRADE_IN_ID: tradeInId.toString(),
-                                EMP_CODE: empCode,
-                                EMP_FULL_NAME: empName,
-                                EMP_PHONE_NUMBER: empPhone,
-                                REASON: reason || reasonCancelText,
-                                CANCEL_STATUS: cancelType,
-                                REASON_CANCEL: reasonCancel,
-                                DESCRIPTION: reason || '-'
-                            }
-                        };
+            // === ขั้นตอน 2: แจ้งผลการตรวจสอบ ===
+            if (canCancelIds.length === 0) {
+                let msg = `⚠️ ไม่มีรายการที่สามารถยกเลิกได้ (${alreadyCancelled.length} รายการถูกยกเลิกไปแล้วหรือไม่อนุญาต)`;
+                if (alreadyCancelled.length > 0) {
+                    msg += '\n\nรายละเอียด:\n' + alreadyCancelled.slice(0, 10).join('\n');
+                }
+                alert(msg);
+                originalBtn.disabled = false;
+                originalBtn.textContent = '🗑️ ยกเลิกรายการที่เลือก';
+                return;
+            }
 
-                        const cancelResponse = await fetch('/api/cancel-data', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                payload: cancelPayload
-                            })
-                        });
+            // แสดงสรุปก่อน confirm
+            let preCheckMsg = `✅ ยกเลิกได้: ${canCancelIds.length} รายการ`;
+            if (alreadyCancelled.length > 0) {
+                preCheckMsg += `\n⚠️ ยกเลิกไปแล้ว/ไม่อนุญาต: ${alreadyCancelled.length} รายการ`;
+                preCheckMsg += '\n' + alreadyCancelled.slice(0, 5).join('\n');
+            }
+            preCheckMsg += `\n\nเลขที่คำสั่งเทรด (ยกเลิกได้):\n${canCancelDocs.slice(0, 5).join('\n')}${canCancelDocs.length > 5 ? '\n...' : ''}`;
+            preCheckMsg += `\n\nพนักงาน: ${empName} (${empCode})\nเบอร์: ${empPhone}\nประเภท: ${cancelTypeText}\nสาเหตุ: ${reasonCancelText}\nเหตุผลเพิ่มเติม: ${reason || '-'}`;
+            preCheckMsg += `\n\nยืนยันยกเลิก ${canCancelIds.length} รายการ?`;
 
-                        if (cancelResponse.ok) {
-                            const cancelResult = await cancelResponse.json();
-                            const isSuccess = cancelResult.d?.is_success || cancelResult.d?.success;
+            if (!confirm(preCheckMsg)) {
+                originalBtn.disabled = false;
+                originalBtn.textContent = '🗑️ ยกเลิกรายการที่เลือก';
+                return;
+            }
 
-                            if (isSuccess) {
-                                successCount++;
-                            } else {
-                                failedCount++;
-                                const msg = cancelResult.d?.message || 'ยกเลิกไม่สำเร็จ';
-                                errors.push(`ID ${tradeInId}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
-                            }
+            // === ขั้นตอน 3: ยกเลิกจริงเฉพาะรายการที่ผ่านการตรวจสอบ ===
+            originalBtn.textContent = '⏳ กำลังยกเลิก...';
+
+            let successCount = 0;
+            let failedCount = 0;
+            const errors = [];
+
+            for (const tradeInId of canCancelIds) {
+                try {
+                    const cancelPayload = {
+                        param: {
+                            TRADE_IN_ID: tradeInId.toString(),
+                            EMP_CODE: empCode,
+                            EMP_FULL_NAME: empName,
+                            EMP_PHONE_NUMBER: empPhone,
+                            REASON: reason || reasonCancelText,
+                            CANCEL_STATUS: cancelType,
+                            REASON_CANCEL: reasonCancel,
+                            DESCRIPTION: reason || '-'
+                        }
+                    };
+
+                    const cancelResponse = await fetch('/api/cancel-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ payload: cancelPayload })
+                    });
+
+                    if (cancelResponse.ok) {
+                        const cancelResult = await cancelResponse.json();
+                        const isSuccess = cancelResult.d?.is_success || cancelResult.d?.success;
+
+                        if (isSuccess) {
+                            successCount++;
                         } else {
                             failedCount++;
-                            errors.push(`ID ${tradeInId}: HTTP ${cancelResponse.status}`);
+                            const msg = cancelResult.d?.message || 'ยกเลิกไม่สำเร็จ';
+                            errors.push(`ID ${tradeInId}: ${Array.isArray(msg) ? msg.join(', ') : msg}`);
                         }
                     } else {
                         failedCount++;
-                        errors.push(`ID ${tradeInId}: ตรวจสอบไม่สำเร็จ HTTP ${checkResponse.status}`);
+                        errors.push(`ID ${tradeInId}: HTTP ${cancelResponse.status}`);
                     }
                 } catch (error) {
                     failedCount++;
