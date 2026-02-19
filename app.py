@@ -3116,21 +3116,25 @@ def send_telegram_notification(bot_token, chat_id, message):
         print(f"❌ Telegram error: {e}")
         return False
 
-def run_auto_cancel():
+def run_auto_cancel(force=False):
     """ฟังก์ชันหลัก: ยกเลิกรายการเทรดอัตโนมัติ"""
     print("\n" + "="*60)
     print(f"⏰ Auto-Cancel Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
     config = get_auto_cancel_config()
-    if not config or not config.get('enabled'):
+    if not config:
+        print("⚠️ No auto-cancel config found")
+        return {'success': False, 'message': 'ไม่พบ config กรุณาบันทึกก่อน'}
+    
+    if not force and not config.get('enabled'):
         print("⚠️ Auto-cancel is disabled, skipping")
-        return
+        return {'success': False, 'message': 'ระบบปิดอยู่'}
     
     branch_ids_str = config.get('branch_ids', '')
     if not branch_ids_str:
         print("⚠️ No branches configured, skipping")
-        return
+        return {'success': False, 'message': 'ยังไม่ได้ตั้งค่าสาขา'}
     
     branch_ids = [b.strip() for b in branch_ids_str.split(',') if b.strip()]
     emp_code = config.get('emp_code', '')
@@ -3322,6 +3326,14 @@ def run_auto_cancel():
     })
     
     print(f"⏰ Auto-Cancel Completed\n")
+    
+    return {
+        'success': True,
+        'total_found': total_found,
+        'total_cancelled': total_cancelled,
+        'total_skipped': total_skipped,
+        'total_failed': total_failed
+    }
 
 def start_auto_cancel_scheduler():
     """เริ่ม scheduler จาก config ใน DB"""
@@ -3388,7 +3400,40 @@ def reschedule_auto_cancel():
         print(f"❌ Error rescheduling auto-cancel: {e}")
 
 # API Routes for Auto-Cancel Config
-@app.route('/api/admin/auto-cancel-config', methods=['GET', 'POST'])
+@app.route('/api/admin/debug-branch-data', methods=['GET'])
+def debug_branch_data():
+    """Debug Endpoint: ดูข้อมูลดิบของสาขา (20 รายการแรก)"""
+    branch_id = request.args.get('branch_id', '231')
+    try:
+        today = datetime.now().strftime('%d/%m/%Y')
+        result = fetch_data_from_api(
+            start=0, length=20,
+            branch_id=branch_id,
+            date_start=today,
+            date_end=today
+        )
+        
+        if not result or 'data' not in result:
+            return jsonify({'success': False, 'message': 'No data found', 'result': result})
+            
+        items = result['data']
+        debug_info = []
+        for item in items:
+            debug_info.append({
+                'trade_in_id': item.get('trade_in_id'),
+                'document_no': item.get('document_no'),
+                'status_name': item.get('BIDDING_STATUS_NAME'),
+                'all_keys': list(item.keys())[:5] # Show first 5 keys
+            })
+            
+        return jsonify({
+            'success': True,
+            'count': len(items),
+            'debug_info': debug_info,
+            'all_statuses': list(set(item.get('BIDDING_STATUS_NAME', 'N/A') for item in items))
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 def manage_auto_cancel_config():
     """API สำหรับจัดการ config auto-cancel"""
     if request.method == 'GET':
@@ -3411,12 +3456,15 @@ def manage_auto_cancel_config():
 
 @app.route('/api/admin/auto-cancel-test', methods=['POST'])
 def test_auto_cancel():
-    """ทดสอบรัน auto-cancel ทันที"""
+    """ทดสอบรัน auto-cancel ทันที (ข้ามการเช็ค enabled)"""
     try:
-        import threading
-        thread = threading.Thread(target=run_auto_cancel)
-        thread.start()
-        return jsonify({'success': True, 'message': 'เริ่มรัน auto-cancel แล้ว ดูผลลัพธ์ใน Telegram และ log'})
+        config = get_auto_cancel_config()
+        if not config or not config.get('branch_ids'):
+            return jsonify({'success': False, 'error': 'กรุณาบันทึก config ก่อน (ระบุสาขา + ข้อมูลพนักงาน)'}), 400
+        
+        # รัน synchronously กับ force=True (ข้ามเช็ค enabled)
+        result = run_auto_cancel(force=True)
+        return jsonify({'success': True, 'message': 'รัน auto-cancel เสร็จแล้ว ดูผลลัพธ์ใน Telegram และ Log', 'result': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
