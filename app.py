@@ -3493,34 +3493,71 @@ import os as _os
 # Line Bot Webhook (Manual Implementation - No SDK)
 # ============================================================
 
+# ============================================================
+# Line Bot Webhook (Restored from Working Version)
+# ============================================================
+
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '').strip()
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    log_debug(f"Webhook called: {request.path}")
-    if not LINE_CHANNEL_SECRET or not LINE_CHANNEL_ACCESS_TOKEN:
-        log_debug("❌ Credentials missing")
-        return 'Line Bot not configured', 500
-
-    signature = request.headers.get('X-Line-Signature', '')
-    body = request.get_data(as_text=True)
-    
-    log_debug(f"Body: {body[:100]}...")  # Log first 100 chars
-    
-    # Verify signature disabled
-    log_debug("Skipping Sig Check for debugging")
-    
+def reply_line_message(reply_token, message):
+    """ส่ง Reply Message ไปยัง LINE (Original Working Version)"""
     try:
-        events = json.loads(body).get('events', [])
-        log_debug(f"Events count: {len(events)}")
+        url = 'https://api.line.me/v2/bot/message/reply'
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+        }
+        payload = {
+            'replyToken': reply_token,
+            'messages': [{'type': 'text', 'text': message}]
+        }
+        
+        log_debug(f"Sending reply to {reply_token[:10]}...")
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code != 200:
+            log_debug(f"❌ Failed to reply: {response.status_code} {response.text}")
+        else:
+            log_debug("✅ Reply success")
+            
+        return response.json()
+    except Exception as e:
+        log_debug(f"❌ Error sending reply: {e}")
+        return None
+
+@app.route('/webhook/line', methods=['POST'])
+def line_webhook():
+    """Webhook สำหรับรับข้อความจาก LINE (Restored Logic)"""
+    # Also handle /callback for compatibility
+    try:
+        log_debug(f"Webhook called: {request.path}")
+        
+        # Original logic used get_json() directly without signature verification
+        body = request.get_json()
+        if not body:
+            log_debug("❌ No JSON body")
+            return 'No Body', 400
+            
+        # Log parsed body slightly sanitized
+        log_debug(f"Body keys: {list(body.keys())}")
+        
+        events = body.get('events', [])
+        log_debug(f"Events: {len(events)}")
         
         for event in events:
             if event['type'] == 'message' and event['message']['type'] == 'text':
                 reply_token = event['replyToken']
                 user_message = event['message']['text']
+                
                 log_debug(f"Msg: {user_message}")
                 
+                 # ตรวจสอบว่าเป็นกลุ่มหรือไม่
+                source_type = event.get('source', {}).get('type')
+                if source_type == 'group' and not user_message.strip().startswith('รายงาน'):
+                    log_debug("Ignored group message (no 'รายงาน')")
+                    continue
+
                 # Logic
                 reply = handle_line_message(
                     user_message,
@@ -3532,23 +3569,26 @@ def callback():
                     get_month_date_range
                 )
                 
-                log_debug(f"Logic Result: {str(reply)[:50]}...")
-                
                 if reply:
                     if isinstance(reply, dict) and reply.get('type') == 'excel_annual':
-                         res = send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, "ฟีเจอร์ Excel ยังไม่เปิดใช้งานในเวอร์ชันนี้")
+                         reply_line_message(reply_token, "ฟีเจอร์ Excel ยังไม่เปิดใช้งานในเวอร์ชันนี้")
                     else:
-                         res = send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, reply)
-                    
-                    log_debug(f"Send Reply Result: {res}")
+                         reply_line_message(reply_token, reply)
             else:
                 log_debug(f"Ignored event type: {event.get('type')}")
 
-    except Exception as e:
-        log_debug(f"❌ Error processing webhook: {e}")
-        return 'Error', 500
+        return jsonify({'status': 'ok'})
 
-    return 'OK'
+    except Exception as e:
+        log_debug(f"❌ Webhook Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Backward compatibility alias
+@app.route("/callback", methods=['POST'])
+def callback_alias():
+    return line_webhook()
 
 @app.route("/api/admin/logs", methods=['GET'])
 def view_debug_logs():
@@ -3577,15 +3617,14 @@ def view_debug_logs():
         
     return jsonify({
         "logs": logs,
-        "version": "v4 DB Logging"
+        "version": "v5 RESTORED Working Logic"
     })
 
 @app.route("/api/admin/line-bot-test", methods=['GET'])
 def line_bot_test():
-    """Endpoint สำหรับทดสอบ Logic ของ Line Bot (ไม่ต้องผ่าน Webhook)"""
+    """Endpoint สำหรับทดสอบ Logic ของ Line Bot"""
     msg = request.args.get('msg', 'วิธีใช้')
     
-    # จำลองการทำงานเหมือน Webhook
     reply = handle_line_message(
         msg,
         fetch_data_from_api,
@@ -3596,34 +3635,13 @@ def line_bot_test():
         get_month_date_range
     )
     
-    # Validate Token
-    token_status = "Unknown"
-    bot_info = {}
-    try:
-        import requests
-        headers = {'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
-        resp = requests.get('https://api.line.me/v2/bot/info', headers=headers, timeout=5)
-        token_status = f"{resp.status_code} {resp.reason}"
-        if resp.status_code == 200:
-             bot_info = resp.json()
-        else:
-             bot_info = resp.text
-    except Exception as e:
-        token_status = f"Error: {e}"
-
     return jsonify({
         'success': True,
         'input_message': msg,
         'reply': reply,
-        'token_validation': {
-             'status': token_status,
-             'token_length': len(LINE_CHANNEL_ACCESS_TOKEN),
-             'token_preview': LINE_CHANNEL_ACCESS_TOKEN[:5] + '...' if LINE_CHANNEL_ACCESS_TOKEN else None,
-             'bot_info': bot_info
-        },
-        'version': 'Final Fix v2 (Route /webhook/line + No Sig Check)',
-        'note': 'To test actual sending, use a real webhook event.'
+        'version': 'v5 RESTORED Working Logic'
     })
+
 
 if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     start_auto_cancel_scheduler()
