@@ -8,6 +8,10 @@ import secrets
 import hashlib
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from line_bot_handler import handle_line_message
 
 app = Flask(__name__)
 # Use a fixed secret key for development to avoid session invalidation on restart
@@ -3022,10 +3026,8 @@ def get_auto_cancel_config():
         conn.close()
         
         if row:
-            columns = ['id', 'enabled', 'schedule_time', 'branch_ids', 'emp_code', 'emp_name',
-                       'emp_phone', 'cancel_type', 'reason_cancel', 'description',
-                       'telegram_bot_token', 'telegram_chat_id', 'updated_at']
-            return dict(zip(columns, row))
+            # Fix: RealDictRow is already a dict-like object, don't use zip with keys!
+            return dict(row)
         return None
     except Exception as e:
         print(f"❌ Error getting auto-cancel config: {e}")
@@ -3464,6 +3466,46 @@ def get_auto_cancel_logs():
 
 # เริ่ม scheduler เมื่อ app start (เฉพาะ non-debug reloader)
 import os as _os
+# ============================================================
+# Line Bot Webhook
+# ============================================================
+
+line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_CHANNEL_ACCESS_TOKEN'))
+handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', 'YOUR_CHANNEL_SECRET'))
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    app.logger.info("Request body: " + body)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    msg = event.message.text
+    # Call handler logic
+    reply = handle_line_message(
+        msg,
+        fetch_data_from_api,
+        load_zones_data,
+        find_zone_by_name,
+        find_branch_by_id,
+        parse_thai_month,
+        get_month_date_range
+    )
+    
+    if reply:
+        if isinstance(reply, dict) and reply.get('type') == 'excel_annual':
+             # Handle Excel export logic if needed (or just text for now)
+             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ฟีเจอร์ Excel ยังไม่เปิดใช้งานในเวอร์ชันนี้"))
+        else:
+             # String reply
+             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
 if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     start_auto_cancel_scheduler()
 
