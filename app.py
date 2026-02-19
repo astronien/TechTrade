@@ -3470,6 +3470,7 @@ import os as _os
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '').strip()
 
+@app.route("/webhook/line", methods=['POST'])
 @app.route("/callback", methods=['POST'])
 def callback():
     if not LINE_CHANNEL_SECRET or not LINE_CHANNEL_ACCESS_TOKEN:
@@ -3482,12 +3483,12 @@ def callback():
     app.logger.info("Request body: " + body)
     
     # Verify signature
-    # Verify signature (Disabled for debugging)
-    # if not verify_line_signature(LINE_CHANNEL_SECRET, body, signature):
-    #     print("❌ Invalid Signature")
-    #     abort(400)
+    # (Re-enabled after route fix)
+    if not verify_line_signature(LINE_CHANNEL_SECRET, body, signature):
+         print("❌ Invalid Signature")
+         abort(400)
     
-    print(f"⚠️ Skipping signature verification for debugging. Signature: {signature[:10]}...")
+    print(f"✅ Signature Verified. Processing webhook from {request.path}")
     
     try:
         events = json.loads(body).get('events', [])
