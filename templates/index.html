@@ -41,36 +41,11 @@
             <div class="container">
                 <h1>🔍 ระบบค้นหาข้อมูล Trade-In</h1>
 
-                <!-- Extension Banner -->
-                <div id="extensionBanner"
-                    style="display: none; background: #fff3cd; border: 2px solid #ffc107; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="flex: 1;">
-                            <h3 style="margin: 0 0 5px 0; color: #856404;">🔌 ใช้งานง่ายขึ้นด้วย Extension!</h3>
-                            <p style="margin: 0 0 10px 0; color: #856404; font-size: 14px;">ไม่ต้องคัดลอก Session ID เอง
-                                -
-                                คลิกเพียง 2 ครั้ง</p>
-                            <button onclick="window.location.href='/install-extension'"
-                                style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin-right: 10px;">
-                                📥 ติดตั้ง Extension
-                            </button>
-                            <button onclick="dismissBanner()"
-                                style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">
-                                ไว้ทีหลัง
-                            </button>
-                        </div>
-                        <button onclick="dismissBanner()"
-                            style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: #856404; padding: 0 10px;">×</button>
-                    </div>
-                </div>
-
                 <div
                     style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px;">
                     <div>
-                        <button onclick="window.open('https://eve.techswop.com/TI/login.aspx', '_blank')"
-                            style="padding: 8px 20px; font-size: 14px; background: #28a745;">🔐 Login ระบบ</button>
-                        <span id="statusText" style="margin-left: 10px; color: white; font-size: 14px;">⚠️ กรุณา login
-                            ก่อนยกเลิกรายการ</span>
+                        <span id="statusText" style="margin-left: 10px; color: #90EE90; font-size: 14px;">🤖 Auto-Login
+                            พร้อมใช้งาน</span>
                     </div>
                     <div>
                         <button onclick="openSettings()" class="secondary"
@@ -499,31 +474,7 @@
                             style="display: block; margin-top: 5px; text-align: right;"></small>
                     </div>
 
-                    <!-- Column 1: Session Cookie -->
-                    <div class="settings-section">
-                        <h3 style="color: #d69e2e;">🍪 Session Cookie</h3>
-                        <div class="form-group" style="margin-bottom: 15px;">
-                            <label>ASP.NET_SessionId</label>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="text" id="settingSessionId" placeholder="Session ID" class="form-control"
-                                    style="flex: 1;">
-                                <button onclick="autoFetchSession(event)"
-                                    style="padding: 5px 10px; font-size: 12px; white-space: nowrap;">
-                                    🔄 ดึงเอง
-                                </button>
-                            </div>
-                        </div>
-                        <details>
-                            <summary style="font-size: 12px; color: #666; cursor: pointer; outline: none;">💡 วิธีหา
-                                Session ID</summary>
-                            <p style="color: #666; font-size: 12px; margin-top: 5px; line-height: 1.4;">
-                                1. Login เว็บ Eve ในแท็บใหม่<br>
-                                2. กด F12 > Console<br>
-                                3. พิมพ์: `document.cookie.match(/ASP\.NET_SessionId=([^;]+)/)[1]`<br>
-                                4. Copy ค่ามาวาง
-                            </p>
-                        </details>
-                    </div>
+                    <!-- Session Cookie section ถูกลบออกแล้ว - ระบบใช้ Auto-Login -->
 
                     <!-- Column 2: Eve Credentials -->
                     <div class="settings-section">
@@ -577,8 +528,7 @@
             // โหลดข้อมูลพนักงานจาก localStorage
             loadEmployeeSettings();
 
-            // ตรวจสอบ Extension และ Session ID
-            checkExtensionAndSession();
+            // ระบบใช้ Auto-Login — ไม่ต้องตรวจสอบ Session ID
 
             // โหลดรายการสาขา
             loadBranches();
@@ -859,22 +809,7 @@
         // ฟังก์ชันอัปเดตสาขา (Hybrid)
         // ฟังก์ชันอัปเดตสาขา (Hybrid)
         async function autoUpdateBranches(silent = false) {
-            const sessionIdInput = document.getElementById('settingSessionId');
             const resultElem = document.getElementById('updateBranchResult');
-            let sessionId = sessionIdInput.value.trim();
-
-            // ถ้าเป็น silent mode และไม่มี value ใน input ให้ลองดูใน localStorage
-            if (silent && !sessionId) {
-                sessionId = localStorage.getItem('sessionId');
-            }
-
-            if (!sessionId) {
-                if (!silent) {
-                    alert('กรุณากรอก Session ID ก่อนกดอัปเดต');
-                    sessionIdInput.focus();
-                }
-                return;
-            }
 
             if (!silent && !confirm('ต้องการดึงรายชื่อสาขาล่าสุดจากระบบใช่หรือไม่?\n(อาจใช้เวลาสักครู่)')) {
                 return;
@@ -891,7 +826,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ sessionId: sessionId })
+                    body: JSON.stringify({})
                 });
 
                 const result = await response.json();
@@ -1276,29 +1211,7 @@
 
         // ==================== End Zone Management Functions ====================
 
-        function checkExtensionAndSession() {
-            const sessionId = localStorage.getItem('sessionId');
-            const dismissed = localStorage.getItem('extensionBannerDismissed');
-            const statusText = document.getElementById('statusText');
-
-            if (sessionId) {
-                // มี Session ID แล้ว
-                statusText.textContent = '✅ พร้อมใช้งาน';
-                statusText.style.color = '#90EE90';
-            } else {
-                // ยังไม่มี Session ID
-                if (!dismissed) {
-                    // แสดง banner แนะนำติดตั้ง Extension
-                    document.getElementById('extensionBanner').style.display = 'block';
-                }
-                statusText.textContent = '⚠️ กรุณาตั้งค่า Session ID';
-            }
-        }
-
-        function dismissBanner() {
-            document.getElementById('extensionBanner').style.display = 'none';
-            localStorage.setItem('extensionBannerDismissed', 'true');
-        }
+        // checkExtensionAndSession() และ dismissBanner() ถูกลบออกแล้ว — ระบบใช้ Auto-Login
 
         async function openSettings() {
             document.getElementById('settingsModal').classList.add('show');
@@ -1340,17 +1253,11 @@
             const empPhone = document.getElementById('settingEmpPhone').value;
             const cancelType = document.getElementById('settingCancelType').value;
             const reasonCancel = document.getElementById('settingReasonCancel').value;
-            const sessionId = document.getElementById('settingSessionId').value;
             const eveUser = document.getElementById('settingEveUser').value;
             const evePass = document.getElementById('settingEvePass').value;
 
             if (!empCode || !empName || !empPhone) {
                 alert('⚠️ กรุณากรอกข้อมูลพนักงานให้ครบถ้วน');
-                return;
-            }
-
-            if (!sessionId) {
-                alert('⚠️ กรุณากรอก Session ID (ดูวิธีหาด้านล่าง)');
                 return;
             }
 
@@ -1384,8 +1291,6 @@
             localStorage.setItem('empPhone', empPhone);
             localStorage.setItem('cancelType', cancelType);
             localStorage.setItem('reasonCancel', reasonCancel);
-            localStorage.setItem('sessionId', sessionId);
-            // ไม่ save eve pass ใน local storage เพื่อความปลอดภัย
 
             alert('✅ บันทึกข้อมูลเรียบร้อย');
             closeSettings();
@@ -1397,14 +1302,12 @@
             const empPhone = localStorage.getItem('empPhone') || '';
             const cancelType = localStorage.getItem('cancelType') || '1';
             const reasonCancel = localStorage.getItem('reasonCancel') || '1';
-            const sessionId = localStorage.getItem('sessionId') || '';
 
             document.getElementById('settingEmpCode').value = empCode;
             document.getElementById('settingEmpName').value = empName;
             document.getElementById('settingEmpPhone').value = empPhone;
             document.getElementById('settingCancelType').value = cancelType;
             document.getElementById('settingReasonCancel').value = reasonCancel;
-            document.getElementById('settingSessionId').value = sessionId;
         }
 
         // ฟังก์ชันรายงาน Excel รายปี
@@ -1475,8 +1378,7 @@
                 const params = new URLSearchParams({
                     year: year,
                     month: m,
-                    branchId: branchId || '',
-                    sessionId: localStorage.getItem('sessionId') || ''
+                    branchId: branchId || ''
                 });
 
                 try {
@@ -1606,8 +1508,7 @@
                     const params = new URLSearchParams({
                         year: year,
                         month: month,
-                        branchId: branchId || '',
-                        sessionId: localStorage.getItem('sessionId') || ''
+                        branchId: branchId || ''
                     });
                     const response = await fetch(`/api/annual-report-data?${params.toString()}`);
                     const result = await response.json();
@@ -1674,8 +1575,7 @@
                         const params = new URLSearchParams({
                             year: year,
                             month: month,
-                            branchId: branchId,
-                            sessionId: localStorage.getItem('sessionId') || ''
+                            branchId: branchId
                         });
                         const response = await fetch(`/api/annual-report-data?${params.toString()}`);
                         const result = await response.json();
@@ -2173,8 +2073,7 @@
                 button.innerHTML = '⏳ กำลัง Export...';
 
                 const params = new URLSearchParams({
-                    year: year,
-                    sessionId: localStorage.getItem('sessionId') || ''
+                    year: year
                 });
 
                 if (zoneId) {
@@ -2231,57 +2130,7 @@
             }
         }
 
-        async function autoFetchSession(event) {
-            event.preventDefault();
-            const button = event.target;
-            const originalText = button.innerHTML;
-
-            button.disabled = true;
-            button.innerHTML = '⏳ กำลังเปิดหน้า...';
-
-            // เปิดหน้า eve.techswop.com ในแท็บใหม่
-            const eveWindow = window.open('https://eve.techswop.com/TI/login.aspx', '_blank');
-
-            if (!eveWindow) {
-                alert('❌ ไม่สามารถเปิดหน้าต่างใหม่ได้\nกรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้');
-                button.disabled = false;
-                button.innerHTML = originalText;
-                return;
-            }
-
-            button.innerHTML = '⏳ รอ Login...';
-
-            // แสดงคำแนะนำ
-            const instructions = `
-📋 ขั้นตอนการดึง Session ID:
-
-1. ✅ Login เข้าระบบในแท็บที่เปิดขึ้นมา
-2. ✅ กด F12 เปิด DevTools
-3. ✅ ไปที่แท็บ Console
-4. ✅ พิมพ์คำสั่งนี้:
-
-document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
-
-5. ✅ Copy ค่าที่ได้
-6. ✅ กลับมาวางในช่อง Session ID ด้านบน
-
-💡 หรือใช้ Extension เพื่อดึงอัตโนมัติ!
-            `.trim();
-
-            // แสดง modal คำแนะนำ
-            if (confirm(instructions + '\n\nกด OK เมื่ออ่านเข้าใจแล้ว')) {
-                // Copy คำสั่งไปยัง clipboard
-                try {
-                    await navigator.clipboard.writeText('document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]');
-                    alert('✅ คัดลอกคำสั่งไปยัง Clipboard แล้ว!\nวางใน Console ของแท็บที่เปิดขึ้นมา');
-                } catch (err) {
-                    console.log('Cannot copy to clipboard:', err);
-                }
-            }
-
-            button.disabled = false;
-            button.innerHTML = originalText;
-        }
+        // autoFetchSession() ถูกลบออกแล้ว — ระบบใช้ Auto-Login
 
         // ปิด modal เมื่อคลิกนอก modal
         window.onclick = function (event) {
@@ -2352,9 +2201,6 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             container.innerHTML = '<div class="loading">⏳ กำลังค้นหาข้อมูล...</div>';
             submitBtn.disabled = true;
 
-            // ดึง Session ID จาก localStorage
-            const sessionId = localStorage.getItem('sessionId') || '';
-
             // ตรวจสอบว่าเลือก Zone หรือสาขาเดี่ยว
             const zoneSelect = document.getElementById('zoneSelect');
             const branchSelect = document.getElementById('branchSelect');
@@ -2373,15 +2219,15 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
 
             // ถ้าเป็น Zone (หลายสาขา) ให้ดึงข้อมูลทีละสาขาแล้วรวมกัน
             if (branchIds.length > 1) {
-                await searchMultipleBranches(branchIds, sessionId, container, submitBtn);
+                await searchMultipleBranches(branchIds, container, submitBtn);
             } else {
                 // ค้นหาสาขาเดียว (แบบเดิม)
-                await searchSingleBranch(branchIds[0], sessionId, container, submitBtn);
+                await searchSingleBranch(branchIds[0], container, submitBtn);
             }
         }
 
         // ฟังก์ชันค้นหาสาขาเดียว
-        async function searchSingleBranch(branchId, sessionId, container, submitBtn) {
+        async function searchSingleBranch(branchId, container, submitBtn) {
             const params = new URLSearchParams({
                 branchId: branchId,
                 saleCode: document.getElementById('saleCode').value,
@@ -2393,8 +2239,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                 docRefType: document.getElementById('docRefType').value,
                 docRefNumber: document.getElementById('docRefNumber').value,
                 promoCode: document.getElementById('promoCode').value,
-                customerSign: document.getElementById('customerSign').value,
-                sessionId: sessionId
+                customerSign: document.getElementById('customerSign').value
             });
 
             try {
@@ -2424,7 +2269,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
         }
 
         // ฟังก์ชันค้นหาหลายสาขา (Zone)
-        async function searchMultipleBranches(branchIds, sessionId, container, submitBtn) {
+        async function searchMultipleBranches(branchIds, container, submitBtn) {
             try {
                 let allData = [];
                 let totalRecords = 0;
@@ -2445,8 +2290,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                         docRefType: document.getElementById('docRefType').value,
                         docRefNumber: document.getElementById('docRefNumber').value,
                         promoCode: document.getElementById('promoCode').value,
-                        customerSign: document.getElementById('customerSign').value,
-                        sessionId: sessionId
+                        customerSign: document.getElementById('customerSign').value
                     });
 
                     const response = await fetch(`/api/data?${params}`);
@@ -2682,20 +2526,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             let failedCount = 0;
             const errors = [];
 
-            // ดึง Session ID จาก localStorage
-            const sessionId = localStorage.getItem('sessionId') || '';
-            if (!sessionId) {
-                alert('⚠️ กรุณาตั้งค่า Session ID ก่อน (กดปุ่ม ⚙️ ตั้งค่าข้อมูลพนักงาน)');
-                originalBtn.disabled = false;
-                originalBtn.textContent = '🗑️ ยกเลิกรายการที่เลือก';
-                return;
-            }
-
-            const eveCookies = {
-                'ASP.NET_SessionId': sessionId
-            };
-
-            // ยกเลิกทีละรายการผ่าน backend
+            // ยกเลิกทีละรายการผ่าน backend (session จัดการอัตโนมัติโดย backend)
             for (const tradeInId of tradeInIds) {
                 try {
                     // ตรวจสอบก่อนว่ายกเลิกได้หรือไม่
@@ -2705,8 +2536,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            tradeInId: tradeInId,
-                            cookies: eveCookies
+                            tradeInId: tradeInId
                         })
                     });
 
@@ -2741,8 +2571,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                                 'Content-Type': 'application/json'
                             },
                             body: JSON.stringify({
-                                payload: cancelPayload,
-                                cookies: eveCookies
+                                payload: cancelPayload
                             })
                         });
 
@@ -2828,9 +2657,6 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
             container.innerHTML = `<div class="loading">${loadingMessage}</div>`;
             submitBtn.disabled = true;
 
-            // ดึง Session ID จาก localStorage
-            const sessionId = localStorage.getItem('sessionId') || '';
-
             // ตรวจสอบว่าเลือก Zone หรือสาขาเดี่ยว
             const zoneSelect = document.getElementById('reportZoneSelect');
             const branchSelect = document.getElementById('reportBranchSelect');
@@ -2860,23 +2686,22 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                 isZone: branchIds.length > 1
             };
 
-            // ถ้าเป็น Zone (หลายสาขา) ให้ดึงข้อมูลทีละสาขาแล้วรวมกัน
+            // ถ้าเป็น Zone (หลายสาขา) ให้ดึงข้อมูลทีละสาขาแล้วรวมกัน (session จัดการอัตโนมัติโดย backend)
             if (branchIds.length > 1) {
-                await generateMultiBranchReport(branchIds, sessionId, container, submitBtn);
+                await generateMultiBranchReport(branchIds, container, submitBtn);
             } else {
                 // สร้างรายงานสาขาเดียว (แบบเดิม)
-                await generateSingleBranchReport(branchIds[0], sessionId, container, submitBtn);
+                await generateSingleBranchReport(branchIds[0], container, submitBtn);
             }
         }
 
         // ฟังก์ชันสร้างรายงานสาขาเดียว
-        async function generateSingleBranchReport(branchId, sessionId, container, submitBtn) {
+        async function generateSingleBranchReport(branchId, container, submitBtn) {
             const params = new URLSearchParams({
                 branchId: branchId,
                 saleCode: document.getElementById('reportSaleCode').value,
                 dateStart: formatDateThai(document.getElementById('reportDateStart').value),
                 dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
-                sessionId: sessionId,
                 customerSign: ''
             });
 
@@ -2921,7 +2746,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
         }
 
         // ฟังก์ชันสร้างรายงานหลายสาขา (Zone)
-        async function generateMultiBranchReport(branchIds, sessionId, container, submitBtn) {
+        async function generateMultiBranchReport(branchIds, container, submitBtn) {
             const dateStart = formatDateThai(document.getElementById('reportDateStart').value);
             const dateEnd = formatDateThai(document.getElementById('reportDateEnd').value);
             const saleCode = document.getElementById('reportSaleCode').value;
@@ -2957,7 +2782,6 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                         saleCode: saleCode,
                         dateStart: dateStart,
                         dateEnd: dateEnd,
-                        sessionId: sessionId,
                         customerSign: ''
                     });
 
@@ -3092,13 +2916,12 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
         }
 
         // ฟังก์ชันสร้างรายงานสาขาเดียว (เดิม)
-        async function generateSingleBranchReport(branchId, sessionId, container, submitBtn) {
+        async function generateSingleBranchReport(branchId, container, submitBtn) {
             const params = new URLSearchParams({
                 branchId: branchId,
                 saleCode: document.getElementById('reportSaleCode').value,
                 dateStart: formatDateThai(document.getElementById('reportDateStart').value),
                 dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
-                sessionId: sessionId,
                 customerSign: ''
             });
 
@@ -3142,7 +2965,7 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
         }
 
         // ฟังก์ชันสร้างรายงานหลายสาขา (Zone)
-        async function generateMultiBranchReport(branchIds, sessionId, container, submitBtn) {
+        async function generateMultiBranchReport(branchIds, container, submitBtn) {
             try {
                 let allDetails = [];
                 let combinedReport = {
@@ -3168,7 +2991,6 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                         saleCode: document.getElementById('reportSaleCode').value,
                         dateStart: formatDateThai(document.getElementById('reportDateStart').value),
                         dateEnd: formatDateThai(document.getElementById('reportDateEnd').value),
-                        sessionId: sessionId,
                         customerSign: ''
                     });
 
@@ -3602,17 +3424,13 @@ document.cookie.match(/ASP\\.NET_SessionId=([^;]+)/)[1]
                 return;
             }
 
-            // ดึง Session ID
-            const sessionId = localStorage.getItem('sessionId') || '';
-
-            // สร้าง URL parameters
+            // สร้าง URL parameters (session จัดการอัตโนมัติโดย backend)
             const params = new URLSearchParams({
                 dateStart: formatDateThai(dateStart),
                 dateEnd: formatDateThai(dateEnd),
                 saleCode: saleCode,
                 branchId: branchSelect.value || '',
-                zoneId: zoneSelect.value || '',
-                sessionId: sessionId
+                zoneId: zoneSelect.value || ''
             });
 
             // ถ้าเลือก Zone ให้แจ้งเตือนว่าอาจใช้เวลานาน

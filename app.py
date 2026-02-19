@@ -19,6 +19,13 @@ DYNAMIC_PARAMS_CACHE = {
 }
 CACHE_DURATION = 300 # 5 minutes
 
+# Global Cache for Eve Session (auto-login)
+EVE_SESSION_CACHE = {
+    'session_id': None,
+    'timestamp': 0
+}
+EVE_SESSION_DURATION = 600  # 10 นาที
+
 # Supabase Database Connection
 def get_db_connection():
     """สร้าง connection ไปยัง Supabase PostgreSQL"""
@@ -453,6 +460,31 @@ def perform_eve_login():
         return None, f"System Error: {str(e)}"
 
 
+def get_eve_session(force_refresh=False):
+    """ดึง Eve Session ID อัตโนมัติ (cached + auto-login)"""
+    global EVE_SESSION_CACHE
+    import time
+    
+    current_time = time.time()
+    
+    # ใช้ cache ถ้ายังไม่หมดอายุ
+    if not force_refresh and EVE_SESSION_CACHE['session_id'] and \
+       (current_time - EVE_SESSION_CACHE['timestamp'] < EVE_SESSION_DURATION):
+        return EVE_SESSION_CACHE['session_id']
+    
+    # Login ใหม่
+    print("🔐 Auto-Login: กำลัง login Eve อัตโนมัติ...")
+    session_id, error = perform_eve_login()
+    if session_id:
+        EVE_SESSION_CACHE['session_id'] = session_id
+        EVE_SESSION_CACHE['timestamp'] = current_time
+        print(f"✅ Auto-Login สำเร็จ! Session cached for {EVE_SESSION_DURATION}s")
+        return session_id
+    
+    print(f"❌ Auto-Login ล้มเหลว: {error}")
+    return None
+
+
 @app.route('/api/admin/run-bot', methods=['POST', 'GET'])
 def run_bot_update():
     """API to manually trigger the Bot"""
@@ -572,17 +604,14 @@ def fetch_data_from_api(start=0, length=50, **filters):
         'Sec-Fetch-Site': 'same-origin'
     }
     
-    # เตรียม cookies ถ้ามี session_id
+    # เตรียม cookies ด้วย auto-login session
     cookies = {}
     
-    # Note: filters เป็น dict ที่ถูก copy มาจาก args หรือ kwargs 
-    # เราควรระวังเรื่อง side effect ถ้ามีการแก้ไข filters โดยตรง
-    # แต่ในที่นี้เรา pop ออกมาใช้เลย
-    
-    session_id = filters.pop('session_id', '')  # ใช้ pop เพื่อเอาออกจาก filters
+    # ดึง session_id อัตโนมัติจาก Eve (cached)
+    session_id = get_eve_session()
     if session_id:
         cookies['ASP.NET_SessionId'] = session_id
-        print(f"🔐 Using Session ID: {session_id[:10]}...")
+        print(f"🔐 Using Auto Session ID: {session_id[:10]}...")
     
     # ดึง branch_id ออกจาก filters
     branch_id = filters.pop('branch_id', BRANCH_ID)
@@ -809,46 +838,16 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-@app.route('/install-extension')
-def install_extension():
-    """หน้าติดตั้ง Extension"""
-    return render_template('install-extension.html')
-
-@app.route('/download-extension')
-def download_extension():
-    """ดาวน์โหลดโฟลเดอร์ Extension เป็น ZIP"""
-    import zipfile
-    import io
-    from flask import send_file
-    
-    # สร้าง ZIP file ในหน่วยความจำ
-    memory_file = io.BytesIO()
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        import os
-        extension_dir = 'extension'
-        for root, dirs, files in os.walk(extension_dir):
-            for file in files:
-                if not file.endswith('.py'):  # ไม่รวมไฟล์ Python
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, extension_dir)
-                    zf.write(file_path, arcname)
-    
-    memory_file.seek(0)
-    return send_file(
-        memory_file,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name='trade-in-extension.zip'
-    )
+# Routes /install-extension และ /download-extension ถูกลบออกแล้ว
+# เนื่องจากระบบใช้ Auto-Login แทน Chrome Extension
 
 @app.route('/api/data')
 def get_data():
     """API endpoint สำหรับดึงข้อมูล"""
     start = request.args.get('start', 0, type=int)
     length = request.args.get('length', 50, type=int)  # ลดเหลือ 50 เพื่อป้องกัน Timeout
-    session_id = request.args.get('sessionId', '')  # รับ Session ID จาก client
     
-    # รับพารามิเตอร์จากฟอร์ม
+    # รับพารามิเตอร์จากฟอร์ม (session จัดการอัตโนมัติโดย backend)
     filters = {
         'date_start': request.args.get('dateStart', ''),
         'date_end': request.args.get('dateEnd', ''),
@@ -859,8 +858,7 @@ def get_data():
         'doc_ref_number': request.args.get('docRefNumber', ''),
         'promo_code': request.args.get('promoCode', ''),
         'customer_sign': request.args.get('customerSign', '0'),
-        'branch_id': request.args.get('branchId', BRANCH_ID),
-        'session_id': session_id
+        'branch_id': request.args.get('branchId', BRANCH_ID)
     }
     
     # ดึงข้อมูลทั้งหมดถ้าจำนวนมากกว่า length
@@ -1100,15 +1098,13 @@ def fetch_and_process_report(filters):
 @app.route('/api/report')
 def get_report():
     """API endpoint สำหรับสร้างรายงาน"""
-    # รับพารามิเตอร์
-    session_id = request.args.get('sessionId', '')
+    # รับพารามิเตอร์ (session จัดการอัตโนมัติโดย backend)
     filters = {
         'date_start': request.args.get('dateStart', ''),
         'date_end': request.args.get('dateEnd', ''),
         'sale_code': request.args.get('saleCode', ''),
         'customer_sign': request.args.get('customerSign', ''),
-        'branch_id': request.args.get('branchId', BRANCH_ID),
-        'session_id': session_id
+        'branch_id': request.args.get('branchId', BRANCH_ID)
     }
     
     report, items = fetch_and_process_report(filters)
@@ -1116,7 +1112,7 @@ def get_report():
     if report is None:
         return jsonify({
             'error': 'ไม่พบข้อมูล',
-            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก กรุณาตรวจสอบ Session ID และช่วงวันที่'
+            'message': 'ไม่พบข้อมูลในช่วงเวลาที่เลือก กรุณาตรวจสอบช่วงวันที่'
         }), 404
         
     if 'error' in report:
@@ -1130,16 +1126,14 @@ def get_report():
 @app.route('/api/export-report')
 def export_report():
     """API endpoint สำหรับ Export รายงานเป็น Excel"""
-    # รับพารามิเตอร์
-    session_id = request.args.get('sessionId', '')
+    # รับพารามิเตอร์ (session จัดการอัตโนมัติโดย backend)
     filters = {
         'date_start': request.args.get('dateStart', ''),
         'date_end': request.args.get('dateEnd', ''),
         'sale_code': request.args.get('saleCode', ''),
         'customer_sign': request.args.get('customerSign', ''),
         'branch_id': request.args.get('branchId', BRANCH_ID),
-        'zone_id': request.args.get('zoneId', ''),
-        'session_id': session_id
+        'zone_id': request.args.get('zoneId', '')
     }
     
     report, items = fetch_and_process_report(filters)
@@ -1169,7 +1163,10 @@ def check_cancel():
     """API endpoint สำหรับตรวจสอบว่ายกเลิกได้หรือไม่"""
     data = request.get_json()
     trade_in_id = data.get('tradeInId', '')
-    cookies = data.get('cookies', {})
+    
+    # ใช้ auto-login session แทน cookies จาก client
+    session_id = get_eve_session()
+    cookies = {'ASP.NET_SessionId': session_id} if session_id else {}
     
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -1200,7 +1197,10 @@ def cancel_data():
     """API endpoint สำหรับยกเลิกรายการ"""
     data = request.get_json()
     payload = data.get('payload', {})
-    cookies = data.get('cookies', {})
+    
+    # ใช้ auto-login session แทน cookies จาก client
+    session_id = get_eve_session()
+    cookies = {'ASP.NET_SessionId': session_id} if session_id else {}
     
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -1226,50 +1226,8 @@ def cancel_data():
     except Exception as e:
         return jsonify({'d': {'is_success': False, 'message': [str(e)]}})
 
-@app.route('/api/get-cookies', methods=['GET'])
-def get_cookies():
-    """API endpoint สำหรับดึง cookies จาก browser"""
-    # รับ cookies จาก request header
-    cookie_header = request.headers.get('Cookie', '')
-    cookies = {}
-    
-    if cookie_header:
-        for item in cookie_header.split(';'):
-            if '=' in item:
-                key, value = item.strip().split('=', 1)
-                cookies[key] = value
-    
-    return jsonify({'cookies': cookies})
-
-@app.route('/api/auto-get-session', methods=['POST'])
-def auto_get_session():
-    """API endpoint สำหรับดึง Session ID จาก eve.techswop.com อัตโนมัติ"""
-    try:
-        # ใช้ requests session เพื่อจำลองการเข้าถึง
-        session = requests.Session()
-        
-        # ส่ง request ไปที่หน้า login
-        response = session.get('https://eve.techswop.com/TI/login.aspx')
-        
-        # ดึง Session ID จาก cookies
-        session_id = session.cookies.get('ASP.NET_SessionId')
-        
-        if session_id:
-            return jsonify({
-                'success': True,
-                'sessionId': session_id,
-                'message': 'ดึง Session ID สำเร็จ'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'ไม่พบ Session ID - กรุณา login ที่ eve.techswop.com ก่อน'
-            })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'เกิดข้อผิดพลาด: {str(e)}'
-        })
+# Routes /api/get-cookies และ /api/auto-get-session ถูกลบออกแล้ว
+# เนื่องจากระบบใช้ Auto-Login ผ่าน get_eve_session() แทน
 
 @app.route('/api/send-telegram', methods=['POST'])
 def send_telegram():
@@ -1919,6 +1877,10 @@ def cancel_orders():
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15'
     }
     
+    # ใช้ auto-login session
+    session_id = get_eve_session()
+    eve_cookies = {'ASP.NET_SessionId': session_id} if session_id else {}
+    
     success_count = 0
     failed_count = 0
     errors = []
@@ -1930,7 +1892,8 @@ def cancel_orders():
             check_response = requests.post(
                 'https://eve.techswop.com/ti/index.aspx/CheckAllowCancel',
                 headers=headers,
-                json=check_payload
+                json=check_payload,
+                cookies=eve_cookies
             )
             
             if check_response.status_code == 200:
@@ -1981,7 +1944,8 @@ def cancel_orders():
                     cancel_response = requests.post(
                         'https://eve.techswop.com/ti/index.aspx/CancelData',
                         headers=headers,
-                        json=cancel_payload
+                        json=cancel_payload,
+                        cookies=eve_cookies
                     )
                     
                     print(f"Cancel response status: {cancel_response.status_code}")
@@ -2978,11 +2942,11 @@ def manage_admin_settings():
 def update_branches_data():
     """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
     try:
-        data = request.get_json()
-        session_id = data.get('sessionId')
+        # ใช้ auto-login session แทนการรับจาก client
+        session_id = get_eve_session()
         
         if not session_id:
-            return jsonify({'success': False, 'error': 'กรุณาระบุ Session ID'}), 400
+            return jsonify({'success': False, 'error': 'Auto-Login ล้มเหลว กรุณาตรวจสอบ Eve Credentials'}), 400
             
         # ใช้ Helper Function ใหม่ที่เขียนข้อมูลลง DB
         print(f"🔄 Updating branches via DB Helper...")
