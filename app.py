@@ -2900,7 +2900,9 @@ def run_auto_cancel(force=False):
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15'
     }
     
-    target_date = (datetime.now() - timedelta(days=1)).strftime('%d/%m/%Y')
+    # คำนวณเวลาไทย (UTC+7) แล้วย้อนหลัง 1 วัน
+    thai_time_now = datetime.utcnow() + timedelta(hours=7)
+    target_date = (thai_time_now - timedelta(days=1)).strftime('%d/%m/%Y')
     total_found = 0
     total_cancelled = 0
     total_skipped = 0
