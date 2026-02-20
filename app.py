@@ -2900,7 +2900,7 @@ def run_auto_cancel(force=False):
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15'
     }
     
-    today = datetime.now().strftime('%d/%m/%Y')
+    target_date = (datetime.now() - timedelta(days=1)).strftime('%d/%m/%Y')
     total_found = 0
     total_cancelled = 0
     total_skipped = 0
@@ -2908,14 +2908,14 @@ def run_auto_cancel(force=False):
     details_list = []
     
     for branch_id in branch_ids:
-        print(f"\n🔍 Processing branch: {branch_id}")
+        print(f"\n🔍 Processing branch: {branch_id} for date: {target_date}")
         try:
-            # ดึงข้อมูลเทรดวันนี้
+            # ดึงข้อมูลเทรดย้อนหลัง 1 วัน
             result = fetch_data_from_api(
                 start=0, length=200,
                 branch_id=branch_id,
-                date_start=today,
-                date_end=today
+                date_start=target_date,
+                date_end=target_date
             )
             
             if not result or 'data' not in result:
