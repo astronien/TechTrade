@@ -2910,12 +2910,13 @@ def run_auto_cancel(force=False):
     for branch_id in branch_ids:
         print(f"\n🔍 Processing branch: {branch_id} for date: {target_date}")
         try:
-            # ดึงข้อมูลเทรดย้อนหลัง 1 วัน
+            # ดึงข้อมูลเทรดย้อนหลัง 1 วัน (เฉพาะสถานะ รอผู้ขายยืนยันราคา)
             result = fetch_data_from_api(
                 start=0, length=200,
                 branch_id=branch_id,
                 date_start=target_date,
-                date_end=target_date
+                date_end=target_date,
+                status="รอผู้ขายยืนยันราคา"
             )
             
             if not result or 'data' not in result:
