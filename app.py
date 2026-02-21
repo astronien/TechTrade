@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import os
 import secrets
 import hashlib
-from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 import os as _os  # Moved to top for safety
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
@@ -2746,10 +2745,8 @@ def update_branches_data():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============================================================
-# Auto-Cancel Scheduler System
+# Auto-Cancel Scheduler System (Vercel Cron Version)
 # ============================================================
-
-scheduler = BackgroundScheduler(timezone='Asia/Bangkok')
 
 def get_auto_cancel_config():
     """ดึง config auto-cancel จาก DB"""
@@ -3080,69 +3077,44 @@ def run_auto_cancel(force=False):
         'total_failed': total_failed
     }
 
-def start_auto_cancel_scheduler():
-    """เริ่ม scheduler จาก config ใน DB"""
-    try:
-        config = get_auto_cancel_config()
-        if not config or not config.get('enabled'):
-            print("⏰ Auto-cancel scheduler: disabled")
-            return
-        
-        schedule_time = config.get('schedule_time', '23:00')
-        hour, minute = schedule_time.split(':')
-        
-        # ลบ job เก่า (ถ้ามี)
-        if scheduler.get_job('auto_cancel'):
-            scheduler.remove_job('auto_cancel')
-        
-        scheduler.add_job(
-            run_auto_cancel,
-            'cron',
-            hour=int(hour),
-            minute=int(minute),
-            id='auto_cancel',
-            replace_existing=True
-        )
-        
-        if not scheduler.running:
-            scheduler.start()
-            atexit.register(lambda: scheduler.shutdown())
-        
-        print(f"⏰ Auto-cancel scheduler: enabled at {schedule_time}")
-    except Exception as e:
-        print(f"❌ Error starting auto-cancel scheduler: {e}")
+# Removed APScheduler functions (start_auto_cancel_scheduler, reschedule_auto_cancel)
+# because Vercel Serverless Functions do not support persistent background tasks.
+# We now use Vercel Cron Jobs to hit /api/admin/auto-cancel-cron instead.
 
-def reschedule_auto_cancel():
-    """Reschedule job เมื่อ config เปลี่ยน"""
+@app.route('/api/admin/auto-cancel-cron', methods=['GET', 'POST'])
+def vercel_cron_auto_cancel():
+    """Endpoint สำหรับ Vercel Cron Job เรียกทุกชั่วโมง"""
     try:
-        # ลบ job เก่า
-        if scheduler.get_job('auto_cancel'):
-            scheduler.remove_job('auto_cancel')
+        # Check authorization (Vercel sends a specific header, we can secure it if needed, 
+        # or just let it run since it only does work if the time matches)
+        # auth_header = request.headers.get('Authorization')
+        # if auth_header != f'Bearer {os.environ.get("CRON_SECRET", "default")}': ...
         
         config = get_auto_cancel_config()
         if not config or not config.get('enabled'):
-            print("⏰ Auto-cancel scheduler: disabled (removed job)")
-            return
-        
+            print("⏰ Cron Triggered: Auto-cancel is disabled in DB.")
+            return jsonify({'success': False, 'message': 'System disabled'}), 200
+            
         schedule_time = config.get('schedule_time', '23:00')
-        hour, minute = schedule_time.split(':')
+        target_hour, target_minute = schedule_time.split(':')
         
-        scheduler.add_job(
-            run_auto_cancel,
-            'cron',
-            hour=int(hour),
-            minute=int(minute),
-            id='auto_cancel',
-            replace_existing=True
-        )
+        # ค้นหาเวลาปัจจุบันของไทย (UTC+7)
+        thai_time_now = datetime.utcnow() + timedelta(hours=7)
+        current_hour = str(thai_time_now.hour).zfill(2)
         
-        if not scheduler.running:
-            scheduler.start()
-            atexit.register(lambda: scheduler.shutdown())
-        
-        print(f"⏰ Auto-cancel rescheduled to {schedule_time}")
+        # ตรวจสอบว่าชั่วโมงปัจจุบันตรงกับที่ตั้งค่าไว้หรือไม่
+        # (Vercel Cron ตั้งให้รันทุกชั่วโมง นาทีที่ 0 ดังนั้นเช็คแค่ชั่วโมงก็พอ)
+        if current_hour == target_hour:
+            print(f"⏰ Cron Matched! Current Hour: {current_hour}, Target: {target_hour}. Running auto-cancel...")
+            result = run_auto_cancel(force=True)
+            return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
+        else:
+            print(f"💤 Cron Skipped. Current Hour: {current_hour}, Target: {target_hour}.")
+            return jsonify({'success': True, 'message': f'Skipped. Not the scheduled hour ({target_hour}).'}), 200
+            
     except Exception as e:
-        print(f"❌ Error rescheduling auto-cancel: {e}")
+        print(f"❌ Cron Error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # API Routes for Auto-Cancel Config
 @app.route('/api/admin/auto-cancel-config', methods=['GET', 'POST'])
@@ -3160,7 +3132,7 @@ def manage_auto_cancel_config():
         data = request.get_json()
         success = save_auto_cancel_config(data)
         if success:
-            reschedule_auto_cancel()
+# Removed reschedule_auto_cancel() call because we now rely on Vercel Cron
             return jsonify({'success': True, 'message': 'บันทึกสำเร็จ'})
         return jsonify({'success': False, 'error': 'บันทึกไม่สำเร็จ'}), 500
     except Exception as e:
@@ -3363,11 +3335,11 @@ def line_bot_test():
 
 try:
     if _os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-        start_auto_cancel_scheduler()
+        # start_auto_cancel_scheduler() # Removed for Vercel Cron
+        pass
 except Exception as e:
     print(f"❌ CRITICAL STARTUP ERROR: {e}")
     # Don't crash the app, just log it.
-
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
