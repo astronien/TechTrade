@@ -3116,7 +3116,7 @@ def manage_auto_cancel_config():
         config = get_auto_cancel_config()
         if config:
             config['updated_at'] = str(config.get('updated_at', ''))
-            config['schedule_time'] = '23:00' # บังคับให้เป็น 23:00 เสมอตาม Vercel Hobby Plan
+            config['schedule_time'] = '00:00' # บังคับให้เป็น 00:00 เสมอตาม Vercel Hobby Plan
             return jsonify({'success': True, 'config': config})
         return jsonify({'success': True, 'config': None})
     

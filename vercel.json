@@ -30,7 +30,7 @@
     },
     {
       "path": "/api/admin/auto-cancel-cron",
-      "schedule": "0 16 * * *"
+      "schedule": "0 17 * * *"
     }
   ]
 }
