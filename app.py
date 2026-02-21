@@ -3098,19 +3098,11 @@ def vercel_cron_auto_cancel():
         schedule_time = config.get('schedule_time', '23:00')
         target_hour, target_minute = schedule_time.split(':')
         
-        # ค้นหาเวลาปัจจุบันของไทย (UTC+7)
-        thai_time_now = datetime.utcnow() + timedelta(hours=7)
-        current_hour = str(thai_time_now.hour).zfill(2)
-        
-        # ตรวจสอบว่าชั่วโมงปัจจุบันตรงกับที่ตั้งค่าไว้หรือไม่
-        # (Vercel Cron ตั้งให้รันทุกชั่วโมง นาทีที่ 0 ดังนั้นเช็คแค่ชั่วโมงก็พอ)
-        if current_hour == target_hour:
-            print(f"⏰ Cron Matched! Current Hour: {current_hour}, Target: {target_hour}. Running auto-cancel...")
-            result = run_auto_cancel(force=True)
-            return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
-        else:
-            print(f"💤 Cron Skipped. Current Hour: {current_hour}, Target: {target_hour}.")
-            return jsonify({'success': True, 'message': f'Skipped. Not the scheduled hour ({target_hour}).'}), 200
+        # สำหรับ Vercel Hobby Plan เราจะใช้บริการ External Cron (เช่น cron-job.org) ยิงมาตามเวลาที่ตั้งไว้พอดี
+        # ดังนั้นถ้า Endpoint นี้ถูกเรียกและ enabled = True ก็ให้ทำงานเลย โดยไม่ต้องเช็ค current_hour ตรงๆ
+        print(f"⏰ External Cron Triggered! Running auto-cancel...")
+        result = run_auto_cancel(force=True)
+        return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
             
     except Exception as e:
         print(f"❌ Cron Error: {str(e)}")
