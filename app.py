@@ -3104,12 +3104,12 @@ def vercel_cron_auto_cancel():
         target_hour, target_minute = schedule_time.split(':')
         
         bkk_tz = pytz.timezone('Asia/Bangkok')
-        now_bkk = datetime.datetime.now(bkk_tz)
+        now_bkk = datetime.now(bkk_tz)
         
         target_dt_today = now_bkk.replace(hour=int(target_hour), minute=int(target_minute), second=0, microsecond=0)
         if now_bkk < target_dt_today:
             # If current time hasn't passed today's target yet, the most recent target is yesterday's.
-            target_dt_past = target_dt_today - datetime.timedelta(days=1)
+            target_dt_past = target_dt_today - timedelta(days=1)
         else:
             target_dt_past = target_dt_today
             
