@@ -1,9 +1,8 @@
-name: TechTrade Auto-Cancel Cron
+name: Auto-Cancel Scheduled Task
 
 on:
   schedule:
     # Trigger every 15 minutes to check if the DB time matches the current time
-    # This allows users to change their time to whatever they want
     - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
