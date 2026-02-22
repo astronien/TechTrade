@@ -3102,20 +3102,46 @@ def vercel_cron_auto_cancel():
         schedule_time = config.get('schedule_time', '00:00')
         target_hour, target_minute = schedule_time.split(':')
         
-        # เช็คเวลาปัจจุบันเปรียบเทียบกับ schedule_time (ดึงเวลาแบบ BKK Timezone)
         bkk_tz = pytz.timezone('Asia/Bangkok')
         now_bkk = datetime.datetime.now(bkk_tz)
-        current_hour = str(now_bkk.hour).zfill(2)
-        current_minute = str(now_bkk.minute).zfill(2)
         
-        print(f"⏰ Cron Ping: Current BKK Time is {current_hour}:{current_minute}. Target is {target_hour}:{target_minute}")
+        target_dt_today = now_bkk.replace(hour=int(target_hour), minute=int(target_minute), second=0, microsecond=0)
+        if now_bkk < target_dt_today:
+            # If current time hasn't passed today's target yet, the most recent target is yesterday's.
+            target_dt_past = target_dt_today - datetime.timedelta(days=1)
+        else:
+            target_dt_past = target_dt_today
+            
+        print(f"⏰ Cron Ping: Now={now_bkk.strftime('%H:%M')}, Target={schedule_time}. Most recent schedule={target_dt_past.strftime('%Y-%m-%d %H:%M')}")
         
-        if current_hour == target_hour and current_minute == target_minute:
-            print(f"✅ Time matched! Running auto-cancel...")
+        # Check database for last run
+        conn = get_db_connection()
+        already_run = False
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT run_at FROM auto_cancel_log ORDER BY run_at DESC LIMIT 1")
+                last_log = cur.fetchone()
+                if last_log and last_log[0]:
+                    last_run_utc = last_log[0]
+                    if last_run_utc.tzinfo is None:
+                        last_run_utc = last_run_utc.replace(tzinfo=pytz.UTC)
+                    last_run_bkk = last_run_utc.astimezone(bkk_tz)
+                    
+                    if last_run_bkk >= target_dt_past:
+                        already_run = True
+                cur.close()
+            except Exception as db_e:
+                print(f"❌ DB Check Error: {db_e}")
+            finally:
+                conn.close()
+                
+        if not already_run:
+            print(f"✅ Time to run! Executing auto-cancel...")
             result = run_auto_cancel(force=True)
             return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
         else:
-            return jsonify({'success': True, 'message': f'Skipped. Target time is {schedule_time}'}), 200
+            return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
             
     except Exception as e:
         print(f"❌ Cron Error: {str(e)}")
