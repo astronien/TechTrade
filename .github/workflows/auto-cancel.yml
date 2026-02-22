@@ -1,0 +1,29 @@
+name: TechTrade Auto-Cancel Cron
+
+on:
+  schedule:
+    # Trigger every 15 minutes to check if the DB time matches the current time
+    # This allows users to change their time to whatever they want
+    - cron: '0,15,30,45 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-auto-cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Auto-Cancel Endpoint
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://techtrade.astronien.tech/api/admin/auto-cancel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "Status Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+          
+          # Allow 200 (Ran successfully or skipped because it's not time yet)
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Failed to trigger auto-cancel. Exiting with error."
+            exit 1
+          fi

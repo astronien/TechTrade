@@ -27,10 +27,6 @@
     {
       "path": "/api/admin/run-bot",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/admin/auto-cancel-cron",
-      "schedule": "0 17 * * *"
     }
   ]
 }

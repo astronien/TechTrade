@@ -3083,26 +3083,39 @@ def run_auto_cancel(force=False):
 
 @app.route('/api/admin/auto-cancel-cron', methods=['GET', 'POST'])
 def vercel_cron_auto_cancel():
-    """Endpoint สำหรับ Vercel Cron Job เรียกทุกชั่วโมง"""
+    """Endpoint สำหรับ GitHub Actions Cron ยิงมาทุกๆ 15 นาที"""
     try:
-        # Check authorization (Vercel sends a specific header, we can secure it if needed, 
-        # or just let it run since it only does work if the time matches)
-        # auth_header = request.headers.get('Authorization')
-        # if auth_header != f'Bearer {os.environ.get("CRON_SECRET", "default")}': ...
+        # Check authorization
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
         
+        # If secret is set in env, enforce it
+        if cron_secret and auth_header != f'Bearer {cron_secret}':
+            print("❌ Unauthorized cron attempt")
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+            
         config = get_auto_cancel_config()
         if not config or not config.get('enabled'):
             print("⏰ Cron Triggered: Auto-cancel is disabled in DB.")
             return jsonify({'success': False, 'message': 'System disabled'}), 200
             
-        schedule_time = config.get('schedule_time', '23:00')
+        schedule_time = config.get('schedule_time', '00:00')
         target_hour, target_minute = schedule_time.split(':')
         
-        # สำหรับ Vercel Hobby Plan เราจะใช้บริการ External Cron (เช่น cron-job.org) ยิงมาตามเวลาที่ตั้งไว้พอดี
-        # ดังนั้นถ้า Endpoint นี้ถูกเรียกและ enabled = True ก็ให้ทำงานเลย โดยไม่ต้องเช็ค current_hour ตรงๆ
-        print(f"⏰ External Cron Triggered! Running auto-cancel...")
-        result = run_auto_cancel(force=True)
-        return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
+        # เช็คเวลาปัจจุบันเปรียบเทียบกับ schedule_time (ดึงเวลาแบบ BKK Timezone)
+        bkk_tz = pytz.timezone('Asia/Bangkok')
+        now_bkk = datetime.datetime.now(bkk_tz)
+        current_hour = str(now_bkk.hour).zfill(2)
+        current_minute = str(now_bkk.minute).zfill(2)
+        
+        print(f"⏰ Cron Ping: Current BKK Time is {current_hour}:{current_minute}. Target is {target_hour}:{target_minute}")
+        
+        if current_hour == target_hour and current_minute == target_minute:
+            print(f"✅ Time matched! Running auto-cancel...")
+            result = run_auto_cancel(force=True)
+            return jsonify({'success': True, 'message': 'Cron executed successfully', 'result': result}), 200
+        else:
+            return jsonify({'success': True, 'message': f'Skipped. Target time is {schedule_time}'}), 200
             
     except Exception as e:
         print(f"❌ Cron Error: {str(e)}")
@@ -3116,7 +3129,6 @@ def manage_auto_cancel_config():
         config = get_auto_cancel_config()
         if config:
             config['updated_at'] = str(config.get('updated_at', ''))
-            config['schedule_time'] = '00:00' # บังคับให้เป็น 00:00 เสมอตาม Vercel Hobby Plan
             return jsonify({'success': True, 'config': config})
         return jsonify({'success': True, 'config': None})
     
