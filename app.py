@@ -3163,7 +3163,10 @@ def get_auto_cancel_logs():
             # row is RealDictRow, convert to dict
             log = dict(row)
             if log.get('run_at'):
-                log['run_at'] = str(log['run_at'])
+                if isinstance(log['run_at'], datetime):
+                    log['run_at'] = log['run_at'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                else:
+                    log['run_at'] = str(log['run_at']).replace(' ', 'T') + 'Z'
             logs.append(log)
         
         return jsonify({'success': True, 'logs': logs})
