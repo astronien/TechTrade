@@ -3192,7 +3192,7 @@ def get_auto_cancel_logs():
         if not conn:
             return jsonify({'success': False, 'error': 'DB connection failed'}), 500
         cur = conn.cursor()
-        cur.execute("SELECT * FROM auto_cancel_log ORDER BY run_at DESC LIMIT 10")
+        cur.execute("SELECT * FROM auto_cancel_log WHERE total_cancelled > 0 ORDER BY run_at DESC LIMIT 10")
         rows = cur.fetchall()
         cur.close()
         conn.close()
