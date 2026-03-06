@@ -1152,19 +1152,23 @@
                 status.innerHTML = '⏳ กำลังโหลด...';
 
                 try {
-                    // โหลดรายชื่อสาขาทั้งหมด
-                    if (supersaleBranchesList.length === 0) {
-                        console.log('🔄 Loading branches for supersale...');
+                    // ใช้ข้อมูลสาขาจากตัวแปร global allBranches ที่โหลดไว้แล้วตอนเปิดหน้าเว็บ
+                    if (typeof allBranches !== 'undefined' && allBranches.length > 0) {
+                        supersaleBranchesList = allBranches;
+                    } else {
+                        // fallback ถ้าโหลด allBranches ไม่สำเร็จตอนแรก
+                        console.log('🔄 Loading branches for supersale (fallback)...');
                         const branchRes = await fetch('/api/branches');
                         const branchData = await branchRes.json();
-                        console.log('📦 Branches API response:', branchData);
                         if (branchData.success && branchData.branches && branchData.branches.length > 0) {
                             supersaleBranchesList = branchData.branches;
-                        } else {
-                            grid.innerHTML = '<p style="color: #e67e22;">⚠️ ไม่พบรายชื่อสาขาในระบบ กรุณาตั้งค่าสาขาก่อน</p>';
-                            status.innerHTML = '⚠️ ไม่พบข้อมูลสาขา';
-                            return;
                         }
+                    }
+
+                    if (supersaleBranchesList.length === 0) {
+                        grid.innerHTML = '<p style="color: #e67e22;">⚠️ ไม่พบรายชื่อสาขาในระบบ กรุณาตั้งค่าสาขาก่อน</p>';
+                        status.innerHTML = '⚠️ ไม่พบข้อมูลสาขา';
+                        return;
                     }
 
                     // โหลด config supersale
