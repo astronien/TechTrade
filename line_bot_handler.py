@@ -9,6 +9,39 @@ import hashlib
 import base64
 import requests
 
+def load_supersale_config():
+    """โหลด config สาขา supersale จาก DB (standalone, ไม่ import จาก app.py)"""
+    try:
+        import psycopg2
+        import psycopg2.extras
+        database_url = os.environ.get('DATABASE_URL')
+        if not database_url:
+            return []
+        conn = psycopg2.connect(database_url, cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = 'supersale_branch_ids'")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return json.loads(row['value'])
+        return []
+    except Exception as e:
+        print(f"⚠️ load_supersale_config error: {e}")
+        return []
+
+def get_sale_key(item, branch_id, supersale_ids):
+    """ดึงรหัสพนักงานตาม supersale config
+    - สาขาปกติ: ใช้ SALE_CODE
+    - สาขา supersale: ใช้ SALE_NAME (เพราะรหัส sale ปกติอยู่ในช่องนี้)
+    """
+    try:
+        if int(branch_id) in supersale_ids:
+            return item.get('SALE_NAME', '') or item.get('SALE_CODE', '')
+    except (ValueError, TypeError):
+        pass
+    return item.get('SALE_CODE', '')
+
 def verify_line_signature(channel_secret, body, signature):
     """Verify LINE Webhook signature manually (HMAC-SHA256)"""
     hash = hmac.new(channel_secret.encode('utf-8'), body.encode('utf-8'), hashlib.sha256).digest()
@@ -36,10 +69,13 @@ def send_line_reply(channel_access_token, reply_token, messages):
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
-        return True
+        return {"success": True}
     except Exception as e:
-        print(f"❌ Error sending LINE reply: {e}")
-        return False
+        error_msg = f"❌ Error sending LINE reply: {e}"
+        if hasattr(e, 'response') and e.response is not None:
+             error_msg += f" | Response: {e.response.text}"
+        print(error_msg)
+        return {"success": False, "error": error_msg}
 def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zone_func, find_branch_func, parse_month_func, get_date_range_func):
     """
     จัดการข้อความจาก LINE และส่งกลับ response message
@@ -194,6 +230,9 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     today = datetime.now().strftime('%d/%m/%Y')
     thai_date = format_thai_date(datetime.now())
     
+    # โหลด supersale config
+    supersale_ids = load_supersale_config()
+    
     filters = {
         'date_start': today,
         'date_end': today,
@@ -220,11 +259,10 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     })
     
     for item in items:
-        sale_code = item.get('SALE_CODE', '')
-        if not sale_code:
+        sale_key = get_sale_key(item, branch['branch_id'], supersale_ids)
+        if not sale_key:
             continue
         
-        sale_name = item.get('SALE_NAME', '')
         status = item.get('BIDDING_STATUS_NAME', '')
         is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
         
@@ -234,14 +272,14 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
         except:
             amount = 0.0
         
-        sales_summary[sale_code]['name'] = sale_name
-        sales_summary[sale_code]['count'] += 1
-        sales_summary[sale_code]['amount'] += amount
+        sales_summary[sale_key]['name'] = ''
+        sales_summary[sale_key]['count'] += 1
+        sales_summary[sale_key]['amount'] += amount
         
         if is_confirmed:
-            sales_summary[sale_code]['confirmed'] += 1
+            sales_summary[sale_key]['confirmed'] += 1
         else:
-            sales_summary[sale_code]['not_confirmed'] += 1
+            sales_summary[sale_key]['not_confirmed'] += 1
     
     # สร้างข้อความ
     import re
@@ -384,6 +422,9 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     
     date_start, date_end = get_date_range_func(month_number)
     
+    # โหลด supersale config
+    supersale_ids = load_supersale_config()
+    
     filters = {
         'date_start': date_start,
         'date_end': date_end,
@@ -410,11 +451,10 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     })
     
     for item in items:
-        sale_code = item.get('SALE_CODE', '')
-        if not sale_code:
+        sale_key = get_sale_key(item, branch['branch_id'], supersale_ids)
+        if not sale_key:
             continue
         
-        sale_name = item.get('SALE_NAME', '')
         status = item.get('BIDDING_STATUS_NAME', '')
         is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
         
@@ -424,14 +464,14 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
         except:
             amount = 0.0
         
-        sales_summary[sale_code]['name'] = sale_name
-        sales_summary[sale_code]['count'] += 1
-        sales_summary[sale_code]['amount'] += amount
+        sales_summary[sale_key]['name'] = ''
+        sales_summary[sale_key]['count'] += 1
+        sales_summary[sale_key]['amount'] += amount
         
         if is_confirmed:
-            sales_summary[sale_code]['confirmed'] += 1
+            sales_summary[sale_key]['confirmed'] += 1
         else:
-            sales_summary[sale_code]['not_confirmed'] += 1
+            sales_summary[sale_key]['not_confirmed'] += 1
     
     # สร้างข้อความ
     import re

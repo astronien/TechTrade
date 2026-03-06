@@ -293,6 +293,17 @@ def get_system_setting(key):
         if conn: conn.close()
         return None
 
+def get_supersale_branch_ids():
+    """ดึงรายชื่อ branch_id ที่มี supersale จาก DB"""
+    try:
+        value = get_system_setting('supersale_branch_ids')
+        if value:
+            return json.loads(value)
+        return []
+    except Exception as e:
+        print(f"⚠️ Error loading supersale config: {e}")
+        return []
+
 def get_dynamic_params():
     """ดึง parameters เพิ่มเติมจาก DB (Cached)"""
     global DYNAMIC_PARAMS_CACHE
@@ -1062,6 +1073,17 @@ def fetch_and_process_report(filters):
     if not all_items:
         return None, []
     
+    # โหลด supersale config
+    supersale_ids = get_supersale_branch_ids()
+    current_branch_id = filters.get('branch_id')
+    # ถ้าเป็นสาขาเดียว (ไม่ใช่ zone) ให้เช็คว่าเป็น supersale หรือไม่
+    is_supersale_branch = False
+    if current_branch_id and not zone_id:
+        try:
+            is_supersale_branch = int(current_branch_id) in supersale_ids
+        except (ValueError, TypeError):
+            pass
+    
     # วิเคราะห์ข้อมูล
     items = all_items
     
@@ -1117,16 +1139,25 @@ def fetch_and_process_report(filters):
                 daily_summary[doc_date]['confirmedCount'] += 1
                 daily_summary[doc_date]['confirmedAmount'] += amount
         
-        # สรุปตามพนักงานขาย
+        # สรุปตามพนักงานขาย (ถ้าเป็น supersale ให้ใช้ SALE_NAME เป็น key แทน)
         sale_code = item.get('SALE_CODE', '')
         sale_name = item.get('SALE_NAME', '')
-        if sale_code:
-            sales_summary[sale_code]['name'] = sale_name
-            sales_summary[sale_code]['count'] += 1
-            sales_summary[sale_code]['totalAmount'] += amount
+        
+        if is_supersale_branch:
+            # supersale branch: รหัส sale ปกติอยู่ใน SALE_NAME
+            sale_key = sale_name
+            sale_display = sale_code  # SALE_CODE คือ supersale code
+        else:
+            sale_key = sale_code
+            sale_display = sale_name
+        
+        if sale_key:
+            sales_summary[sale_key]['name'] = sale_display
+            sales_summary[sale_key]['count'] += 1
+            sales_summary[sale_key]['totalAmount'] += amount
             if is_confirmed:
-                sales_summary[sale_code]['confirmedCount'] += 1
-                sales_summary[sale_code]['confirmedAmount'] += amount
+                sales_summary[sale_key]['confirmedCount'] += 1
+                sales_summary[sale_key]['confirmedAmount'] += amount
         
         # นับสถานะพิเศษ
         if is_confirmed:
@@ -1822,6 +1853,46 @@ def save_zones():
         return jsonify({
             'success': False,
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
+        }), 500
+
+@app.route('/api/supersale-config', methods=['GET'])
+@login_required
+def get_supersale_config():
+    """API endpoint สำหรับดึง config สาขา supersale"""
+    branch_ids = get_supersale_branch_ids()
+    return jsonify({
+        'success': True,
+        'branch_ids': branch_ids
+    })
+
+@app.route('/api/supersale-config', methods=['POST'])
+@login_required
+def save_supersale_config():
+    """API endpoint สำหรับบันทึก config สาขา supersale"""
+    try:
+        data = request.get_json()
+        branch_ids = data.get('branch_ids', [])
+        
+        # บันทึกลง system_settings
+        success = save_system_setting('supersale_branch_ids', json.dumps(branch_ids))
+        
+        if success:
+            print(f"✅ บันทึก supersale config: {len(branch_ids)} สาขา → {branch_ids}")
+            return jsonify({
+                'success': True,
+                'message': f'บันทึกสำเร็จ ({len(branch_ids)} สาขา)',
+                'branch_ids': branch_ids
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'ไม่สามารถบันทึกได้'
+            }), 500
+    except Exception as e:
+        print(f"❌ Error saving supersale config: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 @app.route('/api/annual-report-data')
