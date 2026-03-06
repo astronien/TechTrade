@@ -14,7 +14,7 @@ def load_supersale_config():
     try:
         import psycopg2
         import psycopg2.extras
-        database_url = os.environ.get('DATABASE_URL')
+        database_url = os.environ.get('POSTGRES_URL_NON_POOLING') or os.environ.get('DATABASE_URL')
         if not database_url:
             return []
         conn = psycopg2.connect(database_url, cursor_factory=psycopg2.extras.RealDictCursor)
