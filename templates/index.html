@@ -1173,27 +1173,37 @@
 
                     // สร้าง checkbox grid
                     grid.innerHTML = '';
-                    supersaleBranchesList.forEach(branch => {
-                        const isChecked = selectedIds.includes(branch.branch_id);
-                        let displayName = branch.branch_name || `สาขา ${branch.branch_id}`;
-                        // ตัดให้สั้นลง ถ้าชื่อยาวเกินไป
-                        if (displayName.length > 40) {
-                            const parts = displayName.split(' : ');
-                            displayName = parts.length >= 3 ? parts[2] : parts[parts.length - 1];
-                        }
 
-                        const label = document.createElement('label');
-                        label.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: background 0.2s; font-size: 13px;';
-                        label.style.background = isChecked ? '#fff3cd' : '#f8f9fa';
-                        label.style.border = isChecked ? '1px solid #ffc107' : '1px solid #e9ecef';
-                        label.innerHTML = `<input type="checkbox" value="${branch.branch_id}" ${isChecked ? 'checked' : ''} 
-                            onchange="this.parentElement.style.background = this.checked ? '#fff3cd' : '#f8f9fa'; this.parentElement.style.border = this.checked ? '1px solid #ffc107' : '1px solid #e9ecef'; updateSupersaleCount();" 
-                            style="width: 16px; height: 16px;">
-                            <span>${displayName}</span>`;
-                        grid.appendChild(label);
-                    });
+                    try {
+                        supersaleBranchesList.forEach(branch => {
+                            // ป้องกันกรณี element ใน array ไม่ใช่ object
+                            let branchId = branch.branch_id ?? branch.id ?? 'unknown';
+                            let branchName = branch.branch_name ?? branch.name ?? `สาขา ${branchId}`;
 
-                    updateSupersaleCount();
+                            const isChecked = selectedIds.includes(Number(branchId));
+                            let displayName = branchName;
+                            // ตัดให้สั้นลง ถ้าชื่อยาวเกินไป
+                            if (displayName.length > 40) {
+                                const parts = displayName.split(' : ');
+                                displayName = parts.length >= 3 ? parts[2] : parts[parts.length - 1];
+                            }
+
+                            const label = document.createElement('label');
+                            label.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: background 0.2s; font-size: 13px;';
+                            label.style.background = isChecked ? '#fff3cd' : '#f8f9fa';
+                            label.style.border = isChecked ? '1px solid #ffc107' : '1px solid #e9ecef';
+                            label.innerHTML = `<input type="checkbox" value="${branchId}" ${isChecked ? 'checked' : ''} 
+                                onchange="this.parentElement.style.background = this.checked ? '#fff3cd' : '#f8f9fa'; this.parentElement.style.border = this.checked ? '1px solid #ffc107' : '1px solid #e9ecef'; updateSupersaleCount();" 
+                                style="width: 16px; height: 16px;">
+                                <span>${displayName}</span>`;
+                            grid.appendChild(label);
+                        });
+                        updateSupersaleCount();
+                    } catch (renderError) {
+                        console.error('Rendering error:', renderError);
+                        grid.innerHTML += `<p style="color:red">Error rendering options: ${renderError.message}</p>`;
+                    }
+
                 } catch (error) {
                     console.error('❌ Error loading supersale config:', error);
                     grid.innerHTML = '<p style="color: red;">❌ โหลดข้อมูลไม่สำเร็จ: ' + error.message + '</p>';
