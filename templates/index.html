@@ -433,25 +433,27 @@
 
             <!-- Supersale Config Page -->
             <div id="supersalePage" class="page-section">
-                <div class="card" style="max-width: 1000px;">
-                    <h2 style="margin-bottom: 5px;">⭐ ตั้งค่าสาขา Supersale</h2>
-                    <p style="color: #666; margin-bottom: 20px; font-size: 14px;">
-                        เลือกสาขาที่มีพนักงาน Supersale — สาขาที่เลือกจะนับยอดพนักงานจากช่อง "ชื่อพนักงาน" แทน
-                        "รหัสพนักงาน"
-                    </p>
-                    <div id="supersaleStatus"
-                        style="margin-bottom: 15px; padding: 10px; background: #f0f7ff; border-radius: 8px; font-size: 14px;">
-                        กำลังโหลด...
-                    </div>
-                    <div id="supersaleBranchGrid"
-                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; margin-bottom: 20px; max-height: 500px; overflow-y: auto; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <button onclick="saveSupersaleConfig()"
-                            style="padding: 10px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">💾
-                            บันทึก</button>
-                        <button onclick="loadSupersaleConfig()" class="secondary"
-                            style="padding: 10px 24px; font-size: 14px;">🔄 รีเฟรช</button>
+                <div class="container">
+                    <h1>⭐ ตั้งค่าสาขา Supersale</h1>
+                    <div class="card" style="max-width: 1000px;">
+                        <p style="color: #666; margin-bottom: 20px; font-size: 14px;">
+                            เลือกสาขาที่มีพนักงาน Supersale — สาขาที่เลือกจะนับยอดพนักงานจากช่อง "ชื่อพนักงาน" แทน
+                            "รหัสพนักงาน"
+                        </p>
+                        <div id="supersaleStatus"
+                            style="margin-bottom: 15px; padding: 10px; background: #f0f7ff; border-radius: 8px; font-size: 14px;">
+                            กำลังโหลด...
+                        </div>
+                        <div id="supersaleBranchGrid"
+                            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; margin-bottom: 20px; max-height: 500px; overflow-y: auto; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="saveSupersaleConfig()"
+                                style="padding: 10px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">💾
+                                บันทึก</button>
+                            <button onclick="loadSupersaleConfig()" class="secondary"
+                                style="padding: 10px 24px; font-size: 14px;">🔄 รีเฟรช</button>
+                        </div>
                     </div>
                 </div>
             </div>
