@@ -441,6 +441,11 @@
                         เลือกสาขาที่มีพนักงาน Supersale — สาขาที่เลือกจะนับยอดพนักงานจากช่อง "ชื่อพนักงาน" แทน
                         "รหัสพนักงาน"
                     </p>
+                    <div style="margin-bottom: 15px;">
+                        <input type="text" id="supersaleSearch" placeholder="🔍 ค้นหาสาขา..." class="form-control"
+                            onkeyup="filterSupersaleBranches(this.value)"
+                            style="width: 100%; max-width: 400px; padding: 10px; border-radius: 8px;">
+                    </div>
                     <div id="supersaleStatus"
                         style="margin-bottom: 15px; padding: 10px; background: #f0f7ff; border-radius: 8px; font-size: 14px;">
                         กำลังโหลด...
@@ -1242,8 +1247,25 @@
                     }
                 } catch (error) {
                     console.error('❌ Error saving supersale config:', error);
-                    alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+                    alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + error.message);
                 }
+            }
+
+            // ฟังก์ชันค้นหาสาขาในหน้า Supersale
+            function filterSupersaleBranches(query) {
+                query = query.toLowerCase().trim();
+                const grid = document.getElementById('supersaleBranchGrid');
+                if (!grid) return;
+
+                const labels = grid.querySelectorAll('label');
+                labels.forEach(label => {
+                    const spanText = label.querySelector('span').innerText.toLowerCase();
+                    if (spanText.includes(query)) {
+                        label.style.display = 'flex';
+                    } else {
+                        label.style.display = 'none';
+                    }
+                });
             }
 
             // ==================== Zone Management Functions ====================
