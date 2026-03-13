@@ -3121,12 +3121,16 @@ def run_auto_cancel(force=False):
     
     print(f"\n📊 Summary: Found={total_found}, Cancelled={total_cancelled}, Skipped={total_skipped}, Failed={total_failed}")
     
-    # ส่ง Telegram
-    telegram_sent = send_telegram_notification(
-        config.get('telegram_bot_token', ''),
-        config.get('telegram_chat_id', ''),
-        summary
-    )
+    # ส่ง Telegram (เฉพาะเมื่อมีการยกเลิกสำเร็จ)
+    telegram_sent = False
+    if total_cancelled > 0:
+        telegram_sent = send_telegram_notification(
+            config.get('telegram_bot_token', ''),
+            config.get('telegram_chat_id', ''),
+            summary
+        )
+    else:
+        print("ℹ️ ไม่มีการยกเลิกสำเร็จ ข้ามการส่ง Telegram")
     
     # บันทึก log
     save_auto_cancel_log({
