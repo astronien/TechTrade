@@ -773,6 +773,13 @@
                 const branchStatus = document.getElementById('branchStatus');
                 const reportBranchStatus = document.getElementById('reportBranchStatus');
 
+                // ⭐ อัปเดต BRANCHES_DATA global ให้ตรงกับข้อมูลใหม่
+                // เพื่อให้ทุก BRANCHES_DATA.find() ทำงานกับข้อมูลล่าสุด
+                if (branches && branches.length > 0) {
+                    window.BRANCHES_DATA = branches;
+                    console.log(`🔄 Updated global BRANCHES_DATA: ${branches.length} branches`);
+                }
+
                 // Clear options เดิม
                 branchSelect.innerHTML = '';
                 reportBranchSelect.innerHTML = '';

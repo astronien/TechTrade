@@ -2814,10 +2814,12 @@ def get_all_branches():
     try:
         # 1. พยายามดึงจาก DB
         branches = get_branches_from_db()
+        source = 'database'
         
         # 2. ถ้าไม่มีใน DB ให้ลองดึงจากไฟล์เดิม (Fallback)
         if not branches:
             print("⚠️ No branches in DB, checking static file...")
+            source = 'static_file'
             try:
                 json_path = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
                 if os.path.exists(json_path):
@@ -2826,10 +2828,19 @@ def get_all_branches():
             except Exception as e:
                 print(f"⚠️ File fallback failed: {e}")
         
+        # Debug: แสดงจำนวนสาขาที่ส่งกลับ
+        branch_count = len(branches) if branches else 0
+        print(f"📤 /api/branches -> Serving {branch_count} branches from {source}")
+        if branches and branch_count > 0:
+            # แสดง branch_id ล่าสุด 5 ตัว
+            last_ids = [b.get('branch_id', '?') for b in branches[-5:]]
+            print(f"📤 Last 5 branch IDs: {last_ids}")
+        
         return jsonify({
             'success': True,
             'branches': branches,
-            'source': 'database' if branches else 'static_file'
+            'source': source,
+            'count': branch_count
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
