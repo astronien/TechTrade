@@ -1061,6 +1061,14 @@ def get_data():
             print(f"✅ Final result: {len(all_data)} items")
         else:
             print(f"✅ Got all data in first batch: {current} items")
+
+    # Inject branch info
+    branches_dict = {str(b[1]): b[4] for b in get_branches_from_db()}
+    req_b_id = str(filters['branch_id'])
+    b_name = branches_dict.get(req_b_id, f"Branch {req_b_id}")
+    for item in data.get('data', []):
+        item['branch_id'] = req_b_id
+        item['branch_name'] = b_name
     
     return jsonify(data)
 
@@ -1104,6 +1112,8 @@ def get_data_batch():
         is_vercel = os.environ.get('VERCEL', False)
         max_time = 50 if is_vercel else 180
         
+        branches_dict = {str(b[1]): b[4] for b in get_branches_from_db()}
+        
         def fetch_branch(branch_id):
             """ดึงข้อมูลสาขาเดียว (ใช้ใน thread)"""
             branch_start = time.time()
@@ -1138,6 +1148,12 @@ def get_data_batch():
                 
                 elapsed_branch = time.time() - branch_start
                 print(f"  ✅ Branch {branch_id}: {len(items)} items in {elapsed_branch:.1f}s")
+                
+                b_name = branches_dict.get(str(branch_id), f"Branch {branch_id}")
+                for item in items:
+                    item['branch_id'] = str(branch_id)
+                    item['branch_name'] = b_name
+                    
                 return {'branch_id': branch_id, 'data': items, 'total': record_total}
                 
             except Exception as e:

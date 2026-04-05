@@ -3024,6 +3024,8 @@
                 try {
                     // คอลัมน์ทั้งหมด (ตรงกับ createTable)
                     const columns = [
+                        { key: 'branch_id', label: 'รหัสสาขา' },
+                        { key: 'branch_name', label: 'ชื่อสาขา' },
                         { key: 'document_no', label: 'เลขที่คำสั่งเทรด' },
                         { key: 'IS_SIGNED', label: 'ลายเซ็นลูกค้า' },
                         { key: 'SIGN_DATE', label: 'วันที่ลูกค้าคืนเครื่อง' },
@@ -3123,6 +3125,8 @@
             function createTable(dataArray) {
                 // กำหนดคอลัมน์ที่ต้องการแสดงและชื่อภาษาไทย
                 const columns = [
+                    { key: 'branch_id', label: 'รหัสสาขา' },
+                    { key: 'branch_name', label: 'ชื่อสาขา' },
                     { key: 'document_no', label: 'เลขที่คำสั่งเทรด' },
                     { key: 'IS_SIGNED', label: 'ลายเซ็นลูกค้า', format: (v) => v === '1' ? '✅ เซ็นแล้ว' : '❌ ยังไม่เซ็น' },
                     { key: 'SIGN_DATE', label: 'วันที่ลูกค้าคืนเครื่อง' },
