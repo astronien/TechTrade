@@ -1063,7 +1063,7 @@ def get_data():
             print(f"✅ Got all data in first batch: {current} items")
 
     # Inject branch info
-    branches_dict = {str(b[1]): b[4] for b in get_branches_from_db()}
+    branches_dict = {str(b.get('branch_id', '')): b.get('branch_name', '') for b in get_branches_from_db() if b.get('branch_id')}
     req_b_id = str(filters['branch_id'])
     b_name = branches_dict.get(req_b_id, f"Branch {req_b_id}")
     for item in data.get('data', []):
@@ -1112,7 +1112,7 @@ def get_data_batch():
         is_vercel = os.environ.get('VERCEL', False)
         max_time = 50 if is_vercel else 180
         
-        branches_dict = {str(b[1]): b[4] for b in get_branches_from_db()}
+        branches_dict = {str(b.get('branch_id', '')): b.get('branch_name', '') for b in get_branches_from_db() if b.get('branch_id')}
         
         def fetch_branch(branch_id):
             """ดึงข้อมูลสาขาเดียว (ใช้ใน thread)"""
