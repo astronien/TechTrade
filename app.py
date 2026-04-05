@@ -244,7 +244,16 @@ def get_branches_from_db():
         conn.close()
         
         if row:
-            return row['branch_data']
+            data = row['branch_data']
+            # JSONB ควรจะ auto-parse แต่ถ้าเป็น string ให้ parse เอง
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    print(f"⚠️ branch_data is a string but not valid JSON")
+                    return []
+            print(f"📦 Loaded {len(data) if isinstance(data, list) else 0} branches from DB")
+            return data if isinstance(data, list) else []
         return []
     except Exception as e:
         print(f"❌ Error fetching branches from DB: {e}")
@@ -375,44 +384,122 @@ def trigger_branch_update(session_id):
         url = 'https://eve.techswop.com/TI/inventory/stock-view-list.aspx/GetDropDownBranch'
         headers = {
             'Content-Type': 'application/json; charset=utf-8',
-            'Cookie': f'ASP.NET_SessionId={session_id}'
+            'Cookie': f'ASP.NET_SessionId={session_id}',
+            'X-Requested-With': 'XMLHttpRequest'
         }
         
-        response = requests.post(url, headers=headers, json={})
+        response = requests.post(url, headers=headers, json={}, timeout=30, allow_redirects=False)
         
-        if response.status_code == 200:
+        print(f"📥 Branch API Response Status: {response.status_code}")
+        print(f"📥 Branch API Response Headers: {dict(response.headers)}")
+        
+        # ตรวจสอบว่าถูก redirect ไปหน้า login หรือไม่
+        if response.status_code in (301, 302, 303, 307, 308):
+            redirect_url = response.headers.get('Location', '')
+            print(f"⚠️ Branch API redirected to: {redirect_url}")
+            print(f"❌ Session expired or invalid! Need to re-login.")
+            return False, 0
+        
+        if response.status_code != 200:
+            print(f"❌ Branch API returned HTTP {response.status_code}")
+            print(f"❌ Response body (first 500 chars): {response.text[:500]}")
+            return False, 0
+        
+        # ตรวจสอบว่า response เป็น JSON หรือไม่
+        content_type = response.headers.get('Content-Type', '')
+        if 'json' not in content_type and 'javascript' not in content_type:
+            print(f"⚠️ Response Content-Type is not JSON: {content_type}")
+            print(f"⚠️ Response body (first 500 chars): {response.text[:500]}")
+            # อาจจะเป็น HTML login page
+            if 'login' in response.text.lower() or 'เข้าสู่ระบบ' in response.text:
+                print(f"❌ Session expired! Got login page instead of branch data.")
+                return False, 0
+        
+        try:
             result = response.json()
-            branches_list = []
+        except Exception as json_err:
+            print(f"❌ Failed to parse JSON response: {json_err}")
+            print(f"❌ Response body (first 500 chars): {response.text[:500]}")
+            return False, 0
             
-            # Extract Data
-            if 'd' in result:
-                raw_data = result['d']
-                if isinstance(raw_data, str):
+        print(f"📦 Branch API Result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+        
+        branches_list = []
+        
+        # Extract Data
+        if isinstance(result, dict) and 'd' in result:
+            raw_data = result['d']
+            print(f"📦 'd' field type: {type(raw_data).__name__}, length: {len(raw_data) if hasattr(raw_data, '__len__') else 'N/A'}")
+            if isinstance(raw_data, str):
+                try:
                     branches_list = json.loads(raw_data)
-                elif isinstance(raw_data, list):
-                    branches_list = raw_data
-                elif isinstance(raw_data, dict) and 'data' in raw_data:
-                    branches_list = raw_data['data']
-            elif isinstance(result, list):
-                branches_list = result
-                
-            if branches_list:
-                # Format Data
-                formatted_branches = []
-                for b in branches_list:
-                    bid = b.get('BRANCH_ID') or b.get('branch_id') or b.get('Value') or b.get('Id')
-                    bname = b.get('BRANCH_NAME') or b.get('branch_name') or b.get('Text') or b.get('Name')
-                    if bid and bname:
-                        formatted_branches.append({"branch_id": bid, "branch_name": bname})
-                
-                # Save to DB
-                if formatted_branches:
-                    save_branches_to_db(formatted_branches)
+                    print(f"📦 Parsed 'd' string -> {len(branches_list)} items")
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse 'd' as JSON string: {e}")
+                    print(f"❌ 'd' content (first 300 chars): {raw_data[:300]}")
+            elif isinstance(raw_data, list):
+                branches_list = raw_data
+                print(f"📦 'd' is already a list with {len(branches_list)} items")
+            elif isinstance(raw_data, dict) and 'data' in raw_data:
+                branches_list = raw_data['data']
+                print(f"📦 'd' is a dict, extracted 'data' with {len(branches_list)} items")
+            else:
+                print(f"⚠️ Unexpected 'd' format: {type(raw_data).__name__}")
+                if isinstance(raw_data, dict):
+                    print(f"   Keys: {list(raw_data.keys())}")
+        elif isinstance(result, list):
+            branches_list = result
+            print(f"📦 Result is directly a list with {len(branches_list)} items")
+        else:
+            print(f"⚠️ Unexpected result format. Keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+            # ลองดึงข้อมูลจาก key อื่นๆ ที่อาจมี
+            if isinstance(result, dict):
+                for key in result.keys():
+                    if isinstance(result[key], list) and len(result[key]) > 0:
+                        branches_list = result[key]
+                        print(f"📦 Found branch data in key '{key}' with {len(branches_list)} items")
+                        break
+            
+        if branches_list:
+            # แสดงตัวอย่างข้อมูลแรก
+            if len(branches_list) > 0:
+                print(f"📦 Sample first branch item: {branches_list[0]}")
+                print(f"📦 Sample first branch keys: {list(branches_list[0].keys()) if isinstance(branches_list[0], dict) else type(branches_list[0]).__name__}")
+            
+            # Format Data
+            formatted_branches = []
+            for b in branches_list:
+                if not isinstance(b, dict):
+                    print(f"⚠️ Skipping non-dict item: {b}")
+                    continue
+                bid = b.get('BRANCH_ID') or b.get('branch_id') or b.get('Value') or b.get('Id') or b.get('value') or b.get('id')
+                bname = b.get('BRANCH_NAME') or b.get('branch_name') or b.get('Text') or b.get('Name') or b.get('text') or b.get('name')
+                if bid and bname:
+                    formatted_branches.append({"branch_id": str(bid), "branch_name": str(bname)})
+            
+            print(f"📦 Formatted {len(formatted_branches)} branches out of {len(branches_list)} raw items")
+            
+            # Save to DB
+            if formatted_branches:
+                saved = save_branches_to_db(formatted_branches)
+                if saved:
+                    print(f"✅ Branch update complete! {len(formatted_branches)} branches saved to DB")
                     return True, len(formatted_branches)
+                else:
+                    print(f"❌ Failed to save branches to DB!")
+                    return False, 0
+            else:
+                print(f"⚠️ No branches matched the expected format (need both branch_id and branch_name)")
+                if len(branches_list) > 0:
+                    print(f"   Available keys in first item: {list(branches_list[0].keys()) if isinstance(branches_list[0], dict) else 'N/A'}")
+        else:
+            print(f"⚠️ branches_list is empty after extraction")
                     
         return False, 0
     except Exception as e:
         print(f"❌ Trigger update failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False, 0
 
 # ==========================================
@@ -2791,11 +2878,15 @@ def manage_admin_settings():
 def update_branches_data():
     """API endpoint สำหรับอัปเดตข้อมูลสาขา (Hybrid)"""
     try:
-        # ใช้ auto-login session แทนการรับจาก client
-        session_id = get_eve_session()
+        # บังคับ login ใหม่เสมอเมื่อกดอัปเดตสาขา (ไม่ใช้ cache เพราะ session อาจหมดอายุ)
+        print(f"🔄 [update-branches] Force refreshing Eve session...")
+        session_id = get_eve_session(force_refresh=True)
         
         if not session_id:
+            print(f"❌ [update-branches] Auto-Login failed!")
             return jsonify({'success': False, 'error': 'Auto-Login ล้มเหลว กรุณาตรวจสอบ Eve Credentials'}), 400
+        
+        print(f"✅ [update-branches] Got session: {session_id[:10]}...")
             
         # ใช้ Helper Function ใหม่ที่เขียนข้อมูลลง DB
         print(f"🔄 Updating branches via DB Helper...")
@@ -2808,7 +2899,23 @@ def update_branches_data():
                 'count': count
             })
         else:
-             return jsonify({'success': False, 'error': 'Failed to update branches from external API'}), 500
+             # ลอง login ใหม่อีกครั้ง (second attempt)
+             print(f"⚠️ [update-branches] First attempt failed, trying fresh login...")
+             session_id_retry, error = perform_eve_login()
+             if session_id_retry:
+                 success_retry, count_retry = trigger_branch_update(session_id_retry)
+                 if success_retry:
+                     # อัปเดต cache ด้วย session ใหม่
+                     import time
+                     EVE_SESSION_CACHE['session_id'] = session_id_retry
+                     EVE_SESSION_CACHE['timestamp'] = time.time()
+                     return jsonify({
+                         'success': True,
+                         'message': f'อัปเดตสาขาเรียบร้อย ({count_retry} สาขา) [retry]',
+                         'count': count_retry
+                     })
+             
+             return jsonify({'success': False, 'error': 'ไม่สามารถดึงข้อมูลสาขาจาก Eve API ได้ (ตรวจสอบ Log เพิ่มเติม)'}), 500
 
     except Exception as e:
         print(f"❌ Error in update_branches_data: {str(e)}")
