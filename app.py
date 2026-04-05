@@ -2950,12 +2950,14 @@ def get_all_branches():
             last_ids = [b.get('branch_id', '?') for b in branches[-5:]]
             print(f"📤 Last 5 branch IDs: {last_ids}")
         
-        return jsonify({
+        response = jsonify({
             'success': True,
             'branches': branches,
             'source': source,
             'count': branch_count
         })
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return response
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

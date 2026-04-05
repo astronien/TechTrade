@@ -799,9 +799,9 @@
                     const branchName = branch.BRANCH_NAME || branch.branch_name || branch.name || branch.text || branchId;
 
                     option1.value = branchId;
-                    option1.textContent = `${branchId} - ${branchName}`;
+                    option1.textContent = branchName; // เอา internal ID ออกเพื่อให้พิมพ์ค้นหา 02957 ได้เลย
                     option2.value = branchId;
-                    option2.textContent = `${branchId} - ${branchName}`;
+                    option2.textContent = branchName;
 
                     branchSelect.appendChild(option1);
                     reportBranchSelect.appendChild(option2);
@@ -843,8 +843,8 @@
                 reportBranchStatus.textContent = '⏳ กำลังโหลด...';
 
                 try {
-                    // 1. ลองดึงจาก API (Database)
-                    const response = await fetch('/api/branches');
+                    // 1. ลองดึงจาก API (Database) - เติม timestamp ป้องกัน browser caching
+                    const response = await fetch('/api/branches?t=' + new Date().getTime());
                     const result = await response.json();
 
                     if (result.success && result.branches && result.branches.length > 0) {
