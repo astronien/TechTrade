@@ -1399,50 +1399,20 @@
             function createBranchCheckboxList(selectedBranchIds) {
                 const container = document.getElementById('branchCheckboxList');
 
-                if (typeof BRANCHES_DATA === 'undefined' || !BRANCHES_DATA) {
-                    container.innerHTML = '<p style="color: #999;">ไม่พบข้อมูลสาขา</p>';
-                    return;
-                }
-
-                // Add search box for branches
-                let html = `
-                    <div style="margin-bottom: 10px;">
-                        <input type="text" id="branchCheckboxSearch" placeholder="🔍 พิมพ์ค้นหาสาขา (เช่น 2957 หรือชื่อสาขา)" class="form-control" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onkeyup="filterBranchCheckboxes()">
-                    </div>
-                    <div id="branchCheckboxItems">
-                `;
+                let html = '';
 
                 // Render all branches
                 BRANCHES_DATA.forEach((branch, idx) => {
                     const isChecked = selectedBranchIds.includes(branch.branch_id);
-                    // store branch_name safely so it can be filtered
-                    const bName = (branch.branch_name || '').replace(/"/g, '&quot;');
                     html += `
                     <label style="display: flex; align-items: center; padding: 8px; background: white; border: 1px solid #e0e0e0; border-radius: 5px; cursor: pointer; font-size: 13px;" 
-                           class="branch-checkbox-item" data-branchname="${bName}">
+                           class="branch-checkbox-item">
                         <input type="checkbox" value="${branch.branch_id}" ${isChecked ? 'checked' : ''} 
                                style="margin-right: 8px; width: 16px; height: 16px;">
                         <span>${branch.branch_name}</span>
-                    </label>
-                `;
                 });
-                html += '</div>';
 
                 container.innerHTML = html;
-            }
-
-            // Function to filter branch checkboxes
-            function filterBranchCheckboxes() {
-                const searchTxt = document.getElementById('branchCheckboxSearch').value.toLowerCase();
-                const items = document.querySelectorAll('.branch-checkbox-item');
-                items.forEach(item => {
-                    const bName = item.getAttribute('data-branchname').toLowerCase();
-                    if (bName.includes(searchTxt)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
             }
 
             // กรองรายการสาขา
