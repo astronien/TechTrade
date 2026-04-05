@@ -849,6 +849,8 @@
 
                     if (result.success && result.branches && result.branches.length > 0) {
                         console.log(`✅ Loaded ${result.branches.length} branches from ${result.source}`);
+                        // Sort alphabetically before populating
+                        result.branches.sort((a,b) => (a.branch_name || '').localeCompare(b.branch_name || ''));
                         populateBranchDropdown(result.branches);
                         return;
                     }
@@ -1402,20 +1404,45 @@
                     return;
                 }
 
-                let html = '';
-                BRANCHES_DATA.forEach(branch => {
+                // Add search box for branches
+                let html = `
+                    <div style="margin-bottom: 10px;">
+                        <input type="text" id="branchCheckboxSearch" placeholder="🔍 พิมพ์ค้นหาสาขา (เช่น 2957 หรือชื่อสาขา)" class="form-control" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onkeyup="filterBranchCheckboxes()">
+                    </div>
+                    <div id="branchCheckboxItems">
+                `;
+
+                // Render all branches
+                BRANCHES_DATA.forEach((branch, idx) => {
                     const isChecked = selectedBranchIds.includes(branch.branch_id);
+                    // store branch_name safely so it can be filtered
+                    const bName = (branch.branch_name || '').replace(/"/g, '&quot;');
                     html += `
                     <label style="display: flex; align-items: center; padding: 8px; background: white; border: 1px solid #e0e0e0; border-radius: 5px; cursor: pointer; font-size: 13px;" 
-                           class="branch-checkbox-item">
+                           class="branch-checkbox-item" data-branchname="${bName}">
                         <input type="checkbox" value="${branch.branch_id}" ${isChecked ? 'checked' : ''} 
                                style="margin-right: 8px; width: 16px; height: 16px;">
                         <span>${branch.branch_name}</span>
                     </label>
                 `;
                 });
+                html += '</div>';
 
                 container.innerHTML = html;
+            }
+
+            // Function to filter branch checkboxes
+            function filterBranchCheckboxes() {
+                const searchTxt = document.getElementById('branchCheckboxSearch').value.toLowerCase();
+                const items = document.querySelectorAll('.branch-checkbox-item');
+                items.forEach(item => {
+                    const bName = item.getAttribute('data-branchname').toLowerCase();
+                    if (bName.includes(searchTxt)) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
             }
 
             // กรองรายการสาขา
@@ -2867,9 +2894,25 @@
             async function searchMultipleBranches(branchIds, container, submitBtn) {
                 try {
                     let allData = [];
-                    let totalRecords = 0;
                     let errorBranches = [];
-                    const BATCH_SIZE = 5; // ส่ง 5 สาขาต่อ batch (Vercel Hobby 60s timeout)
+
+                    // Calculate date difference to adjust batch size dynamically (Vercel Hobby plan fix)
+                    const dateStartStr = document.getElementById('dateStart').value;
+                    const dateEndStr = document.getElementById('dateEnd').value;
+                    const ds = new Date(dateStartStr);
+                    const de = new Date(dateEndStr);
+                    const diffTime = Math.abs(de - ds);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    let BATCH_SIZE = 5; // Default for short ranges
+                    if (diffDays > 30) {
+                        BATCH_SIZE = 1; // Extremely intensive query
+                    } else if (diffDays > 7) {
+                        BATCH_SIZE = 2; // Medium-long ranges
+                    } else if (diffDays > 3) {
+                        BATCH_SIZE = 3;
+                    }
+
                     const totalBatches = Math.ceil(branchIds.length / BATCH_SIZE);
 
                     const filters = {
@@ -3039,16 +3082,27 @@
                     // สร้าง array of rows
                     const rows = lastSearchResults.map(item => {
                         const row = {};
-                        columns.forEach(col => {
-                            let value = item[col.key];
+                        
+                        // Use all keys from the object dynamically
+                        const allKeys = Object.keys(item);
+                        
+                        // Try to use friendly labels if available, but keep all keys
+                        allKeys.forEach(key => {
+                            let value = item[key];
+                            let label = key;
+                            
+                            const foundCol = columns.find(c => c.key === key);
+                            if (foundCol) {
+                                label = foundCol.label;
+                            }
 
-                            // Format ค่าลายเซ็น
-                            if (col.key === 'IS_SIGNED') {
+                            // Format ลายเซ็น
+                            if (key === 'IS_SIGNED') {
                                 value = value === '1' ? 'เซ็นแล้ว' : 'ยังไม่เซ็น';
                             }
 
-                            // Format date จาก /Date(timestamp)/
-                            if ((col.key === 'document_date' || col.key === 'SIGN_DATE') && value && value.startsWith('/Date(')) {
+                            // Format Date string /Date(123...)/
+                            if (value && typeof value === 'string' && value.startsWith('/Date(')) {
                                 try {
                                     const ts = parseInt(value.match(/\d+/)[0]);
                                     const dt = new Date(ts);
@@ -3056,13 +3110,16 @@
                                 } catch(e) {}
                             }
 
-                            // Format ตัวเลข (amount, ส่วนลด)
-                            if (['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE'].includes(col.key)) {
+                            // Types conversion
+                            if (['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE'].includes(key)) {
                                 value = value ? parseFloat(value) : 0;
                             }
 
-                            row[col.label] = value !== null && value !== undefined ? value : '';
+                            row[label] = value !== null && value !== undefined ? value : '';
                         });
+                        
+                        // We can still ensure specified columns come first structurally if we want, 
+                        // but JS objects do retain insertion order. This will output all keys anyway.
                         return row;
                     });
 
