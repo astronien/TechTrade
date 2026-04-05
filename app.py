@@ -1064,6 +1064,120 @@ def get_data():
     
     return jsonify(data)
 
+@app.route('/api/data-batch', methods=['POST'])
+def get_data_batch():
+    """API endpoint สำหรับดึงข้อมูลหลายสาขาพร้อมกัน (Batch + Concurrent)"""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    start_time = time.time()
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+            
+        branch_ids = data.get('branchIds', [])
+        if not branch_ids:
+            return jsonify({'error': 'No branchIds provided'}), 400
+        
+        print(f"📦 Batch request: {len(branch_ids)} branches: {branch_ids}")
+        
+        # สร้าง filters จาก request data
+        base_filters = {
+            'date_start': data.get('dateStart', ''),
+            'date_end': data.get('dateEnd', ''),
+            'sale_code': data.get('saleCode', ''),
+            'status': data.get('status', ''),
+            'brands': [data.get('brand')] if data.get('brand') else [],
+            'series': data.get('series', ''),
+            'doc_ref_number': data.get('docRefNumber', ''),
+            'promo_code': data.get('promoCode', ''),
+            'customer_sign': data.get('customerSign', '0')
+        }
+        
+        all_data = []
+        total_records = 0
+        errors = []
+        
+        # Vercel Hobby timeout = 60s, ให้ใช้สูงสุด 50s
+        is_vercel = os.environ.get('VERCEL', False)
+        max_time = 50 if is_vercel else 180
+        
+        def fetch_branch(branch_id):
+            """ดึงข้อมูลสาขาเดียว (ใช้ใน thread)"""
+            branch_start = time.time()
+            try:
+                branch_filters = base_filters.copy()
+                branch_filters['branch_id'] = branch_id
+                
+                result = fetch_data_from_api(start=0, length=200, **branch_filters)
+                
+                if 'error' in result:
+                    print(f"  ❌ Branch {branch_id}: {result['error']}")
+                    return {'branch_id': branch_id, 'error': result['error'], 'data': [], 'total': 0}
+                
+                items = result.get('data', [])
+                record_total = result.get('recordsFiltered', len(items))
+                
+                # ดึง pagination ถ้ามีมากกว่า 200 รายการ
+                if record_total > len(items) and len(items) == 200:
+                    next_start = 200
+                    while len(items) < record_total:
+                        elapsed = time.time() - start_time
+                        if elapsed > max_time:
+                            break
+                        more = fetch_data_from_api(start=next_start, length=200, **branch_filters)
+                        more_data = more.get('data', [])
+                        if not more_data:
+                            break
+                        items.extend(more_data)
+                        next_start += 200
+                        if len(more_data) < 200:
+                            break
+                
+                elapsed_branch = time.time() - branch_start
+                print(f"  ✅ Branch {branch_id}: {len(items)} items in {elapsed_branch:.1f}s")
+                return {'branch_id': branch_id, 'data': items, 'total': record_total}
+                
+            except Exception as e:
+                print(f"  ❌ Branch {branch_id} exception: {e}")
+                return {'branch_id': branch_id, 'error': str(e), 'data': [], 'total': 0}
+        
+        # ใช้ ThreadPoolExecutor ดึง concurrent (max 5 threads)
+        max_workers = min(5, len(branch_ids))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_branch, bid): bid for bid in branch_ids}
+            
+            for future in as_completed(futures):
+                elapsed = time.time() - start_time
+                if elapsed > max_time:
+                    print(f"⚠️ Batch timeout after {elapsed:.1f}s, collected {len(all_data)} items so far")
+                    break
+                    
+                result = future.result()
+                if result.get('error'):
+                    errors.append({'branch_id': result['branch_id'], 'error': result['error']})
+                all_data.extend(result.get('data', []))
+                total_records += result.get('total', 0)
+        
+        elapsed_total = time.time() - start_time
+        print(f"📦 Batch done: {len(branch_ids)} branches, {len(all_data)} items, {len(errors)} errors in {elapsed_total:.1f}s")
+        
+        return jsonify({
+            'data': all_data,
+            'recordsTotal': total_records,
+            'recordsFiltered': len(all_data),
+            'branchCount': len(branch_ids),
+            'errors': errors if errors else None
+        })
+        
+    except Exception as e:
+        print(f"❌ Batch API error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 def fetch_all_for_branch(filters):
     """ดึงข้อมูลทั้งหมดของสาขาเดียว (พร้อม pagination)"""
     import time

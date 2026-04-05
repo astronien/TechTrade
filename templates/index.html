@@ -715,7 +715,12 @@
 
         <script src="{{ url_for('static', filename='branches-data.js') }}"></script>
         <script src="{{ url_for('static', filename='zones-data.js') }}"></script>
+        <!-- SheetJS for client-side Excel export -->
+        <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
         <script>
+            // ⭐ Global variable เก็บผลค้นหาล่าสุดสำหรับ Export Excel
+            let lastSearchResults = null;
+
             // ตั้งค่าวันที่เริ่มต้น
             window.addEventListener('load', () => {
                 const today = new Date();
@@ -2863,34 +2868,65 @@
                 try {
                     let allData = [];
                     let totalRecords = 0;
+                    let errorBranches = [];
+                    const BATCH_SIZE = 5; // ส่ง 5 สาขาต่อ batch (Vercel Hobby 60s timeout)
+                    const totalBatches = Math.ceil(branchIds.length / BATCH_SIZE);
 
-                    // ดึงข้อมูลทีละสาขา
-                    for (let i = 0; i < branchIds.length; i++) {
-                        const branchId = branchIds[i];
-                        container.innerHTML = `<div class="loading">⏳ กำลังค้นหาข้อมูล... (${i + 1}/${branchIds.length} สาขา)</div>`;
+                    const filters = {
+                        saleCode: document.getElementById('saleCode').value,
+                        dateStart: formatDateThai(document.getElementById('dateStart').value),
+                        dateEnd: formatDateThai(document.getElementById('dateEnd').value),
+                        status: document.getElementById('status').value,
+                        brand: document.getElementById('brand').value,
+                        series: document.getElementById('series').value,
+                        docRefType: document.getElementById('docRefType').value,
+                        docRefNumber: document.getElementById('docRefNumber').value,
+                        promoCode: document.getElementById('promoCode').value,
+                        customerSign: document.getElementById('customerSign').value
+                    };
 
-                        const params = new URLSearchParams({
-                            branchId: branchId,
-                            saleCode: document.getElementById('saleCode').value,
-                            dateStart: formatDateThai(document.getElementById('dateStart').value),
-                            dateEnd: formatDateThai(document.getElementById('dateEnd').value),
-                            status: document.getElementById('status').value,
-                            brand: document.getElementById('brand').value,
-                            series: document.getElementById('series').value,
-                            docRefType: document.getElementById('docRefType').value,
-                            docRefNumber: document.getElementById('docRefNumber').value,
-                            promoCode: document.getElementById('promoCode').value,
-                            customerSign: document.getElementById('customerSign').value
-                        });
+                    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+                        const batchStart = batchIdx * BATCH_SIZE;
+                        const batchBranchIds = branchIds.slice(batchStart, batchStart + BATCH_SIZE);
+                        const completedBranches = batchStart + batchBranchIds.length;
+                        const percent = Math.round((completedBranches / branchIds.length) * 100);
 
-                        const response = await fetch(`/api/data?${params}`);
-                        const data = await response.json();
+                        container.innerHTML = `
+                            <div class="loading" style="text-align: center;">
+                                <div style="font-size: 1.2em; margin-bottom: 12px;">⏳ กำลังค้นหาข้อมูล...</div>
+                                <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 24px; width: 80%; max-width: 400px; margin: 0 auto 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.3);">
+                                    <div style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: ${percent}%; border-radius: 10px; transition: width 0.5s ease;"></div>
+                                </div>
+                                <div style="font-size: 0.9em; opacity: 0.8;">Batch ${batchIdx + 1}/${totalBatches} — ${completedBranches}/${branchIds.length} สาขา (${percent}%)</div>
+                                <div style="font-size: 0.85em; opacity: 0.6; margin-top: 4px;">พบ ${allData.length} รายการแล้ว</div>
+                            </div>
+                        `;
 
-                        if (data.error) {
-                            console.error(`❌ สาขา ${branchId}: ${data.error}`);
-                        } else {
-                            allData = allData.concat(data.data || []);
-                            totalRecords += data.recordsTotal || 0;
+                        try {
+                            const response = await fetch('/api/data-batch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    branchIds: batchBranchIds,
+                                    ...filters
+                                })
+                            });
+                            const result = await response.json();
+
+                            if (result.error) {
+                                console.error(`❌ Batch ${batchIdx + 1} error:`, result.error);
+                                errorBranches.push(...batchBranchIds);
+                            } else {
+                                allData = allData.concat(result.data || []);
+                                totalRecords += result.recordsTotal || 0;
+                                if (result.errors) {
+                                    errorBranches.push(...result.errors.map(e => e.branch_id));
+                                }
+                                console.log(`✅ Batch ${batchIdx + 1}/${totalBatches}: +${(result.data || []).length} items (total: ${allData.length})`);
+                            }
+                        } catch (fetchError) {
+                            console.error(`❌ Batch ${batchIdx + 1} fetch error:`, fetchError);
+                            errorBranches.push(...batchBranchIds);
                         }
                     }
 
@@ -2901,7 +2937,11 @@
                         recordsFiltered: allData.length
                     });
 
-                    console.log(`✅ ค้นหา ${branchIds.length} สาขาเสร็จสิ้น, พบ ${allData.length} รายการ`);
+                    let msg = `✅ ค้นหา ${branchIds.length} สาขาเสร็จสิ้น, พบ ${allData.length} รายการ`;
+                    if (errorBranches.length > 0) {
+                        msg += ` (⚠️ ${errorBranches.length} สาขามีปัญหา)`;
+                    }
+                    console.log(msg);
                 } catch (error) {
                     container.innerHTML = `
                     <div class="error">
@@ -2939,7 +2979,10 @@
                             <span id="selectedCount" style="font-weight: 600;">เลือก: 0 รายการ</span>
                         </div>
                         <div>
-                            <button onclick="selectAll()" class="secondary">✅ เลือกทั้งหมด</button>
+                            <button onclick="exportToExcel()" class="secondary" style="background: linear-gradient(135deg, #28a745, #20c997); color: white; border: none; font-weight: 600;">
+                                📥 Export Excel
+                            </button>
+                            <button onclick="selectAll()" class="secondary" style="margin-left: 10px;">✅ เลือกทั้งหมด</button>
                             <button onclick="deselectAll()" class="secondary" style="margin-left: 10px;">❌ ยกเลิกการเลือก</button>
                             <button onclick="cancelSelected()" class="danger" style="margin-left: 10px;">🗑️ ยกเลิกรายการที่เลือก</button>
                         </div>
@@ -2951,6 +2994,101 @@
                 }
 
                 container.innerHTML = html;
+
+                // ⭐ เก็บผลค้นหาล่าสุดไว้สำหรับ Export Excel
+                lastSearchResults = dataArray;
+            }
+
+            // 📥 Export ข้อมูลเป็น Excel (Client-Side ด้วย SheetJS)
+            function exportToExcel() {
+                if (!lastSearchResults || lastSearchResults.length === 0) {
+                    alert('❌ ไม่มีข้อมูลสำหรับ Export\nกรุณาค้นหาข้อมูลก่อน');
+                    return;
+                }
+
+                try {
+                    // คอลัมน์ทั้งหมด (ตรงกับ createTable)
+                    const columns = [
+                        { key: 'document_no', label: 'เลขที่คำสั่งเทรด' },
+                        { key: 'IS_SIGNED', label: 'ลายเซ็นลูกค้า' },
+                        { key: 'SIGN_DATE', label: 'วันที่ลูกค้าคืนเครื่อง' },
+                        { key: 'document_date', label: 'วันที่คำสั่งเทรด' },
+                        { key: 'series', label: 'สินค้า' },
+                        { key: 'category_name', label: 'ประเภทสินค้า' },
+                        { key: 'brand_name', label: 'แบรนด์' },
+                        { key: 'part_number', label: 'อีมี่/ซีเรียล' },
+                        { key: 'amount', label: 'ราคายืนยัน' },
+                        { key: 'COUPON_TRADE_IN_CODE', label: 'คูปองส่วนลดค่าเครื่อง' },
+                        { key: 'invoice_no', label: 'เลขที่บิลขาย' },
+                        { key: 'CAMPAIGN_ON_TOP_NAME', label: 'โปรโมชั่นส่วนลดแบรนด์' },
+                        { key: 'COUPON_ON_TOP_BRAND_CODE', label: 'คูปองส่วนลดแบรนด์' },
+                        { key: 'COUPON_ON_TOP_BRAND_PRICE', label: 'มูลค่าส่วนลดแบรนด์' },
+                        { key: 'COUPON_ON_TOP_COMPANY_CODE', label: 'คูปองส่วนลดบริษัท' },
+                        { key: 'COUPON_ON_TOP_COMPANY_PRICE', label: 'มูลค่าส่วนลดบริษัท' },
+                        { key: 'customer_name', label: 'ชื่อผู้ขาย' },
+                        { key: 'customer_phone_number', label: 'เบอร์โทรศัพท์ผู้ขาย' },
+                        { key: 'customer_email', label: 'อีเมล์ผู้ขาย' },
+                        { key: 'buyer_name', label: 'ผู้รับซื้อ' },
+                        { key: 'SALE_CODE', label: 'รหัสพนักงานขาย' },
+                        { key: 'SALE_NAME', label: 'ชื่อพนักงานขาย' },
+                        { key: 'DOCUMENT_REF_1', label: 'เลขที่เอกสารอ้างอิง' },
+                        { key: 'BIDDING_STATUS_NAME', label: 'สถานะ' },
+                        { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' }
+                    ];
+
+                    // สร้าง array of rows
+                    const rows = lastSearchResults.map(item => {
+                        const row = {};
+                        columns.forEach(col => {
+                            let value = item[col.key];
+
+                            // Format ค่าลายเซ็น
+                            if (col.key === 'IS_SIGNED') {
+                                value = value === '1' ? 'เซ็นแล้ว' : 'ยังไม่เซ็น';
+                            }
+
+                            // Format date จาก /Date(timestamp)/
+                            if ((col.key === 'document_date' || col.key === 'SIGN_DATE') && value && value.startsWith('/Date(')) {
+                                try {
+                                    const ts = parseInt(value.match(/\d+/)[0]);
+                                    const dt = new Date(ts);
+                                    value = `${dt.getDate().toString().padStart(2, '0')}/${(dt.getMonth()+1).toString().padStart(2, '0')}/${dt.getFullYear()}`;
+                                } catch(e) {}
+                            }
+
+                            // Format ตัวเลข (amount, ส่วนลด)
+                            if (['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE'].includes(col.key)) {
+                                value = value ? parseFloat(value) : 0;
+                            }
+
+                            row[col.label] = value !== null && value !== undefined ? value : '';
+                        });
+                        return row;
+                    });
+
+                    // สร้าง workbook ด้วย SheetJS
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลค้นหา');
+
+                    // ปรับความกว้างคอลัมน์
+                    const colWidths = columns.map(col => ({
+                        wch: Math.max(col.label.length * 2, 12)
+                    }));
+                    ws['!cols'] = colWidths;
+
+                    // สร้างชื่อไฟล์ด้วยวันที่
+                    const now = new Date();
+                    const dateStr = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+                    const filename = `trade_search_${dateStr}.xlsx`;
+
+                    // ดาวน์โหลด
+                    XLSX.writeFile(wb, filename);
+                    console.log(`📥 Export Excel สำเร็จ: ${lastSearchResults.length} รายการ -> ${filename}`);
+                } catch (error) {
+                    console.error('❌ Export Excel Error:', error);
+                    alert(`❌ Export ไม่สำเร็จ: ${error.message}`);
+                }
             }
 
             function createTable(dataArray) {
