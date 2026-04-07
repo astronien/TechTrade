@@ -1359,15 +1359,15 @@
             }
 
             // เปิด Modal เพิ่ม Zone
-            function openAddZoneModal() {
+            async function openAddZoneModal() {
                 document.getElementById('zoneModalTitle').textContent = '➕ เพิ่ม Zone ใหม่';
                 document.getElementById('editingZoneId').value = '';
                 document.getElementById('zoneName').value = '';
 
-                // สร้างรายการ checkbox สาขา
-                createBranchCheckboxList([]);
-
                 document.getElementById('zoneModal').classList.add('show');
+
+                // สร้างรายการ checkbox สาขา (async - โหลดจาก API)
+                await createBranchCheckboxList([]);
             }
 
             // Wrapper สำหรับ editZone (เพื่อให้ใช้กับ onclick ได้)
@@ -1389,27 +1389,46 @@
                 document.getElementById('editingZoneId').value = zoneId;
                 document.getElementById('zoneName').value = zone.zone_name;
 
-                // สร้างรายการ checkbox สาขา พร้อมเลือกสาขาที่มีอยู่
-                createBranchCheckboxList(zone.branch_ids);
+                // สร้างรายการ checkbox สาขา พร้อมเลือกสาขาที่มีอยู่ (async - โหลดจาก API)
+                await createBranchCheckboxList(zone.branch_ids);
 
                 document.getElementById('zoneModal').classList.add('show');
             }
 
-            // สร้างรายการ checkbox สาขา
-            function createBranchCheckboxList(selectedBranchIds) {
+            // สร้างรายการ checkbox สาขา (ดึงข้อมูลล่าสุดจาก API เสมอ)
+            async function createBranchCheckboxList(selectedBranchIds) {
                 const container = document.getElementById('branchCheckboxList');
+                container.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">⏳ กำลังโหลดรายชื่อสาขา...</div>';
+
+                // ดึงข้อมูลสาขาล่าสุดจาก API เสมอ เพื่อให้ได้สาขาใหม่ๆ
+                let branches = BRANCHES_DATA;
+                try {
+                    const response = await fetch('/api/branches');
+                    const result = await response.json();
+                    if (result.success && result.branches && result.branches.length > 0) {
+                        branches = result.branches;
+                        // อัปเดต global ด้วย
+                        window.BRANCHES_DATA = branches;
+                        console.log(`🔄 Zone modal: Loaded ${branches.length} branches from API`);
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Failed to fetch branches from API, using cached BRANCHES_DATA:', e);
+                }
 
                 let html = '';
 
                 // Render all branches
-                BRANCHES_DATA.forEach((branch, idx) => {
-                    const isChecked = selectedBranchIds.includes(branch.branch_id);
+                branches.forEach((branch, idx) => {
+                    const branchId = branch.branch_id || branch.BRANCH_ID || '';
+                    const branchName = branch.branch_name || branch.BRANCH_NAME || branchId;
+                    // เปรียบเทียบทั้ง string และ number เพื่อป้องกัน type mismatch
+                    const isChecked = selectedBranchIds.some(id => String(id) === String(branchId));
                     html += `
                     <label style="display: flex; align-items: center; padding: 8px; background: white; border: 1px solid #e0e0e0; border-radius: 5px; cursor: pointer; font-size: 13px;" 
                            class="branch-checkbox-item">
-                        <input type="checkbox" value="${branch.branch_id}" ${isChecked ? 'checked' : ''} 
+                        <input type="checkbox" value="${branchId}" ${isChecked ? 'checked' : ''} 
                                style="margin-right: 8px; width: 16px; height: 16px;">
-                        <span>${branch.branch_name}</span>
+                        <span>${branchName}</span>
                     </label>
                 `;
                 });
