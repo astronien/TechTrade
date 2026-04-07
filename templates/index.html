@@ -2886,6 +2886,7 @@
                 try {
                     let allData = [];
                     let errorBranches = [];
+                    let totalRecords = 0;
 
                     // Calculate date difference to adjust batch size dynamically (Vercel Hobby plan fix)
                     const dateStartStr = document.getElementById('dateStart').value;
