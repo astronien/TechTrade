@@ -1062,13 +1062,29 @@ def get_data():
         else:
             print(f"✅ Got all data in first batch: {current} items")
 
+    def extract_real_branch_id(item, fallback_id):
+        """หาค่า branch id จริงจาก API payload ก่อน แล้ว fallback จากชื่อสาขา"""
+        bid = item.get('BRANCH_ID') or item.get('branch_id')
+        raw_name = str(item.get('BRANCH_NAME', '') or item.get('branch_name', ''))
+        import re
+        m = re.search(r'ID(\d+)', raw_name)
+        if m:
+            return m.group(1)
+        return str(bid) if bid not in (None, '') else str(fallback_id)
+
     # Inject branch info
     branches_dict = {str(b.get('branch_id', '')): b.get('branch_name', '').split(':')[-1].strip() for b in get_branches_from_db() if b.get('branch_id')}
     req_b_id = str(filters['branch_id'])
     b_name = branches_dict.get(req_b_id, f"Branch {req_b_id}")
     for item in data.get('data', []):
-        item['branch_id'] = req_b_id
-        item['branch_name'] = b_name
+        real_id = extract_real_branch_id(item, req_b_id)
+        item['selected_branch_id'] = req_b_id
+        item['branch_id'] = real_id
+        raw_name = str(item.get('BRANCH_NAME', '') or item.get('branch_name', ''))
+        if raw_name:
+            item['branch_name'] = raw_name.split(':')[-1].strip() if ':' in raw_name else raw_name
+        else:
+            item['branch_name'] = branches_dict.get(real_id, b_name)
     
     return jsonify(data)
 
@@ -1114,6 +1130,15 @@ def get_data_batch():
         
         branches_dict = {str(b.get('branch_id', '')): b.get('branch_name', '').split(':')[-1].strip() for b in get_branches_from_db() if b.get('branch_id')}
         
+        def extract_real_branch_id(item, requested_branch_id):
+            bid = item.get('BRANCH_ID') or item.get('branch_id')
+            raw_name = str(item.get('BRANCH_NAME', '') or item.get('branch_name', ''))
+            import re
+            m = re.search(r'ID(\d+)', raw_name)
+            if m:
+                return m.group(1)
+            return str(bid) if bid not in (None, '') else str(requested_branch_id)
+
         def fetch_branch(branch_id):
             """ดึงข้อมูลสาขาเดียว (ใช้ใน thread)"""
             branch_start = time.time()
@@ -1151,8 +1176,14 @@ def get_data_batch():
                 
                 b_name = branches_dict.get(str(branch_id), f"Branch {branch_id}")
                 for item in items:
-                    item['branch_id'] = str(branch_id)
-                    item['branch_name'] = b_name
+                    real_id = extract_real_branch_id(item, branch_id)
+                    item['selected_branch_id'] = str(branch_id)
+                    item['branch_id'] = real_id
+                    raw_name = str(item.get('BRANCH_NAME', '') or item.get('branch_name', ''))
+                    if raw_name:
+                        item['branch_name'] = raw_name.split(':')[-1].strip() if ':' in raw_name else raw_name
+                    else:
+                        item['branch_name'] = branches_dict.get(real_id, b_name)
                     
                 return {'branch_id': branch_id, 'data': items, 'total': record_total}
                 

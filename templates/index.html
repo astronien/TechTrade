@@ -2906,6 +2906,7 @@
                     }
 
                     const totalBatches = Math.ceil(branchIds.length / BATCH_SIZE);
+                    console.log(`🚀 Search mode=batch | requests=${totalBatches} | batchSize=${BATCH_SIZE} | branches=${branchIds.length} | days=${diffDays}`);
 
                     const filters = {
                         saleCode: document.getElementById('saleCode').value,
@@ -2938,6 +2939,7 @@
                         `;
 
                         try {
+                            console.log(`📡 Request ${batchIdx + 1}/${totalBatches}: ${batchBranchIds.length} branches`);
                             const response = await fetch('/api/data-batch', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
