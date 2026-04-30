@@ -3472,6 +3472,7 @@
                         { key: 'COUPON_ON_TOP_BRAND_PRICE', label: 'มูลค่าส่วนลดแบรนด์' },
                         { key: 'COUPON_ON_TOP_COMPANY_CODE', label: 'คูปองส่วนลดบริษัท' },
                         { key: 'COUPON_ON_TOP_COMPANY_PRICE', label: 'มูลค่าส่วนลดบริษัท' },
+                        { key: 'net_price', label: 'ราคาสุทธิ' },
                         { key: 'customer_name', label: 'ชื่อผู้ขาย' },
                         { key: 'customer_phone_number', label: 'เบอร์โทรศัพท์ผู้ขาย' },
                         { key: 'customer_email', label: 'อีเมล์ผู้ขาย' },
@@ -3480,13 +3481,20 @@
                         { key: 'SALE_NAME', label: 'ชื่อพนักงานขาย' },
                         { key: 'DOCUMENT_REF_1', label: 'เลขที่เอกสารอ้างอิง' },
                         { key: 'BIDDING_STATUS_NAME', label: 'สถานะ' },
-                        { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' }
+                        { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' },
+                        { key: 'trade_in_id', label: 'Trade In ID' }
                     ];
 
                     // สร้าง array of rows
                     const rows = lastSearchResults.map(item => {
                         const row = {};
                         
+                        // Calculate Net Price
+                        const amount = parseFloat(item.amount || 0);
+                        const topUpBrand = parseFloat(item.COUPON_ON_TOP_BRAND_PRICE || 0);
+                        const topUpCompany = parseFloat(item.COUPON_ON_TOP_COMPANY_PRICE || 0);
+                        item.net_price = amount + topUpBrand + topUpCompany;
+
                         // Use all keys from the object dynamically
                         const allKeys = Object.keys(item);
                         
@@ -3573,6 +3581,7 @@
                     { key: 'COUPON_ON_TOP_BRAND_PRICE', label: 'มูลค่าส่วนลดแบรนด์', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
                     { key: 'COUPON_ON_TOP_COMPANY_CODE', label: 'คูปองส่วนลดบริษัท' },
                     { key: 'COUPON_ON_TOP_COMPANY_PRICE', label: 'มูลค่าส่วนลดบริษัท', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
+                    { key: 'net_price', label: 'ราคาสุทธิ', format: (v) => v ? parseFloat(v).toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '-' },
                     { key: 'customer_name', label: 'ชื่อผู้ขาย' },
                     { key: 'customer_phone_number', label: 'เบอร์โทรศัพท์ผู้ขาย' },
                     { key: 'customer_email', label: 'อีเมล์ผู้ขาย' },
@@ -3581,7 +3590,8 @@
                     { key: 'SALE_NAME', label: 'ชื่อพนักงานขาย' },
                     { key: 'DOCUMENT_REF_1', label: 'เลขที่เอกสารอ้างอิง' },
                     { key: 'BIDDING_STATUS_NAME', label: 'สถานะ' },
-                    { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' }
+                    { key: 'CHANGE_REQUEST_COUNT', label: 'จำนวนที่ถูกแก้ไข' },
+                    { key: 'trade_in_id', label: 'Trade In ID' }
                 ];
 
                 let table = '<table class="data-table"><thead><tr>';
@@ -3597,6 +3607,12 @@
 
                 // สร้าง rows
                 dataArray.forEach((item, index) => {
+                    // Calculate Net Price for display
+                    const amount = parseFloat(item.amount || 0);
+                    const topUpBrand = parseFloat(item.COUPON_ON_TOP_BRAND_PRICE || 0);
+                    const topUpCompany = parseFloat(item.COUPON_ON_TOP_COMPANY_PRICE || 0);
+                    item.net_price = amount + topUpBrand + topUpCompany;
+
                     const tradeInId = item.trade_in_id || '';
                     const docNo = item.document_no || '';
                     table += `<tr id="row-${index}" data-tradein-id="${tradeInId}" data-doc-no="${docNo}">`;

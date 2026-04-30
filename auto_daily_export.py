@@ -141,16 +141,61 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     ws['A3'].font = Font(size=10, color="999999")
     
     # === Data Table ===
-    headers = [
-        'ลำดับ', 'เลขที่เอกสาร', 'สถานะเซ็น', 'วันที่เซ็น', 'วันที่เอกสาร', 
-        'หมวดหมู่', 'แบรนด์', 'รุ่น', 'Part Number', 'สถานะ', 
-        'มูลค่าประเมิน', 'โปรโมชั่น', 'Top up Brand (Code)', 'Top up Brand (Price)',
-        'Top up Company (Code)', 'Top up Company (Price)', 'ราคาสุทธิ',
-        'รหัสพนักงาน', 'ชื่อพนักงาน', 'ลูกค้า', 'เบอร์โทร', 'อีเมล', 'ผู้ซื้อ',
-        'เลขที่อ้างอิง', 'เลขที่ Invoice', 'คูปองเทรดอิน', 'จำนวนคำขอเปลี่ยน', 
-        'Trade In ID', 'สาขา'
+    # === Column Definitions ===
+    # Standard columns with Thai labels (matching index.html)
+    standard_columns = [
+        ('branch_id', 'รหัสสาขา'),
+        ('branch_name', 'ชื่อสาขา'),
+        ('document_no', 'เลขที่คำสั่งเทรด'),
+        ('IS_SIGNED', 'ลายเซ็นลูกค้า'),
+        ('SIGN_DATE', 'วันที่ลูกค้าคืนเครื่อง'),
+        ('document_date', 'วันที่คำสั่งเทรด'),
+        ('series', 'สินค้า'),
+        ('category_name', 'ประเภทสินค้า'),
+        ('brand_name', 'แบรนด์'),
+        ('part_number', 'อีมี่/ซีเรียล'),
+        ('amount', 'ราคายืนยัน'),
+        ('COUPON_TRADE_IN_CODE', 'คูปองส่วนลดค่าเครื่อง'),
+        ('invoice_no', 'เลขที่บิลขาย'),
+        ('CAMPAIGN_ON_TOP_NAME', 'โปรโมชั่นส่วนลดแบรนด์'),
+        ('COUPON_ON_TOP_BRAND_CODE', 'คูปองส่วนลดแบรนด์'),
+        ('COUPON_ON_TOP_BRAND_PRICE', 'มูลค่าส่วนลดแบรนด์'),
+        ('COUPON_ON_TOP_COMPANY_CODE', 'คูปองส่วนลดบริษัท'),
+        ('COUPON_ON_TOP_COMPANY_PRICE', 'มูลค่าส่วนลดบริษัท'),
+        ('net_price', 'ราคาสุทธิ'),
+        ('customer_name', 'ชื่อผู้ขาย'),
+        ('customer_phone_number', 'เบอร์โทรศัพท์ผู้ขาย'),
+        ('customer_email', 'อีเมล์ผู้ขาย'),
+        ('buyer_name', 'ผู้รับซื้อ'),
+        ('SALE_CODE', 'รหัสพนักงานขาย'),
+        ('SALE_NAME', 'ชื่อพนักงานขาย'),
+        ('DOCUMENT_REF_1', 'เลขที่เอกสารอ้างอิง'),
+        ('BIDDING_STATUS_NAME', 'สถานะ'),
+        ('CHANGE_REQUEST_COUNT', 'จำนวนที่ถูกแก้ไข'),
+        ('trade_in_id', 'Trade In ID')
     ]
     
+    # ดึง keys ทั้งหมดจากข้อมูลรายการแรก (ถ้ามี) เพื่อหาคอลัมน์อื่นๆ
+    all_api_keys = []
+    if trade_data:
+        all_api_keys = list(trade_data[0].keys())
+        
+    # คอลัมน์ที่จะใช้จริง (ลำดับ + Standard + Others)
+    final_headers = ['ลำดับ']
+    header_to_key = { 'ลำดับ': None }
+    
+    # 1. ใส่ Standard Columns
+    for key, label in standard_columns:
+        final_headers.append(label)
+        header_to_key[label] = key
+        
+    # 2. ใส่คอลัมน์ที่เหลือจาก API
+    standard_keys = [c[0] for c in standard_columns]
+    for key in all_api_keys:
+        if key not in standard_keys and key not in ['_branch_id']: 
+            final_headers.append(key)
+            header_to_key[key] = key
+
     header_row = 5
     header_fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
     header_font = Font(bold=True, size=10, color="FFFFFF")
@@ -159,7 +204,7 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
         top=Side(style='thin'), bottom=Side(style='thin')
     )
     
-    for col_idx, header in enumerate(headers, start=1):
+    for col_idx, header in enumerate(final_headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx)
         cell.value = header
         cell.font = header_font
@@ -168,7 +213,6 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
         cell.border = thin_border
     
     # === Data Rows ===
-    # สถานะที่ถือว่า "ตกลงเทรด"
     AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
     agreed_fill = PatternFill(start_color="d4edda", end_color="d4edda", fill_type="solid")
     cancelled_fill = PatternFill(start_color="f8d7da", end_color="f8d7da", fill_type="solid")
@@ -178,106 +222,58 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     agreed_count = 0
     
     for row_idx, item in enumerate(trade_data, start=header_row + 1):
-        # Parse date (Document Date)
-        doc_date = item.get('document_date', '')
-        date_display_val = ''
-        if doc_date and doc_date.startswith('/Date('):
-            timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
-            if timestamp_match:
-                timestamp = int(timestamp_match.group(1)) / 1000
-                date_display_val = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
-        elif doc_date:
-            date_display_val = doc_date
+        # Calculate derived fields
+        branch_id = str(item.get('_branch_id', item.get('branch_id', '')))
+        branch_name = branches_info.get(branch_id, branch_id) if branches_info else branch_id
+        item['branch_name'] = branch_name
+        
+        # Net Price
+        try:
+            amt = float(item.get('amount', 0) or 0)
+            tub = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
+            tuc = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
+            item['net_price'] = amt + tub + tuc
+        except:
+            item['net_price'] = float(item.get('amount', 0) or 0)
 
-        # Parse Sign Date
-        sign_date = item.get('SIGN_DATE', '')
-        sign_date_display = ''
-        if sign_date and sign_date.startswith('/Date('):
-            timestamp_match = re.search(r'/Date\((\d+)\)/', sign_date)
-            if timestamp_match:
-                timestamp = int(timestamp_match.group(1)) / 1000
-                sign_date_display = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
-        elif sign_date:
-            sign_date_display = sign_date
-        
-        # Prices
-        amount = 0
-        try:
-            amount = float(item.get('amount', 0) or 0)
-        except (ValueError, TypeError):
-            amount = 0
-            
-        top_up_brand = 0
-        try:
-            top_up_brand = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
-        except (ValueError, TypeError):
-            top_up_brand = 0
-            
-        top_up_company = 0
-        try:
-            top_up_company = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
-        except (ValueError, TypeError):
-            top_up_company = 0
-            
-        net_price = amount + top_up_brand + top_up_company
-        
-        total_amount += amount
-        total_net_amount += net_price
-        
-        # Status
         status_name = item.get('BIDDING_STATUS_NAME', '')
         is_agreed = status_name in AGREED_STATUSES or item.get('status') == 3
         if is_agreed:
             agreed_count += 1
-        
-        # Branch name
-        branch_name = ''
-        branch_id = item.get('_branch_id', '')
-        if branches_info and branch_id:
-            branch_name = branches_info.get(str(branch_id), str(branch_id))
-        
-        row_data = [
-            row_idx - header_row,
-            item.get('document_no', ''),
-            item.get('IS_SIGNED', ''),
-            sign_date_display,
-            date_display_val,
-            item.get('category_name', ''),
-            item.get('brand_name', ''),
-            item.get('series', ''),
-            item.get('part_number', ''),
-            status_name,
-            amount,
-            item.get('CAMPAIGN_ON_TOP_NAME', ''),
-            item.get('COUPON_ON_TOP_BRAND_CODE', ''),
-            top_up_brand,
-            item.get('COUPON_ON_TOP_COMPANY_CODE', ''),
-            top_up_company,
-            net_price,
-            item.get('SALE_CODE', ''),
-            item.get('SALE_NAME', ''),
-            item.get('customer_name', ''),
-            item.get('customer_phone_number', ''),
-            item.get('customer_email', ''),
-            item.get('buyer_name', ''),
-            item.get('DOCUMENT_REF_1', ''),
-            item.get('invoice_no', ''),
-            item.get('COUPON_TRADE_IN_CODE', ''),
-            item.get('CHANGE_REQUEST_COUNT', ''),
-            item.get('trade_in_id', ''),
-            branch_name
-        ]
-        
-        for col_idx, value in enumerate(row_data, start=1):
+            total_amount += float(item.get('amount', 0) or 0)
+            total_net_amount += item['net_price']
+
+        # Build Row Data
+        for col_idx, header in enumerate(final_headers, start=1):
+            key = header_to_key[header]
             cell = ws.cell(row=row_idx, column=col_idx)
+            
+            if header == 'ลำดับ':
+                value = row_idx - header_row
+            else:
+                value = item.get(key, '')
+                
+                # Special formatting
+                if key in ['document_date', 'SIGN_DATE'] and isinstance(value, str) and value.startswith('/Date('):
+                    try:
+                        ts = int(re.search(r'\d+', value).group()) / 1000
+                        value = datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
+                    except: pass
+                elif key == 'IS_SIGNED':
+                    value = 'เซ็นแล้ว' if value == '1' else 'ยังไม่เซ็น'
+                elif key in ['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE', 'net_price']:
+                    try: value = float(value) if value else 0
+                    except: value = 0
+            
             cell.value = value
             cell.border = thin_border
             cell.alignment = Alignment(vertical='center')
             
-            # Color coding by status
+            # Color coding
             if is_agreed:
                 cell.fill = agreed_fill
             elif 'ยกเลิก' in status_name:
+                cell.fill = cancelled_fill
                 cell.fill = cancelled_fill
     
     # === Summary Row ===

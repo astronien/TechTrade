@@ -736,6 +736,15 @@ def generate_excel_report(trade_data, report_summary, date_start, date_end):
     ]
     for i, w in enumerate(widths):
         ws_details.column_dimensions[get_column_letter(i + 1)].width = w
+                elif key in ['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE', 'net_price']:
+                    try: value = float(value) if value else 0
+                    except: value = 0
+            
+            cell.value = value
+
+    # ปรับความกว้างคอลัมน์อัตโนมัติเบื้องต้น
+    for i, col in enumerate(ws_details.columns):
+        ws_details.column_dimensions[get_column_letter(i + 1)].width = 20
         
     # บันทึกไฟล์
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
