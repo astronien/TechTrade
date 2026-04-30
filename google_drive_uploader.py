@@ -87,7 +87,9 @@ class GoogleDriveUploader:
                 q=query,
                 spaces='drive',
                 fields='files(id, name)',
-                pageSize=1
+                pageSize=1,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
             ).execute()
             
             files = results.get('files', [])
@@ -124,7 +126,8 @@ class GoogleDriveUploader:
             
             folder = self.service.files().create(
                 body=file_metadata,
-                fields='id'
+                fields='id',
+                supportsAllDrives=True
             ).execute()
             
             folder_id = folder.get('id')
@@ -211,7 +214,8 @@ class GoogleDriveUploader:
                     fileId=existing['id'],
                     body={'name': filename},
                     media_body=media,
-                    fields='id, name, webViewLink'
+                    fields='id, name, webViewLink',
+                    supportsAllDrives=True
                 ).execute()
                 print(f"🔄 Updated file '{filename}': {file.get('id')}")
             else:
@@ -219,7 +223,8 @@ class GoogleDriveUploader:
                 file = self.service.files().create(
                     body=file_metadata,
                     media_body=media,
-                    fields='id, name, webViewLink'
+                    fields='id, name, webViewLink',
+                    supportsAllDrives=True
                 ).execute()
                 print(f"✅ Uploaded file '{filename}': {file.get('id')}")
             
@@ -247,7 +252,9 @@ class GoogleDriveUploader:
                 q=query,
                 spaces='drive',
                 fields='files(id, name)',
-                pageSize=1
+                pageSize=1,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
             ).execute()
             files = results.get('files', [])
             return files[0] if files else None
@@ -269,7 +276,9 @@ class GoogleDriveUploader:
                 spaces='drive',
                 fields='files(id, name, createdTime)',
                 orderBy=order_by,
-                pageSize=500
+                pageSize=500,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
             ).execute()
             return results.get('files', [])
         except Exception as e:
@@ -296,7 +305,9 @@ class GoogleDriveUploader:
                 spaces='drive',
                 fields='files(id, name)',
                 orderBy='name',
-                pageSize=100
+                pageSize=100,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
             ).execute()
             
             month_folders = results.get('files', [])
@@ -325,7 +336,7 @@ class GoogleDriveUploader:
         """
         self._ensure_service()
         try:
-            self.service.files().delete(fileId=file_id).execute()
+            self.service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
             print(f"🗑️ Deleted file: {file_id}")
             return True
         except Exception as e:
@@ -378,7 +389,9 @@ class GoogleDriveUploader:
                 q=f"'{zone_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
                 spaces='drive',
                 fields='files(id, name)',
-                pageSize=100
+                pageSize=100,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
             ).execute()
             
             for folder in results.get('files', []):
