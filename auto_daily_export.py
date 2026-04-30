@@ -128,19 +128,16 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     sheet_title_date = target_date.strftime("%d-%m-%Y")
     ws.title = f"รายงาน {sheet_title_date}"
     
-    # === Header Section ===
-    ws['A1'] = f"📊 รายงานประจำวัน - Zone: {zone_name}"
-    ws['A1'].font = Font(bold=True, size=14, color="333333")
-    ws.merge_cells('A1:L1')
-    
-    ws['A2'] = f"วันที่: {date_display} | จำนวนรายการ: {len(trade_data)}"
-    ws['A2'].font = Font(size=11, color="666666")
-    ws.merge_cells('A2:L2')
-    
-    ws['A3'] = f"สร้างเมื่อ: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    ws['A3'].font = Font(size=10, color="999999")
-    
     # === Data Table ===
+    # Start from row 1 (No header/footer as requested)
+    header_row = 1
+    
+    header_fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
+    header_font = Font(bold=True, size=10, color="FFFFFF")
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
     # === Column Definitions ===
     # Standard columns with Thai labels (matching index.html)
     standard_columns = [
@@ -196,14 +193,6 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
             final_headers.append(key)
             header_to_key[key] = key
 
-    header_row = 5
-    header_fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
-    header_font = Font(bold=True, size=10, color="FFFFFF")
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
-    
     for col_idx, header in enumerate(final_headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx)
         cell.value = header
@@ -223,9 +212,12 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     
     for row_idx, item in enumerate(trade_data, start=header_row + 1):
         # Calculate derived fields
-        branch_id = str(item.get('_branch_id', item.get('branch_id', '')))
-        branch_name = branches_info.get(branch_id, branch_id) if branches_info else branch_id
-        item['branch_name'] = branch_name
+        bid_internal = str(item.get('_branch_id', item.get('branch_id', '')))
+        
+        # Get parsed branch info (code and name)
+        info = branches_info.get(bid_internal, {'name': bid_internal, 'code': bid_internal})
+        item['branch_id'] = info['code']
+        item['branch_name'] = info['name']
         
         # Net Price
         try:
@@ -276,16 +268,7 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
                 cell.fill = cancelled_fill
                 cell.fill = cancelled_fill
     
-    # === Summary Row ===
-    summary_row = header_row + len(trade_data) + 2
-    ws.cell(row=summary_row, column=1).value = "สรุป"
-    ws.cell(row=summary_row, column=1).font = Font(bold=True, size=12)
-    
-    ws.cell(row=summary_row + 1, column=1).value = f"📋 รายการทั้งหมด: {len(trade_data)}"
-    ws.cell(row=summary_row + 2, column=1).value = f"✅ ตกลงเทรด: {agreed_count}"
-    ws.cell(row=summary_row + 3, column=1).value = f"❌ ไม่ตกลง/อื่นๆ: {len(trade_data) - agreed_count}"
-    ws.cell(row=summary_row + 4, column=1).value = f"💰 มูลค่าประเมินรวม: {total_amount:,.2f} บาท"
-    ws.cell(row=summary_row + 5, column=1).value = f"💵 ราคาสุทธิรวม: {total_net_amount:,.2f} บาท"
+    # === Summary Row Removed per User Request ===
     
     # === Column widths ===
     widths = [
@@ -396,12 +379,27 @@ def run_daily_export(force=False):
     branches_info = {}
     for b in branches:
         bid = str(b.get('branch_id', ''))
-        bname = b.get('branch_name', bid)
-        # ตัดให้เหลือแค่ชื่อสั้น
-        if ' : ' in bname:
-            parts = bname.split(' : ')
-            bname = parts[-1] if len(parts) > 1 else bname
-        branches_info[bid] = bname
+        bname_full = b.get('branch_name', bid)
+        
+        b_code = bid
+        b_name_only = bname_full
+        
+        if ' : ' in bname_full:
+            parts = bname_full.split(' : ')
+            # Example: "00115 : ID115 : Studio 7-Future Park-Rangsit"
+            # Extract code from first part, name from last part
+            raw_code = parts[0].strip()
+            if raw_code.isdigit():
+                b_code = str(int(raw_code)) # Remove leading zeros if it's all digits
+            else:
+                b_code = raw_code
+                
+            b_name_only = parts[-1].strip() if len(parts) > 1 else bname_full
+            
+        branches_info[bid] = {
+            'code': b_code,
+            'name': b_name_only
+        }
     
     # 7. Export แต่ละ Zone
     results = []
