@@ -19,7 +19,7 @@ except ImportError:
 class GoogleDriveUploader:
     """จัดการ Google Drive: สร้าง folder, upload, delete, FIFO"""
     
-    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    SCOPES = ['https://www.googleapis.com/auth/drive']
     
     def __init__(self, credentials_json=None):
         """
@@ -78,7 +78,8 @@ class GoogleDriveUploader:
         """
         self._ensure_service()
         try:
-            query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            safe_name = folder_name.replace("'", "\\'")
+            query = f"name='{safe_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
             if parent_id:
                 query += f" and '{parent_id}' in parents"
             
@@ -142,14 +143,27 @@ class GoogleDriveUploader:
         Returns:
             str: month folder ID
         """
-        # สร้าง Zone folder
-        zone_folder_id = self.create_folder(zone_name, root_folder_id)
-        if not zone_folder_id:
+        try:
+            # สร้าง Zone folder
+            print(f"📁 Creating zone folder '{zone_name}' in root {root_folder_id}")
+            zone_folder_id = self.create_folder(zone_name, root_folder_id)
+            if not zone_folder_id:
+                print(f"❌ Failed to create zone folder '{zone_name}'")
+                return None
+            
+            # สร้าง Month folder
+            print(f"📁 Creating month folder '{year_month}' in zone {zone_folder_id}")
+            month_folder_id = self.create_folder(year_month, zone_folder_id)
+            if not month_folder_id:
+                print(f"❌ Failed to create month folder '{year_month}'")
+                return None
+            
+            return month_folder_id
+        except Exception as e:
+            print(f"❌ Error in ensure_folder_path: {e}")
+            import traceback
+            traceback.print_exc()
             return None
-        
-        # สร้าง Month folder
-        month_folder_id = self.create_folder(year_month, zone_folder_id)
-        return month_folder_id
     
     def upload_file(self, filepath, folder_id, filename=None):
         """Upload ไฟล์ไป Google Drive
@@ -222,7 +236,8 @@ class GoogleDriveUploader:
             dict: {'id': ...} หรือ None
         """
         try:
-            query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+            safe_name = filename.replace("'", "\\'")
+            query = f"name='{safe_name}' and '{folder_id}' in parents and trashed=false"
             results = self.service.files().list(
                 q=query,
                 spaces='drive',
