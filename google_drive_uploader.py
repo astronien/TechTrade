@@ -183,6 +183,9 @@ class GoogleDriveUploader:
         if not filename:
             filename = os.path.basename(filepath)
         
+        file_size = os.path.getsize(filepath)
+        print(f"📤 Uploading '{filename}' ({file_size:,} bytes) to folder {folder_id}")
+        
         try:
             # ตรวจสอบว่ามีไฟล์ชื่อเดียวกันอยู่แล้วหรือไม่
             existing = self._find_file(filename, folder_id)
@@ -199,7 +202,8 @@ class GoogleDriveUploader:
             elif filepath.endswith('.json'):
                 mime_type = 'application/json'
             
-            media = MediaFileUpload(filepath, mimetype=mime_type, resumable=True)
+            # ใช้ resumable=False สำหรับ serverless (Vercel) เพราะไฟล์ขนาดเล็ก
+            media = MediaFileUpload(filepath, mimetype=mime_type, resumable=False)
             
             if existing:
                 # Update existing file
@@ -225,10 +229,11 @@ class GoogleDriveUploader:
                 'webViewLink': file.get('webViewLink', '')
             }
         except Exception as e:
+            error_msg = f"Upload error: {str(e)}"
             print(f"❌ Error uploading file '{filename}': {e}")
             import traceback
             traceback.print_exc()
-            return None
+            raise Exception(error_msg)
     
     def _find_file(self, filename, folder_id):
         """ค้นหาไฟล์ที่มีชื่อตรงกันใน folder
