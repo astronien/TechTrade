@@ -658,9 +658,13 @@ def generate_excel_report(trade_data, report_summary, date_start, date_end):
     ws_details = wb.create_sheet("Details")
     
     headers = [
-        'Document No', 'Date', 'Branch', 'Sale Code', 'Sale Name', 
-        'Customer Name', 'Brand', 'Model', 'Status', 'Amount', 
-        'Invoice No', 'Ref No'
+        'Document No', 'Is Signed', 'Sign Date', 'Date', 'Category', 
+        'Brand', 'Model', 'Part Number', 'Status', 'Amount', 
+        'Promo/Campaign', 'Top up Brand (Code)', 'Top up Brand (Price)',
+        'Top up Company (Code)', 'Top up Company (Price)', 'Net Price',
+        'Sale Code', 'Sale Name', 'Customer Name', 'Phone', 'Email', 'Buyer Name',
+        'Ref No', 'Invoice No', 'Coupon Code', 'Change Req Count', 
+        'Trade In ID', 'Branch'
     ]
     
     for col_idx, header in enumerate(headers, start=1):
@@ -671,30 +675,67 @@ def generate_excel_report(trade_data, report_summary, date_start, date_end):
         cell.alignment = Alignment(horizontal='center')
     
     for row_idx, item in enumerate(trade_data, start=2):
-        ws_details.cell(row=row_idx, column=1).value = item.get('document_no', '')
-        ws_details.cell(row=row_idx, column=2).value = item.get('document_date', '')
-        ws_details.cell(row=row_idx, column=3).value = item.get('branch_name', '') # Note: API might not return branch_name in item directly if filtered by branch
-        ws_details.cell(row=row_idx, column=4).value = item.get('SALE_CODE', '')
-        ws_details.cell(row=row_idx, column=5).value = item.get('SALE_NAME', '')
-        ws_details.cell(row=row_idx, column=6).value = item.get('customer_name', '')
-        ws_details.cell(row=row_idx, column=7).value = item.get('brand_name', '')
-        ws_details.cell(row=row_idx, column=8).value = item.get('series', '')
-        ws_details.cell(row=row_idx, column=9).value = item.get('BIDDING_STATUS_NAME', '')
-        
-        amount = item.get('amount')
+        # Prices
+        amount = 0
         try:
-            amount = float(amount) if amount else 0.0
+            amount = float(item.get('amount', 0) or 0)
         except:
-            amount = 0.0
-        ws_details.cell(row=row_idx, column=10).value = amount
+            amount = 0
+            
+        top_up_brand = 0
+        try:
+            top_up_brand = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
+        except:
+            top_up_brand = 0
+            
+        top_up_company = 0
+        try:
+            top_up_company = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
+        except:
+            top_up_company = 0
+            
+        net_price = amount + top_up_brand + top_up_company
         
-        ws_details.cell(row=row_idx, column=11).value = item.get('invoice_no', '')
-        ws_details.cell(row=row_idx, column=12).value = item.get('DOCUMENT_REF_1', '')
+        ws_details.cell(row=row_idx, column=1).value = item.get('document_no', '')
+        ws_details.cell(row=row_idx, column=2).value = item.get('IS_SIGNED', '')
+        ws_details.cell(row=row_idx, column=3).value = item.get('SIGN_DATE', '')
+        ws_details.cell(row=row_idx, column=4).value = item.get('document_date', '')
+        ws_details.cell(row=row_idx, column=5).value = item.get('category_name', '')
+        ws_details.cell(row=row_idx, column=6).value = item.get('brand_name', '')
+        ws_details.cell(row=row_idx, column=7).value = item.get('series', '')
+        ws_details.cell(row=row_idx, column=8).value = item.get('part_number', '')
+        ws_details.cell(row=row_idx, column=9).value = item.get('BIDDING_STATUS_NAME', '')
+        ws_details.cell(row=row_idx, column=10).value = amount
+        ws_details.cell(row=row_idx, column=11).value = item.get('CAMPAIGN_ON_TOP_NAME', '')
+        ws_details.cell(row=row_idx, column=12).value = item.get('COUPON_ON_TOP_BRAND_CODE', '')
+        ws_details.cell(row=row_idx, column=13).value = top_up_brand
+        ws_details.cell(row=row_idx, column=14).value = item.get('COUPON_ON_TOP_COMPANY_CODE', '')
+        ws_details.cell(row=row_idx, column=15).value = top_up_company
+        ws_details.cell(row=row_idx, column=16).value = net_price
+        ws_details.cell(row=row_idx, column=17).value = item.get('SALE_CODE', '')
+        ws_details.cell(row=row_idx, column=18).value = item.get('SALE_NAME', '')
+        ws_details.cell(row=row_idx, column=19).value = item.get('customer_name', '')
+        ws_details.cell(row=row_idx, column=20).value = item.get('customer_phone_number', '')
+        ws_details.cell(row=row_idx, column=21).value = item.get('customer_email', '')
+        ws_details.cell(row=row_idx, column=22).value = item.get('buyer_name', '')
+        ws_details.cell(row=row_idx, column=23).value = item.get('DOCUMENT_REF_1', '')
+        ws_details.cell(row=row_idx, column=24).value = item.get('invoice_no', '')
+        ws_details.cell(row=row_idx, column=25).value = item.get('COUPON_TRADE_IN_CODE', '')
+        ws_details.cell(row=row_idx, column=26).value = item.get('CHANGE_REQUEST_COUNT', '')
+        ws_details.cell(row=row_idx, column=27).value = item.get('trade_in_id', '')
+        ws_details.cell(row=row_idx, column=28).value = item.get('branch_name', '')
     
     # ปรับความกว้างคอลัมน์ Details
-    widths = [20, 15, 20, 15, 20, 20, 15, 20, 20, 15, 20, 20]
+    widths = [
+        20, 12, 20, 20, 15, 
+        15, 25, 20, 20, 15, 
+        30, 20, 15, 20, 15, 
+        15, 15, 20, 25, 15, 
+        25, 25, 20, 20, 20, 
+        15, 15, 25
+    ]
     for i, w in enumerate(widths):
-        ws_details.column_dimensions[chr(65+i)].width = w
+        ws_details.column_dimensions[get_column_letter(i + 1)].width = w
         
     # บันทึกไฟล์
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -142,9 +142,13 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     
     # === Data Table ===
     headers = [
-        'ลำดับ', 'เลขที่เอกสาร', 'วันที่', 'สาขา', 'รหัสพนักงาน', 
-        'ชื่อพนักงาน', 'ลูกค้า', 'แบรนด์', 'รุ่น', 'สถานะ', 
-        'มูลค่า', 'เลขที่ Invoice'
+        'ลำดับ', 'เลขที่เอกสาร', 'สถานะเซ็น', 'วันที่เซ็น', 'วันที่เอกสาร', 
+        'หมวดหมู่', 'แบรนด์', 'รุ่น', 'Part Number', 'สถานะ', 
+        'มูลค่าประเมิน', 'โปรโมชั่น', 'Top up Brand (Code)', 'Top up Brand (Price)',
+        'Top up Company (Code)', 'Top up Company (Price)', 'ราคาสุทธิ',
+        'รหัสพนักงาน', 'ชื่อพนักงาน', 'ลูกค้า', 'เบอร์โทร', 'อีเมล', 'ผู้ซื้อ',
+        'เลขที่อ้างอิง', 'เลขที่ Invoice', 'คูปองเทรดอิน', 'จำนวนคำขอเปลี่ยน', 
+        'Trade In ID', 'สาขา'
     ]
     
     header_row = 5
@@ -170,10 +174,11 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     cancelled_fill = PatternFill(start_color="f8d7da", end_color="f8d7da", fill_type="solid")
     
     total_amount = 0
+    total_net_amount = 0
     agreed_count = 0
     
     for row_idx, item in enumerate(trade_data, start=header_row + 1):
-        # Parse date
+        # Parse date (Document Date)
         doc_date = item.get('document_date', '')
         date_display_val = ''
         if doc_date and doc_date.startswith('/Date('):
@@ -183,14 +188,41 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
                 date_display_val = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
         elif doc_date:
             date_display_val = doc_date
+
+        # Parse Sign Date
+        sign_date = item.get('SIGN_DATE', '')
+        sign_date_display = ''
+        if sign_date and sign_date.startswith('/Date('):
+            timestamp_match = re.search(r'/Date\((\d+)\)/', sign_date)
+            if timestamp_match:
+                timestamp = int(timestamp_match.group(1)) / 1000
+                sign_date_display = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
+        elif sign_date:
+            sign_date_display = sign_date
         
-        # Amount
+        # Prices
         amount = 0
         try:
             amount = float(item.get('amount', 0) or 0)
         except (ValueError, TypeError):
             amount = 0
+            
+        top_up_brand = 0
+        try:
+            top_up_brand = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
+        except (ValueError, TypeError):
+            top_up_brand = 0
+            
+        top_up_company = 0
+        try:
+            top_up_company = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
+        except (ValueError, TypeError):
+            top_up_company = 0
+            
+        net_price = amount + top_up_brand + top_up_company
+        
         total_amount += amount
+        total_net_amount += net_price
         
         # Status
         status_name = item.get('BIDDING_STATUS_NAME', '')
@@ -207,16 +239,33 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
         row_data = [
             row_idx - header_row,
             item.get('document_no', ''),
+            item.get('IS_SIGNED', ''),
+            sign_date_display,
             date_display_val,
-            branch_name,
+            item.get('category_name', ''),
+            item.get('brand_name', ''),
+            item.get('series', ''),
+            item.get('part_number', ''),
+            status_name,
+            amount,
+            item.get('CAMPAIGN_ON_TOP_NAME', ''),
+            item.get('COUPON_ON_TOP_BRAND_CODE', ''),
+            top_up_brand,
+            item.get('COUPON_ON_TOP_COMPANY_CODE', ''),
+            top_up_company,
+            net_price,
             item.get('SALE_CODE', ''),
             item.get('SALE_NAME', ''),
             item.get('customer_name', ''),
-            item.get('brand_name', ''),
-            item.get('series', ''),
-            status_name,
-            amount,
-            item.get('invoice_no', '')
+            item.get('customer_phone_number', ''),
+            item.get('customer_email', ''),
+            item.get('buyer_name', ''),
+            item.get('DOCUMENT_REF_1', ''),
+            item.get('invoice_no', ''),
+            item.get('COUPON_TRADE_IN_CODE', ''),
+            item.get('CHANGE_REQUEST_COUNT', ''),
+            item.get('trade_in_id', ''),
+            branch_name
         ]
         
         for col_idx, value in enumerate(row_data, start=1):
@@ -239,10 +288,19 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     ws.cell(row=summary_row + 1, column=1).value = f"📋 รายการทั้งหมด: {len(trade_data)}"
     ws.cell(row=summary_row + 2, column=1).value = f"✅ ตกลงเทรด: {agreed_count}"
     ws.cell(row=summary_row + 3, column=1).value = f"❌ ไม่ตกลง/อื่นๆ: {len(trade_data) - agreed_count}"
-    ws.cell(row=summary_row + 4, column=1).value = f"💰 มูลค่ารวม: {total_amount:,.2f} บาท"
+    ws.cell(row=summary_row + 4, column=1).value = f"💰 มูลค่าประเมินรวม: {total_amount:,.2f} บาท"
+    ws.cell(row=summary_row + 5, column=1).value = f"💵 ราคาสุทธิรวม: {total_net_amount:,.2f} บาท"
     
     # === Column widths ===
-    widths = [6, 18, 18, 25, 12, 20, 20, 12, 18, 18, 12, 18]
+    widths = [
+        6, 20, 15, 20, 20, 
+        15, 15, 25, 20, 20, 
+        15, 30, 20, 15, 
+        20, 15, 15,
+        15, 20, 25, 15, 25, 25,
+        20, 20, 20, 15,
+        15, 25
+    ]
     for i, w in enumerate(widths):
         ws.column_dimensions[get_column_letter(i + 1)].width = w
     
