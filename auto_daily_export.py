@@ -124,7 +124,9 @@ def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None)
     ws = wb.active
     
     date_display = target_date.strftime("%d/%m/%Y")
-    ws.title = f"รายงาน {date_display}"
+    # Excel sheet title ห้ามมี / \ * ? [ ]
+    sheet_title_date = target_date.strftime("%d-%m-%Y")
+    ws.title = f"รายงาน {sheet_title_date}"
     
     # === Header Section ===
     ws['A1'] = f"📊 รายงานประจำวัน - Zone: {zone_name}"
