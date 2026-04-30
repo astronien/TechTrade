@@ -1,5 +1,5 @@
 # Google Drive Uploader Module
-# ใช้ Service Account สำหรับ upload ไฟล์ Excel ไป Google Drive อัตโนมัติ
+# รองรับทั้ง OAuth2 (แนะนำ) และ Service Account
 
 import json
 import os
@@ -7,13 +7,22 @@ import tempfile
 from datetime import datetime
 
 try:
+    from google.oauth2.credentials import Credentials as OAuthCredentials
     from google.oauth2 import service_account
+    from google_auth_oauthlib.flow import Flow
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     GDRIVE_AVAILABLE = True
 except ImportError:
-    GDRIVE_AVAILABLE = False
-    print("⚠️ Google Drive libraries not installed. Install: pip install google-api-python-client google-auth")
+    try:
+        from google.oauth2.credentials import Credentials as OAuthCredentials
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+        GDRIVE_AVAILABLE = True
+    except ImportError:
+        GDRIVE_AVAILABLE = False
+        print("⚠️ Google Drive libraries not installed")
 
 
 class GoogleDriveUploader:
@@ -22,11 +31,6 @@ class GoogleDriveUploader:
     SCOPES = ['https://www.googleapis.com/auth/drive']
     
     def __init__(self, credentials_json=None):
-        """
-        Initialize uploader
-        Args:
-            credentials_json: Service Account JSON string หรือ dict
-        """
         self.service = None
         self.credentials = None
         
@@ -38,30 +42,50 @@ class GoogleDriveUploader:
             self.authenticate(credentials_json)
     
     def authenticate(self, credentials_json):
-        """Authenticate with Service Account
-        Args:
-            credentials_json: JSON string หรือ dict ของ Service Account credentials
-        Returns:
-            bool: True ถ้าสำเร็จ
-        """
+        """Auto-detect credential type and authenticate"""
         try:
             if isinstance(credentials_json, str):
                 creds_dict = json.loads(credentials_json)
             elif isinstance(credentials_json, dict):
                 creds_dict = credentials_json
             else:
-                print("❌ Invalid credentials format")
                 return False
             
-            self.credentials = service_account.Credentials.from_service_account_info(
-                creds_dict, scopes=self.SCOPES
-            )
-            self.service = build('drive', 'v3', credentials=self.credentials)
-            print("✅ Google Drive authenticated successfully")
-            return True
+            # OAuth2 (มี refresh_token)
+            if creds_dict.get('refresh_token'):
+                return self._auth_oauth2(creds_dict)
+            # Service Account (มี type=service_account)
+            elif creds_dict.get('type') == 'service_account':
+                return self._auth_service_account(creds_dict)
+            else:
+                print("❌ Invalid credentials: need refresh_token or service_account")
+                return False
         except Exception as e:
-            print(f"❌ Google Drive authentication failed: {e}")
+            print(f"❌ Authentication failed: {e}")
             return False
+    
+    def _auth_oauth2(self, creds_dict):
+        """Authenticate with OAuth2 refresh token"""
+        creds = OAuthCredentials(
+            token=None,
+            refresh_token=creds_dict['refresh_token'],
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=creds_dict['client_id'],
+            client_secret=creds_dict['client_secret'],
+            scopes=self.SCOPES
+        )
+        self.service = build('drive', 'v3', credentials=creds)
+        print("✅ Google Drive authenticated via OAuth2")
+        return True
+    
+    def _auth_service_account(self, creds_dict):
+        """Authenticate with Service Account"""
+        self.credentials = service_account.Credentials.from_service_account_info(
+            creds_dict, scopes=self.SCOPES
+        )
+        self.service = build('drive', 'v3', credentials=self.credentials)
+        print("✅ Google Drive authenticated via Service Account")
+        return True
     
     def _ensure_service(self):
         """ตรวจสอบว่ามี service พร้อมใช้งาน"""

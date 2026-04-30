@@ -3690,14 +3690,13 @@ def test_gdrive_connection():
         data = request.get_json()
         credentials_json = data.get('gdrive_credentials', '')
         
-        # ถ้าส่งมาเป็น '***' ให้ใช้ค่าจาก DB
         if credentials_json == '***':
             existing = get_auto_export_config_from_db()
             if existing:
                 credentials_json = existing.get('gdrive_credentials', '')
         
         if not credentials_json:
-            return jsonify({'success': False, 'message': 'กรุณาใส่ Google Drive credentials'})
+            return jsonify({'success': False, 'message': 'กรุณาเชื่อมต่อ Google Drive ก่อน'})
         
         from google_drive_uploader import GoogleDriveUploader
         uploader = GoogleDriveUploader(credentials_json)
@@ -3705,6 +3704,110 @@ def test_gdrive_connection():
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/admin/gdrive-auth', methods=['POST'])
+def gdrive_start_auth():
+    """สร้าง Google OAuth2 authorization URL"""
+    try:
+        data = request.get_json()
+        client_id = data.get('client_id', '')
+        client_secret = data.get('client_secret', '')
+        
+        if not client_id or not client_secret:
+            return jsonify({'success': False, 'message': 'กรุณาใส่ Client ID และ Client Secret'})
+        
+        # สร้าง redirect URI จาก request host
+        redirect_uri = request.host_url.rstrip('/') + '/api/admin/gdrive-callback'
+        
+        scopes = ['https://www.googleapis.com/auth/drive']
+        auth_url = (
+            f"https://accounts.google.com/o/oauth2/v2/auth"
+            f"?client_id={client_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&response_type=code"
+            f"&scope={'%20'.join(scopes)}"
+            f"&access_type=offline"
+            f"&prompt=consent"
+        )
+        
+        # เก็บ client_id/secret ชั่วคราวใน config เพื่อใช้ตอน callback
+        existing = get_auto_export_config_from_db() or {}
+        existing['gdrive_client_id'] = client_id
+        existing['gdrive_client_secret'] = client_secret
+        # เก็บเป็น JSON ใน gdrive_credentials field
+        temp_creds = json.dumps({'client_id': client_id, 'client_secret': client_secret, '_pending': True})
+        existing['gdrive_credentials'] = temp_creds
+        save_auto_export_config_to_db(existing)
+        
+        return jsonify({'success': True, 'auth_url': auth_url})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/admin/gdrive-callback', methods=['GET'])
+def gdrive_callback():
+    """OAuth2 callback - แลก code เป็น refresh_token"""
+    try:
+        code = request.args.get('code', '')
+        error = request.args.get('error', '')
+        
+        if error:
+            return f"<h2>❌ Authorization failed: {error}</h2><p><a href='/'>กลับหน้าหลัก</a></p>"
+        
+        if not code:
+            return "<h2>❌ No authorization code</h2><p><a href='/'>กลับหน้าหลัก</a></p>"
+        
+        # ดึง client_id/secret จาก DB
+        config = get_auto_export_config_from_db()
+        if not config or not config.get('gdrive_credentials'):
+            return "<h2>❌ Config not found</h2>"
+        
+        creds_data = json.loads(config['gdrive_credentials'])
+        client_id = creds_data.get('client_id', '')
+        client_secret = creds_data.get('client_secret', '')
+        
+        if not client_id or not client_secret:
+            return "<h2>❌ Client credentials not found</h2>"
+        
+        redirect_uri = request.host_url.rstrip('/') + '/api/admin/gdrive-callback'
+        
+        # แลก code เป็น tokens
+        import requests as req
+        token_response = req.post('https://oauth2.googleapis.com/token', data={
+            'code': code,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code'
+        })
+        
+        if token_response.status_code != 200:
+            return f"<h2>❌ Token exchange failed</h2><pre>{token_response.text}</pre>"
+        
+        tokens = token_response.json()
+        refresh_token = tokens.get('refresh_token', '')
+        
+        if not refresh_token:
+            return "<h2>❌ No refresh token received. Try revoking app access and retry.</h2>"
+        
+        # บันทึก credentials ลง DB
+        final_creds = json.dumps({
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'refresh_token': refresh_token
+        })
+        config['gdrive_credentials'] = final_creds
+        save_auto_export_config_to_db(config)
+        
+        return """
+        <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
+        <h1>✅ เชื่อมต่อ Google Drive สำเร็จ!</h1>
+        <p>ระบบบันทึก credentials แล้ว สามารถปิดหน้านี้ได้</p>
+        <p><a href="/" style="color: #4285f4; font-size: 18px;">กลับหน้าหลัก</a></p>
+        </body></html>
+        """
+    except Exception as e:
+        return f"<h2>❌ Error: {str(e)}</h2>"
+
 
 @app.route('/api/admin/auto-export-test', methods=['POST'])
 def test_auto_export():

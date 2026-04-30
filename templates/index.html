@@ -520,16 +520,28 @@
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom: 15px;">
-                        <label>Service Account JSON Credentials</label>
-                        <textarea id="aeCredentials" rows="4" placeholder='วาง JSON ของ Service Account credentials ที่นี่'
-                            class="form-control" style="font-family: monospace; font-size: 12px;"></textarea>
-                        <small style="color: var(--text-muted);">JSON key จาก Google Cloud Console (Service
-                            Account)</small>
+                        <label>🔐 เชื่อมต่อ Google Drive (OAuth2)</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
+                            <div>
+                                <small style="color: var(--text-muted);">Client ID</small>
+                                <input type="text" id="aeClientId" placeholder="OAuth Client ID" class="form-control" style="font-size: 12px;">
+                            </div>
+                            <div>
+                                <small style="color: var(--text-muted);">Client Secret</small>
+                                <input type="password" id="aeClientSecret" placeholder="OAuth Client Secret" class="form-control" style="font-size: 12px;">
+                            </div>
+                        </div>
+                        <small style="color: var(--text-muted); display: block; margin-top: 5px;">
+                            ⚠️ ต้องเพิ่ม Redirect URI: <code style="color: #4285f4;">https://report-trade.vercel.app/api/admin/gdrive-callback</code> ใน Google Cloud Console > Credentials > OAuth 2.0 Client IDs
+                        </small>
                     </div>
-                    <div style="margin-bottom: 20px;">
-                        <button onclick="testGDriveConnection()" class="secondary"
+                    <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                        <button onclick="connectGoogleDrive()" class="secondary"
                             style="padding: 8px 20px; background: #4285f4; color: white; border: none;">🔗
-                            ทดสอบเชื่อมต่อ Google Drive</button>
+                            เชื่อมต่อ Google Drive</button>
+                        <button onclick="testGDriveConnection()" class="secondary"
+                            style="padding: 8px 20px; background: #34a853; color: white; border: none;">✅
+                            ทดสอบการเชื่อมต่อ</button>
                         <span id="aeGdriveStatus" style="margin-left: 10px; font-size: 13px;"></span>
                     </div>
 
@@ -2031,7 +2043,12 @@
                         
                         document.getElementById('aeMaxFiles').value = c.max_files_per_zone || 365;
                         document.getElementById('aeFolderId').value = c.gdrive_folder_id || '';
-                        document.getElementById('aeCredentials').value = c.gdrive_credentials || '';
+                        
+                        // แสดงสถานะ OAuth2
+                        if (c.gdrive_credentials === '***') {
+                            document.getElementById('aeGdriveStatus').innerHTML = '🔑 มี credentials อยู่แล้ว';
+                            document.getElementById('aeGdriveStatus').style.color = '#10b981';
+                        }
                         
                         // Zone IDs
                         let zoneIds = c.zone_ids || [];
@@ -2063,7 +2080,7 @@
                     schedule_time: `${document.getElementById('aeHour').value}:${document.getElementById('aeMinute').value}`,
                     zone_ids: aeSelectedZoneIds,
                     gdrive_folder_id: document.getElementById('aeFolderId').value.trim(),
-                    gdrive_credentials: document.getElementById('aeCredentials').value.trim(),
+                    gdrive_credentials: '***',  // ไม่ overwrite credentials ที่เก็บไว้
                     max_files_per_zone: parseInt(document.getElementById('aeMaxFiles').value) || 365
                 };
 
@@ -2084,17 +2101,43 @@
                 }
             }
 
+            async function connectGoogleDrive() {
+                const clientId = document.getElementById('aeClientId').value.trim();
+                const clientSecret = document.getElementById('aeClientSecret').value.trim();
+                
+                if (!clientId || !clientSecret) {
+                    alert('กรุณาใส่ Client ID และ Client Secret');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/admin/gdrive-auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success && data.auth_url) {
+                        window.open(data.auth_url, '_blank');
+                    } else {
+                        alert('❌ ' + (data.message || 'ไม่สามารถสร้าง auth URL'));
+                    }
+                } catch (error) {
+                    alert('❌ Error: ' + error.message);
+                }
+            }
+
             async function testGDriveConnection() {
                 const statusEl = document.getElementById('aeGdriveStatus');
                 statusEl.innerHTML = '🔄 กำลังทดสอบ...';
                 statusEl.style.color = '#f59e0b';
                 
                 try {
-                    const credentials = document.getElementById('aeCredentials').value.trim();
                     const response = await fetch('/api/admin/auto-export-test-gdrive', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ gdrive_credentials: credentials })
+                        body: JSON.stringify({ gdrive_credentials: '***' })
                     });
                     const data = await response.json();
                     
