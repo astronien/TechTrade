@@ -166,6 +166,37 @@ def init_database():
             )
         """)
         
+        # สร้างตาราง auto_export_config
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS auto_export_config (
+                id SERIAL PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                schedule_time VARCHAR(5) DEFAULT '00:05',
+                zone_ids JSONB DEFAULT '[]',
+                gdrive_folder_id VARCHAR(255) DEFAULT '',
+                gdrive_credentials TEXT DEFAULT '',
+                max_files_per_zone INTEGER DEFAULT 365,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # สร้างตาราง auto_export_log
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS auto_export_log (
+                id SERIAL PRIMARY KEY,
+                run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                zone_id VARCHAR(255) DEFAULT '',
+                zone_name VARCHAR(255) DEFAULT '',
+                date_exported VARCHAR(10) DEFAULT '',
+                total_records INTEGER DEFAULT 0,
+                file_name VARCHAR(500) DEFAULT '',
+                gdrive_file_id VARCHAR(255) DEFAULT '',
+                status VARCHAR(20) DEFAULT 'success',
+                error_message TEXT DEFAULT '',
+                duration_seconds FLOAT DEFAULT 0
+            )
+        """)
+        
         # สร้างตาราง admin_users
         
         # สร้าง admin user เริ่มต้น
@@ -3556,6 +3587,215 @@ def get_auto_cancel_logs():
         logs = []
         for row in rows:
             # row is RealDictRow, convert to dict
+            log = dict(row)
+            if log.get('run_at'):
+                if isinstance(log['run_at'], datetime):
+                    log['run_at'] = log['run_at'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                else:
+                    log['run_at'] = str(log['run_at']).replace(' ', 'T') + 'Z'
+            logs.append(log)
+        
+        return jsonify({'success': True, 'logs': logs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# Auto Daily Export System
+# ============================================================
+
+def get_auto_export_config_from_db():
+    """ดึง config auto-export จาก DB"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM auto_export_config ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        print(f"❌ Error getting auto-export config: {e}")
+        return None
+
+def save_auto_export_config_to_db(config):
+    """บันทึก config auto-export ลง DB"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        cur = conn.cursor()
+        cur.execute("DELETE FROM auto_export_config")
+        
+        zone_ids = config.get('zone_ids', [])
+        if isinstance(zone_ids, list):
+            zone_ids = json.dumps(zone_ids)
+        
+        cur.execute("""
+            INSERT INTO auto_export_config
+            (enabled, schedule_time, zone_ids, gdrive_folder_id, gdrive_credentials, max_files_per_zone)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            config.get('enabled', False),
+            config.get('schedule_time', '00:05'),
+            zone_ids,
+            config.get('gdrive_folder_id', ''),
+            config.get('gdrive_credentials', ''),
+            config.get('max_files_per_zone', 365)
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Error saving auto-export config: {e}")
+        return False
+
+@app.route('/api/admin/auto-export-config', methods=['GET', 'POST'])
+def manage_auto_export_config():
+    """API สำหรับจัดการ config auto-export"""
+    if request.method == 'GET':
+        config = get_auto_export_config_from_db()
+        if config:
+            config['updated_at'] = str(config.get('updated_at', ''))
+            # ไม่ส่ง credentials กลับไป (security)
+            config['gdrive_credentials'] = '***' if config.get('gdrive_credentials') else ''
+            return jsonify({'success': True, 'config': config})
+        return jsonify({'success': True, 'config': None})
+    
+    # POST - save config
+    try:
+        data = request.get_json()
+        
+        # ถ้าส่ง credentials มาเป็น '***' หมายถึงไม่เปลี่ยน
+        if data.get('gdrive_credentials') == '***':
+            existing = get_auto_export_config_from_db()
+            if existing:
+                data['gdrive_credentials'] = existing.get('gdrive_credentials', '')
+        
+        success = save_auto_export_config_to_db(data)
+        if success:
+            return jsonify({'success': True, 'message': 'บันทึก config auto-export สำเร็จ'})
+        return jsonify({'success': False, 'error': 'บันทึกไม่สำเร็จ'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-export-test-gdrive', methods=['POST'])
+def test_gdrive_connection():
+    """ทดสอบการเชื่อมต่อ Google Drive"""
+    try:
+        data = request.get_json()
+        credentials_json = data.get('gdrive_credentials', '')
+        
+        # ถ้าส่งมาเป็น '***' ให้ใช้ค่าจาก DB
+        if credentials_json == '***':
+            existing = get_auto_export_config_from_db()
+            if existing:
+                credentials_json = existing.get('gdrive_credentials', '')
+        
+        if not credentials_json:
+            return jsonify({'success': False, 'message': 'กรุณาใส่ Google Drive credentials'})
+        
+        from google_drive_uploader import GoogleDriveUploader
+        uploader = GoogleDriveUploader(credentials_json)
+        result = uploader.test_connection()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/admin/auto-export-test', methods=['POST'])
+def test_auto_export():
+    """ทดสอบรัน auto-export ทันที"""
+    try:
+        from auto_daily_export import run_daily_export
+        result = run_daily_export(force=True)
+        return jsonify({'success': True, 'message': 'รัน auto-export เสร็จแล้ว', 'result': result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-export-cron', methods=['GET', 'POST'])
+def vercel_cron_auto_export():
+    """Endpoint สำหรับ GitHub Actions Cron ยิงมาทุกๆ 15 นาที สำหรับ auto-export"""
+    try:
+        # Check authorization
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
+        if cron_secret and auth_header != f'Bearer {cron_secret}':
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+        
+        config = get_auto_export_config_from_db()
+        if not config or not config.get('enabled'):
+            return jsonify({'success': False, 'message': 'Auto-export is disabled'}), 200
+        
+        schedule_time = config.get('schedule_time', '00:05')
+        target_hour, target_minute = schedule_time.split(':')
+        
+        bkk_tz = pytz.timezone('Asia/Bangkok')
+        now_bkk = datetime.now(bkk_tz)
+        
+        target_dt_today = now_bkk.replace(hour=int(target_hour), minute=int(target_minute), second=0, microsecond=0)
+        if now_bkk < target_dt_today:
+            target_dt_past = target_dt_today - timedelta(days=1)
+        else:
+            target_dt_past = target_dt_today
+        
+        print(f"📤 Export Cron Ping: Now={now_bkk.strftime('%H:%M')}, Target={schedule_time}")
+        
+        # Check if already ran for this schedule
+        conn = get_db_connection()
+        already_run = False
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT run_at FROM auto_export_log WHERE status='success' ORDER BY run_at DESC LIMIT 1")
+                last_log = cur.fetchone()
+                if last_log and last_log[0]:
+                    last_run_utc = last_log[0]
+                    if last_run_utc.tzinfo is None:
+                        last_run_utc = last_run_utc.replace(tzinfo=pytz.UTC)
+                    last_run_bkk = last_run_utc.astimezone(bkk_tz)
+                    if last_run_bkk >= target_dt_past:
+                        already_run = True
+                cur.close()
+            except Exception as db_e:
+                print(f"❌ DB Check Error: {db_e}")
+            finally:
+                conn.close()
+        
+        if not already_run:
+            print(f"✅ Time to run! Executing auto-export...")
+            from auto_daily_export import run_daily_export
+            result = run_daily_export(force=True)
+            return jsonify({'success': True, 'message': 'Export executed', 'result': result}), 200
+        else:
+            return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
+    
+    except Exception as e:
+        print(f"❌ Export Cron Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/auto-export-logs', methods=['GET'])
+def get_auto_export_logs():
+    """ดึง log การรัน auto-export"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM auto_export_log ORDER BY run_at DESC LIMIT 50")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        logs = []
+        for row in rows:
             log = dict(row)
             if log.get('run_at'):
                 if isinstance(log['run_at'], datetime):

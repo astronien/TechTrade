@@ -11,6 +11,8 @@
         "maxDuration": 300,
         "includeFiles": [
           "excel_report_generator.py",
+          "auto_daily_export.py",
+          "google_drive_uploader.py",
           "templates/**",
           "static/**"
         ]

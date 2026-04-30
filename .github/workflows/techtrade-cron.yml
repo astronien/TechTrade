@@ -1,4 +1,4 @@
-name: Auto-Cancel Scheduled Task
+name: TechTrade Scheduled Tasks
 
 on:
   schedule:
@@ -24,5 +24,25 @@ jobs:
           # Allow 200 (Ran successfully or skipped because it's not time yet)
           if [ "$HTTP_CODE" -ne 200 ]; then
             echo "Failed to trigger auto-cancel. Exiting with error."
+            exit 1
+          fi
+
+  run-auto-export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Auto-Export Endpoint
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://report-trade.vercel.app/api/admin/auto-export-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "Status Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+          
+          # Allow 200 (Ran successfully or skipped because it's not time yet)
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Failed to trigger auto-export. Exiting with error."
             exit 1
           fi

@@ -28,6 +28,8 @@
             <li><a href="#" onclick="showPage('zones', event); return false;"><span>🗺️</span> จัดการ Zone</a></li>
             <li><a href="#" onclick="showPage('autocancel', event); return false;"><span>⏰</span> ยกเลิกอัตโนมัติ</a>
             </li>
+            <li><a href="#" onclick="showPage('autoexport', event); return false;"><span>📤</span> Auto Export</a>
+            </li>
             <li><a href="#" onclick="showPage('supersale', event); return false;"><span>⭐</span> ตั้งค่า Supersale</a>
             </li>
             <li><a href="#" onclick="openSettings(); return false;"><span>⚙️</span> ตั้งค่า</a></li>
@@ -431,6 +433,130 @@
             </div>
             <!-- End Auto-Cancel Page -->
         </div>
+
+        <!-- Auto Export Page -->
+        <div id="autoexportPage" class="page-section">
+            <div class="container">
+                <h1>📤 Auto Daily Export to Google Drive</h1>
+
+                <div class="search-panel">
+                    <!-- Toggle -->
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <div>
+                            <h3 style="margin:0; color: var(--text-main);">Auto Export</h3>
+                            <small style="color: var(--text-muted);">ดึงข้อมูลเทรดรายวัน สร้าง Excel แล้วอัพโหลดไป
+                                Google Drive อัตโนมัติ</small>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="aeEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                            <span id="aeStatusText" style="font-weight: 600; color: var(--text-muted);">ปิดอยู่</span>
+                        </label>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- เวลา -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>⏰ เวลา Export (ทุกวัน)</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <select id="aeHour" class="form-control" style="width: 80px;">
+                                    <script>
+                                        for (let i = 0; i < 24; i++) {
+                                            document.write(`<option value="${i.toString().padStart(2, '0')}">${i.toString().padStart(2, '0')}</option>`);
+                                        }
+                                    </script>
+                                </select>
+                                <span>:</span>
+                                <select id="aeMinute" class="form-control" style="width: 80px;">
+                                    <script>
+                                        for (let i = 0; i < 60; i++) {
+                                            document.write(`<option value="${i.toString().padStart(2, '0')}" ${i === 5 ? 'selected' : ''}>${i.toString().padStart(2, '0')}</option>`);
+                                        }
+                                    </script>
+                                </select>
+                                <span style="color: var(--text-muted); font-size: 14px;">(น.)
+                                    จะดึงข้อมูลของวันก่อนหน้า</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>📁 FIFO Limit (จำนวนไฟล์สูงสุดต่อ Zone)</label>
+                            <input type="number" id="aeMaxFiles" value="365" min="30" max="3650" class="form-control"
+                                style="width: 120px;">
+                            <small style="color: var(--text-muted);">เมื่อครบจะลบไฟล์เก่าสุดออก (FIFO)</small>
+                        </div>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- Zone Selection -->
+                    <h3 style="color: var(--primary); margin-bottom: 15px;">🗺️ เลือก Zone ที่ต้องการ Export</h3>
+                    <div style="margin-bottom: 15px;">
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <select id="aeZoneSelect" class="form-control" style="flex: 1;">
+                                <option value="">-- เลือก Zone --</option>
+                            </select>
+                            <button onclick="addAutoExportZone()"
+                                style="padding: 8px 16px; font-size: 13px; white-space: nowrap;">➕ เพิ่ม</button>
+                            <button onclick="addAllExportZones()" class="secondary"
+                                style="padding: 8px 16px; font-size: 13px; white-space: nowrap;">📋 ทั้งหมด</button>
+                        </div>
+                        <div id="aeSelectedZones" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                        <small style="color: var(--text-muted);">ว่าง = export ทุก Zone</small>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- Google Drive Settings -->
+                    <h3 style="color: #4285f4; margin-bottom: 15px;">📁 Google Drive Settings</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Folder ID</label>
+                            <input type="text" id="aeFolderId" placeholder="Google Drive Folder ID" class="form-control">
+                            <small style="color: var(--text-muted);">ID ของ folder ที่ต้องการเก็บไฟล์ (จาก URL ของ
+                                Drive)</small>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label>Service Account JSON Credentials</label>
+                        <textarea id="aeCredentials" rows="4" placeholder='วาง JSON ของ Service Account credentials ที่นี่'
+                            class="form-control" style="font-family: monospace; font-size: 12px;"></textarea>
+                        <small style="color: var(--text-muted);">JSON key จาก Google Cloud Console (Service
+                            Account)</small>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <button onclick="testGDriveConnection()" class="secondary"
+                            style="padding: 8px 20px; background: #4285f4; color: white; border: none;">🔗
+                            ทดสอบเชื่อมต่อ Google Drive</button>
+                        <span id="aeGdriveStatus" style="margin-left: 10px; font-size: 13px;"></span>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+
+                    <!-- ปุ่ม -->
+                    <div style="display: flex; gap: 15px; margin-top: 25px;">
+                        <button onclick="saveAutoExportConfig()" style="padding: 12px 30px;">💾 บันทึก</button>
+                        <button onclick="testAutoExport()" class="secondary"
+                            style="padding: 12px 30px; background: #10b981; color: white; border: none;">🧪
+                            ทดสอบรันเดี๋ยวนี้</button>
+                    </div>
+                </div>
+
+                <!-- Log -->
+                <div class="data-container">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">📋 ประวัติ Auto Export</h3>
+                        <button onclick="loadAutoExportLogs()" class="secondary"
+                            style="padding: 8px 16px; font-size: 13px;">🔄 รีเฟรช</button>
+                    </div>
+                    <div id="aeLogsContainer">กดรีเฟรชเพื่อดูประวัติ</div>
+                </div>
+            </div>
+        </div>
+        <!-- End Auto Export Page -->
 
         <!-- Supersale Config Page -->
         <div id="supersalePage" class="page-section">
@@ -1133,6 +1259,9 @@
                 } else if (pageName === 'autocancel') {
                     document.getElementById('autocancelPage').classList.add('active');
                     loadAutoCancelConfig();
+                } else if (pageName === 'autoexport') {
+                    document.getElementById('autoexportPage').classList.add('active');
+                    loadAutoExportConfig();
                 } else if (pageName === 'supersale') {
                     document.getElementById('supersalePage').classList.add('active');
                     loadSupersaleConfig();
@@ -1824,6 +1953,242 @@
             }
             // ==================== End Auto-Cancel Functions ====================
 
+            // ==================== Auto Export Functions ====================
+            let aeSelectedZoneIds = [];
+            let aeAllZones = [];
+
+            async function populateAutoExportZones() {
+                try {
+                    const response = await fetch('/api/custom-zones');
+                    const data = await response.json();
+                    if (data.success && data.zones) {
+                        aeAllZones = data.zones;
+                        const select = document.getElementById('aeZoneSelect');
+                        select.innerHTML = '<option value="">-- เลือก Zone --</option>';
+                        data.zones.forEach(z => {
+                            select.innerHTML += `<option value="${z.zone_id}">${z.zone_name} (${z.branch_ids.length} สาขา)</option>`;
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error loading zones for auto-export:', error);
+                }
+            }
+
+            function addAutoExportZone() {
+                const select = document.getElementById('aeZoneSelect');
+                const zoneId = select.value;
+                if (!zoneId || aeSelectedZoneIds.includes(zoneId)) return;
+                aeSelectedZoneIds.push(zoneId);
+                renderSelectedExportZones();
+            }
+
+            function addAllExportZones() {
+                aeSelectedZoneIds = aeAllZones.map(z => z.zone_id);
+                renderSelectedExportZones();
+            }
+
+            function removeAutoExportZone(zoneId) {
+                aeSelectedZoneIds = aeSelectedZoneIds.filter(id => id !== zoneId);
+                renderSelectedExportZones();
+            }
+
+            function renderSelectedExportZones() {
+                const container = document.getElementById('aeSelectedZones');
+                if (aeSelectedZoneIds.length === 0) {
+                    container.innerHTML = '<span style="color: #999; font-size: 13px;">ยังไม่ได้เลือก Zone (จะ export ทุก Zone)</span>';
+                    return;
+                }
+                container.innerHTML = aeSelectedZoneIds.map(id => {
+                    const zone = aeAllZones.find(z => z.zone_id === id);
+                    const name = zone ? zone.zone_name : id;
+                    return `<span style="background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 20px; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                        🗺️ ${name}
+                        <span onclick="removeAutoExportZone('${id}')" 
+                            style="cursor: pointer; color: #dc2626; font-weight: bold; margin-left: 4px;">✕</span>
+                    </span>`;
+                }).join('');
+            }
+
+            async function loadAutoExportConfig() {
+                try {
+                    await populateAutoExportZones();
+                    
+                    const response = await fetch('/api/admin/auto-export-config');
+                    const data = await response.json();
+                    
+                    if (data.success && data.config) {
+                        const c = data.config;
+                        
+                        document.getElementById('aeEnabled').checked = c.enabled;
+                        document.getElementById('aeStatusText').textContent = c.enabled ? 'เปิดใช้งาน' : 'ปิดอยู่';
+                        document.getElementById('aeStatusText').style.color = c.enabled ? '#10b981' : 'var(--text-muted)';
+                        
+                        if (c.schedule_time) {
+                            const [h, m] = c.schedule_time.split(':');
+                            document.getElementById('aeHour').value = h;
+                            document.getElementById('aeMinute').value = m;
+                        }
+                        
+                        document.getElementById('aeMaxFiles').value = c.max_files_per_zone || 365;
+                        document.getElementById('aeFolderId').value = c.gdrive_folder_id || '';
+                        document.getElementById('aeCredentials').value = c.gdrive_credentials || '';
+                        
+                        // Zone IDs
+                        let zoneIds = c.zone_ids || [];
+                        if (typeof zoneIds === 'string') {
+                            try { zoneIds = JSON.parse(zoneIds); } catch(e) { zoneIds = []; }
+                        }
+                        aeSelectedZoneIds = zoneIds;
+                        renderSelectedExportZones();
+                    }
+                    
+                    loadAutoExportLogs();
+                } catch (error) {
+                    console.error('Error loading auto-export config:', error);
+                }
+            }
+
+            // Toggle status text
+            document.addEventListener('change', function(e) {
+                if (e.target.id === 'aeEnabled') {
+                    const statusText = document.getElementById('aeStatusText');
+                    statusText.textContent = e.target.checked ? 'เปิดใช้งาน' : 'ปิดอยู่';
+                    statusText.style.color = e.target.checked ? '#10b981' : 'var(--text-muted)';
+                }
+            });
+
+            async function saveAutoExportConfig() {
+                const config = {
+                    enabled: document.getElementById('aeEnabled').checked,
+                    schedule_time: `${document.getElementById('aeHour').value}:${document.getElementById('aeMinute').value}`,
+                    zone_ids: aeSelectedZoneIds,
+                    gdrive_folder_id: document.getElementById('aeFolderId').value.trim(),
+                    gdrive_credentials: document.getElementById('aeCredentials').value.trim(),
+                    max_files_per_zone: parseInt(document.getElementById('aeMaxFiles').value) || 365
+                };
+
+                try {
+                    const response = await fetch('/api/admin/auto-export-config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(config)
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`✅ บันทึกสำเร็จ!\n\nระบบจะ export ${config.enabled ? 'เวลา ' + config.schedule_time + ' น. ทุกวัน' : '(ปิดอยู่)'}`);
+                    } else {
+                        alert(`❌ ${data.error || 'บันทึกไม่สำเร็จ'}`);
+                    }
+                } catch (error) {
+                    alert(`❌ Error: ${error.message}`);
+                }
+            }
+
+            async function testGDriveConnection() {
+                const statusEl = document.getElementById('aeGdriveStatus');
+                statusEl.innerHTML = '🔄 กำลังทดสอบ...';
+                statusEl.style.color = '#f59e0b';
+                
+                try {
+                    const credentials = document.getElementById('aeCredentials').value.trim();
+                    const response = await fetch('/api/admin/auto-export-test-gdrive', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gdrive_credentials: credentials })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        statusEl.innerHTML = `✅ ${data.message}`;
+                        statusEl.style.color = '#10b981';
+                    } else {
+                        statusEl.innerHTML = `❌ ${data.message}`;
+                        statusEl.style.color = '#dc2626';
+                    }
+                } catch (error) {
+                    statusEl.innerHTML = `❌ ${error.message}`;
+                    statusEl.style.color = '#dc2626';
+                }
+            }
+
+            async function testAutoExport() {
+                if (!confirm('🧪 ทดสอบรัน Auto Export เดี๋ยวนี้?\n\nระบบจะดึงข้อมูลวันก่อนหน้าจากทุก Zone ที่เลือก\nสร้าง Excel และ upload ไป Google Drive จริง\n\nกรุณาบันทึก config ก่อนกดทดสอบ')) return;
+                
+                const btn = event.target;
+                const origText = btn.innerHTML;
+                btn.innerHTML = '⏳ กำลังรัน...';
+                btn.disabled = true;
+                
+                try {
+                    const response = await fetch('/api/admin/auto-export-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const r = data.result || {};
+                        alert(`✅ รัน Auto Export เสร็จแล้ว!\n\n🗺️ Zone: ${r.total_zones || 0}\n📁 ไฟล์: ${r.total_files || 0}\n📋 รายการ: ${r.total_records || 0}\n❌ Errors: ${r.total_errors || 0}\n⏱️ ใช้เวลา: ${r.duration || '?'}\n\nดูรายละเอียดใน Telegram และ Log`);
+                        loadAutoExportLogs();
+                    } else {
+                        alert(`❌ ${data.error || 'ไม่สำเร็จ'}`);
+                    }
+                } catch (error) {
+                    alert(`❌ Error: ${error.message}`);
+                } finally {
+                    btn.innerHTML = origText;
+                    btn.disabled = false;
+                }
+            }
+
+            async function loadAutoExportLogs() {
+                const container = document.getElementById('aeLogsContainer');
+                container.innerHTML = '⏳ กำลังโหลด...';
+                
+                try {
+                    const response = await fetch('/api/admin/auto-export-logs');
+                    const data = await response.json();
+                    
+                    if (data.success && data.logs && data.logs.length > 0) {
+                        let html = '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+                        html += '<thead><tr style="background: #f1f5f9;">';
+                        html += '<th style="padding: 8px; text-align: left; border-bottom: 2px solid #e2e8f0;">เวลา</th>';
+                        html += '<th style="padding: 8px; text-align: left; border-bottom: 2px solid #e2e8f0;">Zone</th>';
+                        html += '<th style="padding: 8px; text-align: left; border-bottom: 2px solid #e2e8f0;">วันที่ข้อมูล</th>';
+                        html += '<th style="padding: 8px; text-align: center; border-bottom: 2px solid #e2e8f0;">รายการ</th>';
+                        html += '<th style="padding: 8px; text-align: center; border-bottom: 2px solid #e2e8f0;">สถานะ</th>';
+                        html += '<th style="padding: 8px; text-align: center; border-bottom: 2px solid #e2e8f0;">เวลา(s)</th>';
+                        html += '</tr></thead><tbody>';
+                        
+                        data.logs.forEach(log => {
+                            const runAt = log.run_at ? new Date(log.run_at).toLocaleString('th-TH') : '-';
+                            const statusIcon = log.status === 'success' ? '✅' : '❌';
+                            const statusColor = log.status === 'success' ? '#10b981' : '#dc2626';
+                            
+                            html += '<tr style="border-bottom: 1px solid #f1f5f9;">';
+                            html += `<td style="padding: 8px;">${runAt}</td>`;
+                            html += `<td style="padding: 8px;">${log.zone_name || '-'}</td>`;
+                            html += `<td style="padding: 8px;">${log.date_exported || '-'}</td>`;
+                            html += `<td style="padding: 8px; text-align: center;">${log.total_records || 0}</td>`;
+                            html += `<td style="padding: 8px; text-align: center; color: ${statusColor};">${statusIcon} ${log.status}</td>`;
+                            html += `<td style="padding: 8px; text-align: center;">${(log.duration_seconds || 0).toFixed(1)}</td>`;
+                            html += '</tr>';
+                            
+                            if (log.error_message) {
+                                html += `<tr><td colspan="6" style="padding: 4px 8px; color: #dc2626; font-size: 12px;">⚠️ ${log.error_message}</td></tr>`;
+                            }
+                        });
+                        
+                        html += '</tbody></table>';
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = '<p style="color: #999; text-align: center;">ยังไม่มีประวัติ Auto Export</p>';
+                    }
+                } catch (error) {
+                    container.innerHTML = '<p style="color: #dc2626;">❌ โหลดประวัติไม่สำเร็จ</p>';
+                }
+            }
+            // ==================== End Auto Export Functions ====================
             // checkExtensionAndSession() และ dismissBanner() ถูกลบออกแล้ว — ระบบใช้ Auto-Login
 
             async function openSettings() {
