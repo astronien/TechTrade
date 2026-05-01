@@ -3510,8 +3510,8 @@ def vercel_cron_auto_cancel():
                 cur = conn.cursor()
                 cur.execute("SELECT run_at FROM auto_cancel_log ORDER BY run_at DESC LIMIT 1")
                 last_log = cur.fetchone()
-                if last_log and last_log[0]:
-                    last_run_utc = last_log[0]
+                if last_log and last_log.get('run_at'):
+                    last_run_utc = last_log['run_at']
                     if last_run_utc.tzinfo is None:
                         last_run_utc = last_run_utc.replace(tzinfo=pytz.UTC)
                     last_run_bkk = last_run_utc.astimezone(bkk_tz)
@@ -3857,8 +3857,8 @@ def vercel_cron_auto_export():
                 cur = conn.cursor()
                 cur.execute("SELECT run_at FROM auto_export_log WHERE status='success' ORDER BY run_at DESC LIMIT 1")
                 last_log = cur.fetchone()
-                if last_log and last_log[0]:
-                    last_run_utc = last_log[0]
+                if last_log and last_log.get('run_at'):
+                    last_run_utc = last_log['run_at']
                     if last_run_utc.tzinfo is None:
                         last_run_utc = last_run_utc.replace(tzinfo=pytz.UTC)
                     last_run_bkk = last_run_utc.astimezone(bkk_tz)

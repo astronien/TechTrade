@@ -161,35 +161,26 @@ class GoogleDriveUploader:
             print(f"❌ Error creating folder '{folder_name}': {e}")
             return None
     
-    def ensure_folder_path(self, root_folder_id, zone_name, year_month):
-        """สร้าง folder path: root > zone_name > YYYY-MM
+    def ensure_folder_path(self, root_folder_id, zone_name, year_month=None):
+        """สร้าง folder path: root > zone_name (ไม่มี folder รายเดือนตามคำขอ)
         Args:
             root_folder_id: Root folder ID ใน Google Drive
             zone_name: ชื่อ Zone
-            year_month: เดือน format "YYYY-MM"
+            year_month: (ไม่ใช้แล้ว แต่เก็บไว้เพื่อ compatibility)
         Returns:
-            str: month folder ID
+            str: zone folder ID
         """
         try:
             # สร้าง Zone folder
-            print(f"📁 Creating zone folder '{zone_name}' in root {root_folder_id}")
+            print(f"📁 Ensuring zone folder '{zone_name}' in root {root_folder_id}")
             zone_folder_id = self.create_folder(zone_name, root_folder_id)
             if not zone_folder_id:
-                print(f"❌ Failed to create zone folder '{zone_name}'")
+                print(f"❌ Failed to find or create zone folder '{zone_name}'")
                 return None
             
-            # สร้าง Month folder
-            print(f"📁 Creating month folder '{year_month}' in zone {zone_folder_id}")
-            month_folder_id = self.create_folder(year_month, zone_folder_id)
-            if not month_folder_id:
-                print(f"❌ Failed to create month folder '{year_month}'")
-                return None
-            
-            return month_folder_id
+            return zone_folder_id
         except Exception as e:
             print(f"❌ Error in ensure_folder_path: {e}")
-            import traceback
-            traceback.print_exc()
             return None
     
     def upload_file(self, filepath, folder_id, filename=None):
@@ -310,38 +301,19 @@ class GoogleDriveUploader:
             return []
     
     def list_all_zone_files(self, root_folder_id, zone_name):
-        """นับไฟล์ทั้งหมดใน Zone (ทุก month folder)
+        """ลิสต์ไฟล์ทั้งหมดใน Zone (ไม่มีโฟลเดอร์ย่อย)
         Returns:
-            list: [{'id', 'name', 'createdTime', 'month_folder'}, ...] เรียงตาม createdTime
+            list: [{'id', 'name', 'createdTime'}, ...] เรียงตาม createdTime
         """
         self._ensure_service()
-        all_files = []
-        
         try:
             # หา Zone folder
             zone_folder_id = self.find_folder(zone_name, root_folder_id)
             if not zone_folder_id:
                 return []
             
-            # หา month folders ทั้งหมดใน zone
-            results = self.service.files().list(
-                q=f"'{zone_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-                spaces='drive',
-                fields='files(id, name)',
-                orderBy='name',
-                pageSize=100,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True
-            ).execute()
-            
-            month_folders = results.get('files', [])
-            
-            for mf in month_folders:
-                files = self.list_files(mf['id'], order_by='createdTime')
-                for f in files:
-                    f['month_folder_id'] = mf['id']
-                    f['month_folder_name'] = mf['name']
-                all_files.extend(files)
+            # ลิสต์ไฟล์ใน zone
+            all_files = self.list_files(zone_folder_id, order_by='createdTime')
             
             # เรียงตาม createdTime (oldest first)
             all_files.sort(key=lambda x: x.get('createdTime', ''))
@@ -394,10 +366,7 @@ class GoogleDriveUploader:
             success = self.delete_file(file_to_delete['id'])
             if success:
                 deleted_count += 1
-                print(f"   🗑️ Deleted: {file_to_delete['name']} (from {file_to_delete.get('month_folder_name', '?')})")
-        
-        # ลบ month folder ที่ว่างเปล่า
-        self._cleanup_empty_month_folders(root_folder_id, zone_name)
+                print(f"   🗑️ Deleted old file: {file_to_delete['name']}")
         
         print(f"✅ FIFO cleanup complete: deleted {deleted_count} files from zone '{zone_name}'")
         return deleted_count

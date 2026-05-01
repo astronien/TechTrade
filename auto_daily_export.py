@@ -422,15 +422,15 @@ def run_daily_export(force=False):
             # สร้าง Excel
             filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
             
-            # สร้าง folder path: root > zone > YYYY-MM
-            month_folder_id = uploader.ensure_folder_path(root_folder_id, zone_name, year_month)
+            # หารหัส Folder ของ Zone (บันทึกตรงใน Zone folder เลย)
+            zone_folder_id = uploader.ensure_folder_path(root_folder_id, zone_name)
             
-            if not month_folder_id:
-                raise Exception(f"Failed to create folder path for zone '{zone_name}'")
+            if not zone_folder_id:
+                raise Exception(f"Failed to find or create folder for zone '{zone_name}'")
             
             # Upload
             filename = f"{target_date.strftime('%Y-%m-%d')}_{zone_name}.xlsx"
-            upload_result = uploader.upload_file(filepath, month_folder_id, filename)
+            upload_result = uploader.upload_file(filepath, zone_folder_id, filename)
             
             if not upload_result:
                 raise Exception("Upload failed")
