@@ -1262,22 +1262,22 @@ def fetch_all_for_branch(filters):
     
     # ปรับ timeout ตามสภาพแวดล้อม
     is_vercel = os.environ.get('VERCEL', False)
-    max_time = 160 if is_vercel else 120
-    max_items = 10000 if is_vercel else 50000
+    max_time = 300 if is_vercel else 900  # เพิ่มเวลาเป็น 15 นาทีถ้าไม่ใช่ Vercel
+    max_items = 10000 if is_vercel else 100000
     
-    length = 100
+    length = 500 # เพิ่มจาก 100 เป็น 500 เพื่อให้ดึงเร็วขึ้น (ลดจำนวนครั้งที่เรียก API)
     start = 0
     all_items = []
     batch_count = 0
     start_time = time.time()
     
-    print(f"📊 Fetching for branch {filters.get('branch_id')}...")
+    print(f"📊 Fetching for branch {filters.get('branch_id')} (Batch size: {length})...")
     
     while True:
         # ตรวจสอบเวลา
         elapsed = time.time() - start_time
         if elapsed > max_time:
-            print(f"⚠️ Timeout protection: stopped at {len(all_items)} items after {elapsed:.1f}s")
+            print(f"⚠️ Timeout protection: stopped at {len(all_items)} items after {elapsed:.1f}s (Max: {max_time}s)")
             break
             
         batch_count += 1
