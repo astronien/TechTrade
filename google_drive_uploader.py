@@ -124,6 +124,70 @@ class GoogleDriveUploader:
             print(f"❌ Error finding folder '{folder_name}': {e}")
             return None
     
+    def find_file_by_name(self, name, parent_id=None):
+        """ค้นหาไฟล์ตามชื่อ
+        Args:
+            name: ชื่อไฟล์
+            parent_id: ID ของ parent folder (optional)
+        Returns:
+            dict: file object หรือ None
+        """
+        self._ensure_service()
+        try:
+            q = f"name = '{name}' and trashed = false"
+            if parent_id:
+                q += f" and '{parent_id}' in parents"
+            
+            results = self.service.files().list(
+                q=q,
+                spaces='drive',
+                fields='files(id, name)',
+                pageSize=1,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+            
+            files = results.get('files', [])
+            return files[0] if files else None
+        except Exception as e:
+            print(f"❌ Error finding file '{name}': {e}")
+            return None
+
+    def find_monthly_file(self, root_folder_id, zone_name, year_month):
+        """ค้นหาไฟล์สะสมของเดือนนี้ (ZoneName_YYYY-MM_*.xlsx)
+        Args:
+            root_folder_id: Root folder ID
+            zone_name: ชื่อโซน
+            year_month: รูปแบบ YYYY-MM
+        Returns:
+            dict: file object หรือ None
+        """
+        self._ensure_service()
+        try:
+            # หา Zone folder
+            zone_folder_id = self.find_folder(zone_name, root_folder_id)
+            if not zone_folder_id:
+                return None
+            
+            # ค้นหาไฟล์ที่ขึ้นต้นด้วย ZoneName_YYYY-MM
+            pattern = f"{zone_name}_{year_month}"
+            q = f"'{zone_folder_id}' in parents and name contains '{pattern}' and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+            
+            results = self.service.files().list(
+                q=q,
+                spaces='drive',
+                fields='files(id, name)',
+                pageSize=1,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+            
+            files = results.get('files', [])
+            return files[0] if files else None
+        except Exception as e:
+            print(f"❌ Error finding monthly file for '{zone_name}' ({year_month}): {e}")
+            return None
+
     def create_folder(self, folder_name, parent_id=None):
         """สร้าง folder ใน Google Drive (ถ้ายังไม่มี)
         Args:

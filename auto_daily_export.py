@@ -64,25 +64,17 @@ def save_auto_export_log(log_data):
 
 
 def fetch_zone_daily_data(zone, target_date):
-    """ดึงข้อมูล trade ของ zone ทั้งหมดในวันที่กำหนด
-    Args:
-        zone: dict {'zone_id', 'zone_name', 'branch_ids'}
-        target_date: datetime date object
-    Returns:
-        list: trade data items
-    """
-    from app import fetch_all_for_branch, get_eve_session
+    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุ"""
+    from app import fetch_all_for_branch
     
     date_str = target_date.strftime("%d/%m/%Y")
     branch_ids = zone.get('branch_ids', [])
     all_items = []
     
     print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str}")
-    print(f"   Branches: {branch_ids}")
     
     for i, branch_id in enumerate(branch_ids):
         try:
-            print(f"   [{i+1}/{len(branch_ids)}] Branch {branch_id}...")
             filters = {
                 'date_start': date_str,
                 'date_end': date_str,
@@ -91,18 +83,125 @@ def fetch_zone_daily_data(zone, target_date):
                 'branch_id': branch_id
             }
             items = fetch_all_for_branch(filters)
-            
-            # เพิ่ม branch_id เข้าไปในทุก item
             for item in items:
                 item['_branch_id'] = branch_id
-            
             all_items.extend(items)
-            print(f"   ✅ Branch {branch_id}: {len(items)} records")
         except Exception as e:
             print(f"   ❌ Branch {branch_id} error: {e}")
     
-    print(f"✅ Total records for Zone '{zone['zone_name']}': {len(all_items)}")
     return all_items
+
+
+def append_data_to_excel(filepath, trade_data, branches_info=None):
+    """เพิ่มข้อมูลลงในไฟล์ Excel เดิมที่มีอยู่แล้ว
+    Args:
+        filepath: path ของไฟล์ Excel เดิม
+        trade_data: ข้อมูลใหม่ที่จะเพิ่ม
+        branches_info: ข้อมูลสาขา
+    Returns:
+        bool: สำเร็จหรือไม่
+    """
+    if not trade_data:
+        return True
+        
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        
+        wb = load_workbook(filepath)
+        ws = wb.active
+        
+        # หาบรรทัดสุดท้าย
+        last_row = ws.max_row
+        
+        # หา headers เพื่อดูว่า column ไหนคืออะไร
+        headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        
+        # เตรียม mapping header -> column index
+        header_to_idx = {h: i+1 for i, h in enumerate(headers)}
+        
+        # === Column Definitions (เพื่อ mapping ข้อมูลใหม่) ===
+        standard_columns = [
+            ('branch_id', 'รหัสสาขา'), ('branch_name', 'ชื่อสาขา'), ('document_no', 'เลขที่คำสั่งเทรด'),
+            ('IS_SIGNED', 'ลายเซ็นลูกค้า'), ('SIGN_DATE', 'วันที่ลูกค้าคืนเครื่อง'), ('document_date', 'วันที่คำสั่งเทรด'),
+            ('series', 'สินค้า'), ('category_name', 'ประเภทสินค้า'), ('brand_name', 'แบรนด์'),
+            ('part_number', 'อีมี่/ซีเรียล'), ('amount', 'ราคายืนยัน'), ('COUPON_TRADE_IN_CODE', 'คูปองส่วนลดค่าเครื่อง'),
+            ('invoice_no', 'เลขที่บิลขาย'), ('CAMPAIGN_ON_TOP_NAME', 'โปรโมชั่นส่วนลดแบรนด์'),
+            ('COUPON_ON_TOP_BRAND_CODE', 'คูปองส่วนลดแบรนด์'), ('COUPON_ON_TOP_BRAND_PRICE', 'มูลค่าส่วนลดแบรนด์'),
+            ('COUPON_ON_TOP_COMPANY_CODE', 'คูปองส่วนลดบริษัท'), ('COUPON_ON_TOP_COMPANY_PRICE', 'มูลค่าส่วนลดบริษัท'),
+            ('net_price', 'ราคาสุทธิ'), ('customer_name', 'ชื่อผู้ขาย'), ('customer_phone_number', 'เบอร์โทรศัพท์ผู้ขาย'),
+            ('customer_email', 'อีเมล์ผู้ขาย'), ('buyer_name', 'ผู้รับซื้อ'), ('SALE_CODE', 'รหัสพนักงานขาย'),
+            ('SALE_NAME', 'ชื่อพนักงานขาย'), ('DOCUMENT_REF_1', 'เลขที่เอกสารอ้างอิง'), ('BIDDING_STATUS_NAME', 'สถานะ'),
+            ('CHANGE_REQUEST_COUNT', 'จำนวนที่ถูกแก้ไข'), ('trade_in_id', 'Trade In ID')
+        ]
+        label_to_key = {label: key for key, label in standard_columns}
+        
+        # ป้องกันข้อมูลซ้ำ (เช็คจาก trade_in_id ในไฟล์เดิม)
+        existing_ids = set()
+        if 'Trade In ID' in header_to_idx:
+            tid_col = header_to_idx['Trade In ID']
+            for r in range(2, last_row + 1):
+                val = ws.cell(row=r, column=tid_col).value
+                if val: existing_ids.add(str(val))
+        
+        # เพิ่มข้อมูล
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+        
+        added_count = 0
+        for item in trade_data:
+            tid = str(item.get('trade_in_id', ''))
+            if tid in existing_ids:
+                continue
+                
+            # แปลงข้อมูล (เหมือนใน generate_daily_excel)
+            bid_internal = str(item.get('_branch_id', item.get('branch_id', '')))
+            info = branches_info.get(bid_internal, {'name': bid_internal, 'code': bid_internal})
+            item['branch_id'] = info['code']
+            item['branch_name'] = info['name']
+            
+            try:
+                amt = float(item.get('amount', 0) or 0)
+                tub = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
+                tuc = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
+                item['net_price'] = amt + tub + tuc
+            except:
+                item['net_price'] = float(item.get('amount', 0) or 0)
+
+            last_row += 1
+            added_count += 1
+            
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=last_row, column=col_idx)
+                cell.border = thin_border
+                
+                if header == 'ลำดับ':
+                    cell.value = last_row - 1
+                elif header in label_to_key:
+                    key = label_to_key[header]
+                    value = item.get(key, '')
+                    
+                    # Date formatting
+                    if key in ['document_date', 'SIGN_DATE'] and isinstance(value, str) and value.startswith('/Date('):
+                        import re
+                        match = re.search(r'\((\d+)\)', value)
+                        if match:
+                            ts = int(match.group(1)) / 1000
+                            value = datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
+                    
+                    cell.value = value
+                else:
+                    # คอลัมน์อื่นๆ ที่ไม่ได้อยู่ใน Standard
+                    cell.value = item.get(header, '')
+        
+        wb.save(filepath)
+        print(f"   📝 Appended {added_count} new records to existing file")
+        return True
+    except Exception as e:
+        print(f"   ❌ Error appending to Excel: {e}")
+        return False
 
 
 def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None):
@@ -345,7 +444,6 @@ def run_daily_export(force=False):
     target_date_dt = datetime.combine(target_date, datetime.min.time())
     
     date_str_display = target_date.strftime("%d/%m/%Y")
-    year_month = target_date.strftime("%Y-%m")
     
     print(f"📅 Export date: {date_str_display}")
     
@@ -386,11 +484,9 @@ def run_daily_export(force=False):
         
         if ' : ' in bname_full:
             parts = bname_full.split(' : ')
-            # Example: "00115 : ID115 : Studio 7-Future Park-Rangsit"
-            # Extract code from first part, name from last part
             raw_code = parts[0].strip()
             if raw_code.isdigit():
-                b_code = str(int(raw_code)) # Remove leading zeros if it's all digits
+                b_code = str(int(raw_code))
             else:
                 b_code = raw_code
                 
@@ -407,35 +503,69 @@ def run_daily_export(force=False):
     total_files = 0
     total_errors = 0
     
+    # Loop แต่ละ Zone
     for zone_idx, zone in enumerate(zones_to_export):
-        zone_start = time.time()
         zone_name = zone['zone_name']
-        zone_id = zone['zone_id']
+        zone_id = zone['id']
+        zone_start = time.time()
         
         print(f"\n{'─' * 40}")
         print(f"📦 [{zone_idx+1}/{len(zones_to_export)}] Processing Zone: {zone_name}")
         
         try:
-            # ดึงข้อมูล
+            # 1. ดึงข้อมูลวันนี้
             trade_data = fetch_zone_daily_data(zone, target_date_dt)
             
-            # สร้าง Excel
-            filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
+            # 2. ตรวจสอบไฟล์สะสมของเดือนนี้ใน Drive
+            year_month = target_date.strftime('%Y-%m')
+            existing_file = uploader.find_monthly_file(root_folder_id, zone_name, year_month)
             
-            # หารหัส Folder ของ Zone (บันทึกตรงใน Zone folder เลย)
+            # เตรียมไฟล์ปลายทาง (ใน /tmp สำหรับ Vercel)
+            temp_dir = tempfile.gettempdir()
+            month_start_str = target_date.replace(day=1).strftime('%Y-%m-%d')
+            today_str = target_date.strftime('%Y-%m-%d')
+            new_filename = f"{zone_name}_{month_start_str}_to_{today_str}.xlsx"
+            filepath = os.path.join(temp_dir, new_filename)
+            
+            old_file_id = None
+            if existing_file:
+                print(f"   📂 Found existing monthly file: {existing_file['name']}")
+                old_file_id = existing_file['id']
+                # โหลดมาเขียนต่อ
+                download_path = os.path.join(temp_dir, f"old_{existing_file['name']}")
+                if uploader.download_file(old_file_id, download_path):
+                    # ย้ายมาเป็นไฟล์ที่จะใช้ทำงาน
+                    import shutil
+                    shutil.copy2(download_path, filepath)
+                    # เขียนต่อ
+                    append_data_to_excel(filepath, trade_data, branches_info)
+                    if os.path.exists(download_path): os.remove(download_path)
+                else:
+                    # ถ้าโหลดไม่ได้ ให้สร้างใหม่แทน
+                    filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
+            else:
+                # ถ้าไม่เจอไฟล์สะสม (เช่น วันที่ 1) สร้างไฟล์ใหม่
+                filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
+                # เปลี่ยนชื่อให้เป็นรูปแบบสะสม
+                os.rename(filepath, os.path.join(temp_dir, new_filename))
+                filepath = os.path.join(temp_dir, new_filename)
+
+            # 3. หารหัส Folder ของ Zone
             zone_folder_id = uploader.ensure_folder_path(root_folder_id, zone_name)
-            
             if not zone_folder_id:
                 raise Exception(f"Failed to find or create folder for zone '{zone_name}'")
             
-            # Upload
-            filename = f"{target_date.strftime('%Y-%m-%d')}_{zone_name}.xlsx"
-            upload_result = uploader.upload_file(filepath, zone_folder_id, filename)
-            
+            # 4. Upload ตัวใหม่
+            upload_result = uploader.upload_file(filepath, zone_folder_id, new_filename)
             if not upload_result:
                 raise Exception("Upload failed")
             
-            # FIFO cleanup
+            # 5. ลบไฟล์เก่าใน Drive (เพื่อให้เหลือแค่ตัวล่าสุดตัวเดียว)
+            if old_file_id and upload_result:
+                uploader.delete_file(old_file_id)
+                print(f"   🗑️ Removed previous monthly file: {existing_file['name']}")
+            
+            # 6. FIFO cleanup (เผื่อไว้ถ้ามีไฟล์เก่าของเดือนอื่นๆ เยอะเกิน)
             deleted_count = uploader.fifo_cleanup(root_folder_id, zone_name, max_files)
             
             zone_duration = time.time() - zone_start
@@ -446,7 +576,7 @@ def run_daily_export(force=False):
                 'zone_name': zone_name,
                 'date_exported': date_str_display,
                 'total_records': len(trade_data),
-                'file_name': filename,
+                'file_name': new_filename,
                 'gdrive_file_id': upload_result.get('id', ''),
                 'status': 'success',
                 'duration_seconds': zone_duration
