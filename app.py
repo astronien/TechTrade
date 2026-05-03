@@ -810,10 +810,25 @@ def fetch_data_from_api(start=0, length=50, **filters):
             else:
                 print(f"📦 [Check Turso] Searching for historical data in database...")
                 turso = TursoHandler()
-                if turso.client:
+                # 💡 อนุญาตให้ใช้ Turso ได้แม้จะไม่มี client (ใช้ HTTP Fallback แทน)
+                if turso.url and turso.token:
+                    # 🔍 แปลง branch_id (Eve ID) เป็น real_branch_id (เช่น 645) สำหรับ Turso
+                    turso_branch_id = branch_id
+                    try:
+                        branch_info = find_branch_by_sequential_id(branch_id)
+                        if branch_info and 'branch_name' in branch_info:
+                            import re
+                            match = re.search(r'ID(\d+)', branch_info['branch_name'])
+                            if match:
+                                turso_branch_id = match.group(1)
+                                if str(turso_branch_id) != str(branch_id):
+                                    print(f"🔄 [Turso Map] Mapping Eve ID {branch_id} -> Real ID {turso_branch_id}")
+                    except Exception as map_err:
+                        print(f"⚠️ [Turso Map Error] {map_err}")
+
                     sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
-                    if turso.is_synced(branch_id, sync_key):
-                        cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+                    if turso.is_synced(turso_branch_id, sync_key):
+                        cached_data = turso.get_trades(date_start, date_end, branch_id=turso_branch_id)
                         turso.close()
                         
                         if cached_data:

@@ -217,7 +217,7 @@ class TursoHandler:
                     except:
                         b_id_val = str(branch_id)
                     
-                    check_sql = "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND exported_at BETWEEN ? AND ?"
+                    check_sql = "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND document_date BETWEEN ? AND ?"
                     count_res = self._execute_sql(check_sql, [b_id_val, iso_start, iso_end])
                     if count_res:
                         try:
@@ -355,8 +355,8 @@ class TursoHandler:
                      COUPON_ON_TOP_COMPANY_CODE, COUPON_ON_TOP_COMPANY_PRICE,
                      SALE_NAME, SALE_CODE, employee_name, customer_name, customer_phone_number, customer_email,
                      customer_tax_no, buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT,
-                     status, grade, cosmetic, ontop_amount, campaign_name, zone_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, grade, cosmetic, ontop_amount, campaign_name, zone_name, exported_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(trade_in_id), branch_id, real_branch_id, branch_name, doc_no, doc_date,
@@ -365,7 +365,9 @@ class TursoHandler:
                         camp_name, b_cp_code, b_cp_price, c_cp_code, c_cp_price,
                         sale_name, sale_code, emp_name, cust_name, cust_phone, cust_email,
                         cust_tax, buyer, bid_status, ref1, chg_count,
-                        status, grade, cosmetic, ot_amount, camp_name, zone_name
+                        status, grade, cosmetic, ot_amount, camp_name, zone_name,
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ]
                 ))
             
@@ -409,7 +411,7 @@ class TursoHandler:
             q = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
             p = [s, e]
             if branch_id and str(branch_id) != '0':
-                q += " AND branch_id = ?"
+                q += " AND real_branch_id = ?"
                 p.append(str(branch_id))
             q += " ORDER BY document_date DESC, trade_in_id DESC"
             res = self._execute_sql(q, p)
