@@ -146,7 +146,6 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     zone = find_zone_func(zone_name)
     
     if not zone:
-        zones = []  # ต้องดึงจาก load_zones_func
         return f"❌ ไม่พบ Zone: {zone_name}"
     
     today = datetime.now().strftime('%d/%m/%Y')
@@ -163,6 +162,7 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     
     total_all = 0
     confirmed_all = 0
+    last_source = "unknown"
     
     for branch_id in branch_ids:
         filters = {
@@ -175,6 +175,7 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
         }
         
         data = fetch_data_func(start=0, length=1000, **filters)
+        last_source = data.get('source', 'unknown')
         
         branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
         if ' : ' in branch_name:
@@ -216,6 +217,10 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     else:
         message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
         message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
+    
+    # เพิ่มแหล่งที่มา
+    source_display = "📦 Turso" if last_source == 'turso' else "🌐 Real-time"
+    message += f"\n\n(Source: {source_display})"
     
     return message
 
@@ -323,6 +328,11 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
         message += f"• ลูกค้าตกลง: {total_confirmed} รายการ ({confirm_percent:.0f}%)\n"
         message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)"
     
+    # เพิ่มแหล่งที่มา
+    source = data.get('source', 'unknown')
+    source_display = "📦 Turso" if source == 'turso' else "🌐 Real-time"
+    message += f"\n\n(Source: {source_display})"
+    
     return message
 
 
@@ -352,6 +362,7 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
     
     total_all = 0
     confirmed_all = 0
+    last_source = "unknown"
     
     for branch_id in branch_ids:
         filters = {
@@ -364,6 +375,7 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
         }
         
         data = fetch_data_func(start=0, length=5000, **filters)
+        last_source = data.get('source', 'unknown')
         
         branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
         if ' : ' in branch_name:
@@ -405,6 +417,10 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
     else:
         message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
         message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
+    
+    # เพิ่มแหล่งที่มา
+    source_display = "📦 Turso" if last_source == 'turso' else "🌐 Real-time"
+    message += f"\n\n(Source: {source_display})"
     
     return message
 
@@ -515,6 +531,11 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
         confirm_percent = (total_confirmed / total_count) * 100
         message += f"• ลูกค้าตกลง: {total_confirmed} รายการ ({confirm_percent:.0f}%)\n"
         message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)"
+    
+    # เพิ่มแหล่งที่มา
+    source = data.get('source', 'unknown')
+    source_display = "📦 Turso" if source == 'turso' else "🌐 Real-time"
+    message += f"\n\n(Source: {source_display})"
     
     return message
 
