@@ -1,9 +1,32 @@
-import libsql_client
 import os
 import math
 import requests
 import re
 from datetime import datetime
+
+# Safe import for libsql_client to prevent crashes on incompatible environments (like Vercel)
+try:
+    import libsql_client
+    HAS_LIBSQL = True
+except ImportError:
+    HAS_LIBSQL = False
+    print("⚠️ [Turso] libsql_client not found or failed to load. Using HTTP fallback.")
+except Exception as e:
+    HAS_LIBSQL = False
+    print(f"⚠️ [Turso] libsql_client error: {e}. Using HTTP fallback.")
+
+# Mock Statement class if libsql_client is missing
+if not HAS_LIBSQL:
+    class MockStatement:
+        def __init__(self, sql, args=None):
+            self.sql = sql
+            self.args = args or []
+    
+    # Create a dummy libsql_client namespace
+    class DummyLibsql:
+        Statement = MockStatement
+    
+    libsql_client = DummyLibsql()
 
 class TursoHandler:
     def __init__(self, url=None, token=None):
@@ -11,12 +34,13 @@ class TursoHandler:
         self.token = token or os.getenv('TURSO_AUTH_TOKEN')
         self.client = None
         
-        if self.url and self.token:
+        if HAS_LIBSQL and self.url and self.token:
             try:
-                # ลองเชื่อมต่อแบบปกติ
-                self.client = libsql_client.create_client_sync(self.url, auth_token=self.token)
+                # Use the standard create_client which handles sync/async context
+                self.client = libsql_client.create_client(url=self.url, auth_token=self.token)
             except Exception as e:
                 print(f"⚠️ [Turso] Client init warning: {e}")
+                self.client = None
 
     def init_db(self, reset=False):
         """สร้างตาราง trades พร้อมคอลัมน์ที่ครบถ้วน"""
@@ -275,16 +299,16 @@ class TursoHandler:
                 ))
             
             if stmts:
-                # ลองแบบ Batch ก่อน ถ้าพังหรือ Error 505 ให้สลับไป HTTP ทันที
+                # ลองแบบ Batch ก่อน ถ้ามี client และไม่พัง
                 try:
-                    if self.client: 
+                    if self.client and HAS_LIBSQL: 
                         self.client.batch(stmts)
                         return len(stmts)
                     else:
                         return len(stmts) if self._execute_batch_http(stmts) else 0
                 except Exception as e:
-                    if "505" in str(e) or "Invalid response status" in str(e):
-                        print("🔄 [Turso] Batch 505 Error. Using HTTP Fallback...")
+                    if "505" in str(e) or "Invalid response status" in str(e) or "not defined" in str(e):
+                        print("🔄 [Turso] Batch Error or 505. Using HTTP Fallback...")
                         return len(stmts) if self._execute_batch_http(stmts) else 0
                     print(f"❌ [Turso] Insert batch error: {e}")
                     return 0
