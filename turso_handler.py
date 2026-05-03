@@ -141,6 +141,60 @@ class TursoHandler:
             print(f"❌ Turso batch insert error: {e}")
             return 0
 
+    def get_trades(self, date_start, date_end, branch_id=None):
+        """ดึงข้อมูลรายการเทรดจาก Turso ตามช่วงวันที่และสาขา"""
+        if not self.client:
+            return []
+            
+        try:
+            # แปลงวันที่จาก DD/MM/YYYY เป็น YYYY-MM-DD สำหรับ SQL
+            def to_sql_date(d_str):
+                try:
+                    d, m, y = d_str.split('/')
+                    return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                except:
+                    return d_str
+
+            s_date = to_sql_date(date_start)
+            e_date = to_sql_date(date_end)
+            
+            query = "SELECT * FROM trades WHERE trade_date BETWEEN ? AND ?"
+            params = [s_date, e_date]
+            
+            if branch_id and str(branch_id) != '0':
+                query += " AND branch_id = ?"
+                params.append(str(branch_id))
+            
+            query += " ORDER BY trade_date DESC, trade_id DESC"
+            
+            result = self.client.execute(query, params)
+            
+            # แปลงกลับเป็น format ที่หน้าเว็บ/Line Bot ต้องการ
+            trades = []
+            for row in result.rows:
+                # แมพชื่อคอลัมน์กลับ (Turso columns -> API fields)
+                # หมายเหตุ: ใน app.py ใช้คีย์ตัวพิมพ์ใหญ่ตาม API ของ Eve
+                trade = {
+                    'TRADE_ID': row[0],
+                    'TRADE_DATE': datetime.strptime(row[1], '%Y-%m-%d').strftime('%d/%m/%Y') if row[1] else '',
+                    'BRANCH_ID': row[2],
+                    'BRANCH_NAME': row[3],
+                    'SALE_CODE': row[4],
+                    'SALE_NAME': row[5],
+                    'CUSTOMER_NAME': row[6],
+                    'PRODUCT_NAME': row[7],
+                    'IMEI': row[8],
+                    'BIDDING_STATUS_NAME': row[9],
+                    'amount': row[10], # API ใช้ตัวพิมพ์เล็กสำหรับยอดเงิน
+                    'zone_name': row[11]
+                }
+                trades.append(trade)
+                
+            return trades
+        except Exception as e:
+            print(f"❌ Turso query error: {e}")
+            return []
+
     def close(self):
         if self.client:
             self.client.close()

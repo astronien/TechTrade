@@ -10,6 +10,7 @@ import hashlib
 import atexit
 import os as _os  # Moved to top for safety
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
+from turso_handler import TursoHandler
 
 # Debug Log to Database (Persistent)
 def log_debug(msg):
@@ -827,6 +828,29 @@ def fetch_data_from_api(start=0, length=50, **filters):
     print(f"   Session ID: {session_id[:10] if session_id else 'N/A'}...")
     print(f"🔍 DEBUG: Full payload branchID field: {payload.get('branchID')}")
     
+    # 🛡️ Smart Cache: ลองดึงจาก Turso ก่อนถ้าเป็นข้อมูลย้อนหลัง
+    try:
+        date_start = filters.get('date_start')
+        date_end = filters.get('date_end')
+        today_str = datetime.now().strftime('%d/%m/%Y')
+        
+        # ถ้าไม่ใช่การดึงข้อมูลของ "วันนี้" (เช่น เป็นการดึงย้อนหลัง) ให้ลองดูใน Turso
+        if date_start and date_end and date_end != today_str:
+            turso = TursoHandler()
+            if turso.client:
+                cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+                turso.close()
+                
+                if cached_data:
+                    print(f"🚀 [Smart Cache] Found {len(cached_data)} records in Turso for {date_start}-{date_end}")
+                    return {
+                        'data': cached_data,
+                        'recordsTotal': len(cached_data),
+                        'recordsFiltered': len(cached_data)
+                    }
+    except Exception as cache_err:
+        print(f"⚠️ Smart Cache Error (Fallback to API): {cache_err}")
+
     # ใช้ Session เพื่อ reuse connection
     with requests.Session() as session:
         # Retry loop สำหรับ Auto-Healing
@@ -906,6 +930,20 @@ def fetch_data_from_api(start=0, length=50, **filters):
             print(f"   Records Filtered: {records_filtered}")
             print(f"   Data items: {data_items}")
             
+            # 🚀 Near Real-time Sync to Turso
+            try:
+                trade_data = data_obj.get('data', [])
+                if trade_data:
+                    # หา Zone Name จาก filters (ถ้ามี)
+                    zone_name = filters.get('zone_name', 'Auto-Sync')
+                    turso = TursoHandler()
+                    if turso.client:
+                        inserted = turso.insert_trades_batch(trade_data, zone_name)
+                        print(f"   🗄️ Near Real-time Sync: Saved {inserted} records to Turso")
+                        turso.close()
+            except Exception as sync_err:
+                print(f"   ⚠️ Turso Sync Error (Non-blocking): {sync_err}")
+
             # Debug: ถ้าไม่มีข้อมูล แสดงรายละเอียดเพิ่มเติม
             if records_filtered == 0:
                 print(f"⚠️ DEBUG: No records found!")
