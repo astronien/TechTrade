@@ -313,6 +313,9 @@ class TursoHandler:
                     print(f"❌ [Turso] Insert batch error: {e}")
                     return 0
             return 0
+        except Exception as e:
+            print(f"❌ [Turso] insert_trades_batch outer error: {e}")
+            return 0
 
     def _execute_batch_http(self, stmts):
         url = self.url
