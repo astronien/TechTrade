@@ -134,11 +134,15 @@ class TursoHandler:
             return 0
             
         try:
+            print(f"📦 [Turso] Attempting to insert {len(trades_data)} records...")
             stmts = []
             for item in trades_data:
-                # จัดการ trade_in_id (ต้องมีค่า)
-                trade_in_id = self._clean_val(item.get('trade_in_id'))
-                if not trade_in_id: continue
+                # จัดการ trade_in_id (ลองทั้งตัวเล็กและตัวใหญ่)
+                trade_in_id = item.get('trade_in_id') or item.get('TRADE_IN_ID')
+                trade_in_id = self._clean_val(trade_in_id)
+                
+                if not trade_in_id:
+                    continue
                 
                 # ทำความสะอาดข้อมูลอื่นๆ
                 # ข้อมูลหลัก
@@ -205,12 +209,18 @@ class TursoHandler:
                 ))
             
             if stmts:
+                print(f"⚡ [Turso] Executing batch of {len(stmts)} statements...")
                 self.client.batch(stmts)
+                print(f"✅ [Turso] Successfully inserted/updated {len(stmts)} records")
                 return len(stmts)
-            return 0
-            
+            else:
+                print("⚠️ [Turso] No valid records to insert (missing trade_in_id?)")
+                return 0
+                
         except Exception as e:
-            print(f"❌ Turso batch insert error: {e}")
+            print(f"❌ [Turso] Insert batch error: {e}")
+            if trades_data:
+                print(f"   Sample data keys: {list(trades_data[0].keys())}")
             return 0
 
     def get_trades(self, date_start, date_end, branch_id=None):
