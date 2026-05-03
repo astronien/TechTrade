@@ -2,6 +2,7 @@ import libsql_client
 import os
 import math
 import requests
+import re
 from datetime import datetime
 
 class TursoHandler:
@@ -16,15 +17,17 @@ class TursoHandler:
                 self.client = libsql_client.create_client_sync(self.url, auth_token=self.token)
             except Exception as e:
                 print(f"⚠️ [Turso] Client init warning: {e}")
-                # จะใช้ HTTP Fallback ในฟังก์ชันต่างๆ แทน
 
-    def init_db(self):
-        """สร้างตาราง trades หากยังไม่มี"""
-        if not self.client:
-            print("❌ Turso client not initialized")
-            return False
+    def init_db(self, reset=False):
+        """สร้างตาราง trades พร้อมคอลัมน์ที่ครบถ้วน"""
+        # อนุญาตให้รันผ่าน HTTP Fallback ได้ถ้าไม่มี client
             
         try:
+            if reset:
+                print("🗑️ [Turso] Dropping old tables as requested...")
+                self._execute_sql("DROP TABLE IF EXISTS trades")
+                self._execute_sql("DROP TABLE IF EXISTS sync_history")
+
             self._execute_sql("""
                 CREATE TABLE IF NOT EXISTS trades (
                     trade_in_id TEXT PRIMARY KEY,
@@ -49,13 +52,20 @@ class TursoHandler:
                     COUPON_ON_TOP_COMPANY_PRICE REAL,
                     SALE_NAME TEXT,
                     SALE_CODE TEXT,
+                    employee_name TEXT,
                     customer_name TEXT,
                     customer_phone_number TEXT,
                     customer_email TEXT,
+                    customer_tax_no TEXT,
                     buyer_name TEXT,
                     BIDDING_STATUS_NAME TEXT,
                     DOCUMENT_REF_1 TEXT,
                     CHANGE_REQUEST_COUNT INTEGER,
+                    status INTEGER,
+                    grade TEXT,
+                    cosmetic TEXT,
+                    ontop_amount REAL,
+                    campaign_name TEXT,
                     zone_name TEXT,
                     exported_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -64,8 +74,7 @@ class TursoHandler:
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_zone_date ON trades(zone_name, document_date)")
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_branch ON trades(branch_id)")
             
-            print("✅ Turso table and indexes initialized")
-            # 3. ตารางประวัติการ Sync (เพื่อเช็คว่าสาขาไหนดึงมาแล้ว แม้จะมี 0 รายการ)
+            # ตารางประวัติการ Sync
             self._execute_sql("""
                 CREATE TABLE IF NOT EXISTS sync_history (
                     branch_id TEXT,
@@ -76,204 +85,153 @@ class TursoHandler:
                 )
             """)
             
-            print("✅ Database tables ready")
+            print("✅ Turso database initialized with full schema")
             return True
         except Exception as e:
             print(f"❌ Database init error: {e}")
             return False
 
     def _execute_sql(self, sql, params=None):
-        """ตัวกลางสำหรับรัน SQL พร้อมระบบ HTTP Fallback"""
         if not self.client:
             return self._execute_http(sql, params)
-            
         try:
             return self.client.execute(sql, params)
         except Exception as e:
             if "505" in str(e) or "Invalid response status" in str(e):
-                print("🔄 [Turso] 505 Error detected in execute. Switching to HTTP Fallback...")
+                print("🔄 [Turso] 505 Error detected. Using HTTP Fallback...")
                 return self._execute_http(sql, params)
             raise e
 
     def _execute_http(self, sql, params=None):
-        """ประมวลผล SQL เดี่ยวผ่าน HTTP API (v2 pipeline)"""
         url = self.url
         if not url: return None
-        if url and url.startswith("libsql://"):
+        if url.startswith("libsql://"):
             url = url.replace("libsql://", "https://")
             
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "requests": [
-                {"type": "execute", "stmt": {"sql": sql, "args": self._format_args(params)}}
-            ]
-        }
+        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        data = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": self._format_args(params)}}]}
         
         try:
             response = requests.post(f"{url}/v2/pipeline", headers=headers, json=data, timeout=15)
             if response.status_code == 200:
                 result_data = response.json()
-                # สร้าง Mock Result Object
                 class MockResult:
                     def __init__(self, res_obj):
                         self.columns = [c['name'] for c in res_obj['cols']]
-                        self.rows = []
-                        for r in res_obj['rows']:
-                            row_vals = []
-                            for val in r:
-                                if isinstance(val, dict) and "value" in val:
-                                    row_vals.append(val.get('value'))
-                                else:
-                                    row_vals.append(val)
-                            self.rows.append(row_vals)
-                
-                res_obj = result_data['results'][0]['response']['result']
-                return MockResult(res_obj)
-            else:
-                return None
+                        self.rows = [[(val.get('value') if isinstance(val, dict) else val) for val in r] for r in res_obj['rows']]
+                return MockResult(result_data['results'][0]['response']['result'])
+            return None
         except Exception as e:
             print(f"❌ [Turso Fallback] Error: {e}")
             return None
 
     def _format_args(self, params):
-        """แปลง Python params เป็น Turso HTTP API format"""
         if not params: return []
         formatted = []
         for p in params:
-            if p is None:
-                formatted.append({"type": "null"})
-            elif isinstance(p, bool):
-                formatted.append({"type": "integer", "value": "1" if p else "0"})
-            elif isinstance(p, int):
-                formatted.append({"type": "integer", "value": str(p)})
-            elif isinstance(p, float):
-                formatted.append({"type": "float", "value": p})
-            else:
-                formatted.append({"type": "text", "value": str(p)})
+            if p is None: formatted.append({"type": "null"})
+            elif isinstance(p, bool): formatted.append({"type": "integer", "value": "1" if p else "0"})
+            elif isinstance(p, int): formatted.append({"type": "integer", "value": str(p)})
+            elif isinstance(p, float): formatted.append({"type": "float", "value": p})
+            else: formatted.append({"type": "text", "value": str(p)})
         return formatted
 
     def is_synced(self, branch_id, sync_date):
-        """ตรวจสอบว่าสาขานี้ในวันที่นี้ถูก Sync แล้วหรือยัง"""
         try:
-            # แปลงวันที่เป็น format SQL (YYYY-MM-DD)
             if '-' not in sync_date and '/' in sync_date:
-                try:
-                    parts = sync_date.split('/')
-                    if len(parts) == 3:
-                        d, m, y = parts
-                        sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-                except:
-                    pass
-                    
-            res = self._execute_sql(
-                "SELECT branch_id FROM sync_history WHERE branch_id = ? AND sync_date = ?",
-                [str(branch_id), sync_date]
-            )
+                d, m, y = sync_date.split('/')
+                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            res = self._execute_sql("SELECT branch_id FROM sync_history WHERE branch_id = ? AND sync_date = ?", [str(branch_id), sync_date])
             return res and len(res.rows) > 0
-        except:
-            return False
+        except: return False
 
     def mark_synced(self, branch_id, sync_date, count):
-        """บันทึกว่าสาขานี้ในวันที่นี้ดึงข้อมูลมาแล้ว"""
         try:
-            # ถ้าเป็นช่วงวันที่ (มีขีดกลาง) ไม่ต้องพยายามแปลงเป็น SQL date แบบละเอียด
             if '-' not in sync_date and '/' in sync_date:
-                try:
-                    parts = sync_date.split('/')
-                    if len(parts) == 3:
-                        d, m, y = parts
-                        sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-                except:
-                    pass
-                
-            self._execute_sql(
-                "INSERT OR REPLACE INTO sync_history (branch_id, sync_date, record_count) VALUES (?, ?, ?)",
-                [str(branch_id), sync_date, count]
-            )
+                d, m, y = sync_date.split('/')
+                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            self._execute_sql("INSERT OR REPLACE INTO sync_history (branch_id, sync_date, record_count) VALUES (?, ?, ?)", [str(branch_id), sync_date, count])
             return True
-        except Exception as e:
-            print(f"⚠️ [Turso] mark_synced error: {e}")
-            return False
+        except: return False
 
     def _clean_val(self, val, default=None, is_num=False):
-        """จัดการค่า NaN หรือ Null ให้เป็นค่าที่ Database รับได้"""
-        if val is None:
-            return 0.0 if is_num else default
-            
-        # ถ้าเป็น float และเป็น NaN หรือ Infinity
+        if val is None: return 0.0 if is_num else default
         if isinstance(val, float):
-            if math.isnan(val) or math.isinf(val):
-                return 0.0 if is_num else default
+            if math.isnan(val) or math.isinf(val): return 0.0 if is_num else default
             return val
-            
-        # ถ้าเป็น string
         if isinstance(val, str):
-            if val.lower() in ['nan', 'none', 'null', '']:
-                return 0.0 if is_num else default
+            if val.lower() in ['nan', 'none', 'null', '']: return 0.0 if is_num else default
             return val
-            
         return val
 
+    def _parse_eve_date(self, date_val):
+        if not date_val: return ""
+        if isinstance(date_val, str) and "/Date(" in date_val:
+            try:
+                match = re.search(r"(\d+)", date_val)
+                if match:
+                    dt = datetime.fromtimestamp(int(match.group(1)) / 1000.0)
+                    return dt.strftime("%Y-%m-%d")
+            except: pass
+        if isinstance(date_val, str) and "/" in date_val:
+            try:
+                parts = date_val.split('/')
+                if len(parts) == 3: return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            except: pass
+        return str(date_val)
+
     def insert_trades_batch(self, trades_data, zone_name):
-        """บันทึกข้อมูลแบบ Batch"""
-        if not trades_data:
-            return 0
-            
+        if not trades_data: return 0
         try:
-            print(f"📦 [Turso] Attempting to insert {len(trades_data)} records...")
             stmts = []
             for item in trades_data:
-                # จัดการ trade_in_id (ลองทั้งตัวเล็กและตัวใหญ่)
-                trade_in_id = item.get('trade_in_id') or item.get('TRADE_IN_ID')
-                trade_in_id = self._clean_val(trade_in_id)
-                
-                if not trade_in_id:
-                    continue
-                
-                # ทำความสะอาดข้อมูลอื่นๆ
-                # ข้อมูลหลัก
-                branch_id = str(self._clean_val(item.get('branch_id'), ""))
-                branch_name = self._clean_val(item.get('branch_name'), "")
-                document_no = self._clean_val(item.get('document_no'), "")
-                document_date = self._clean_val(item.get('document_date'), "")
-                is_signed = self._clean_val(item.get('IS_SIGNED'), "")
-                sign_date = self._clean_val(item.get('SIGN_DATE'), "")
-                series = self._clean_val(item.get('series'), "")
-                brand_name = self._clean_val(item.get('brand_name'), "")
-                category_name = self._clean_val(item.get('category_name'), "")
-                part_number = self._clean_val(item.get('part_number'), "")
-                
-                amount = float(self._clean_val(item.get('amount', 0), 0, True))
-                
-                # คูปองและ Campaign
-                coupon_trade_in = self._clean_val(item.get('COUPON_TRADE_IN_CODE'), "")
-                invoice_no = self._clean_val(item.get('invoice_no'), "")
-                campaign_name = self._clean_val(item.get('CAMPAIGN_ON_TOP_NAME'), "")
-                brand_coupon_code = self._clean_val(item.get('COUPON_ON_TOP_BRAND_CODE'), "")
-                brand_coupon_price = float(self._clean_val(item.get('COUPON_ON_TOP_BRAND_PRICE', 0), 0, True))
-                company_coupon_code = self._clean_val(item.get('COUPON_ON_TOP_COMPANY_CODE'), "")
-                company_coupon_price = float(self._clean_val(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0), 0, True))
+                trade_in_id = self._clean_val(item.get('trade_in_id') or item.get('TRADE_IN_ID'))
+                if not trade_in_id: continue
 
-                # คำนวณ net_price
-                if 'net_price' in item:
-                    net_price = float(self._clean_val(item.get('net_price', 0), 0, True))
-                else:
-                    net_price = amount + brand_coupon_price + company_coupon_price
+                # Extraction with Case-insensitive keys
+                branch_id = str(self._clean_val(item.get('branch_id') or item.get('BRANCH_ID'), ""))
+                branch_name = self._clean_val(item.get('branch_name') or item.get('BRANCH_NAME'), "")
+                doc_no = self._clean_val(item.get('document_no') or item.get('DOCUMENT_NO'), "")
+                doc_date = self._parse_eve_date(item.get('document_date') or item.get('DOCUMENT_DATE'))
+                
+                is_signed = self._clean_val(item.get('IS_SIGNED') or item.get('is_signed'), "")
+                sign_date = self._parse_eve_date(item.get('SIGN_DATE') or item.get('sign_date'))
+                
+                series = self._clean_val(item.get('series') or item.get('SERIES'), "")
+                brand = self._clean_val(item.get('brand_name') or item.get('BRAND_NAME'), "")
+                cat = self._clean_val(item.get('category_name') or item.get('CATEGORY_NAME'), "")
+                part = self._clean_val(item.get('part_number') or item.get('PART_NUMBER'), "")
+                
+                amount = float(self._clean_val(item.get('amount') or item.get('AMOUNT') or 0, 0, True))
+                
+                # Campaign & Coupons
+                coupon_code = self._clean_val(item.get('COUPON_TRADE_IN_CODE') or item.get('coupon_trade_in_code'), "")
+                inv_no = self._clean_val(item.get('invoice_no') or item.get('INVOICE_NO'), "")
+                camp_name = self._clean_val(item.get('campaign_name') or item.get('CAMPAIGN_NAME') or item.get('CAMPAIGN_ON_TOP_NAME'), "")
+                b_cp_code = self._clean_val(item.get('COUPON_ON_TOP_BRAND_CODE') or item.get('coupon_on_top_brand_code'), "")
+                b_cp_price = float(self._clean_val(item.get('COUPON_ON_TOP_BRAND_PRICE') or 0, 0, True))
+                c_cp_code = self._clean_val(item.get('COUPON_ON_TOP_COMPANY_CODE') or item.get('coupon_on_top_company_code'), "")
+                c_cp_price = float(self._clean_val(item.get('COUPON_ON_TOP_COMPANY_PRICE') or 0, 0, True))
+                
+                net_price = float(item.get('net_price', amount + b_cp_price + c_cp_price))
 
-                # ข้อมูลพนักงานและลูกค้า
-                sale_name = self._clean_val(item.get('SALE_NAME'), "")
-                sale_code = self._clean_val(item.get('SALE_CODE'), "")
-                customer_name = self._clean_val(item.get('customer_name'), "")
-                customer_phone = self._clean_val(item.get('customer_phone_number'), "")
-                customer_email = self._clean_val(item.get('customer_email'), "")
-                buyer_name = self._clean_val(item.get('buyer_name'), "")
-                bidding_status = self._clean_val(item.get('BIDDING_STATUS_NAME'), "")
-                doc_ref_1 = self._clean_val(item.get('DOCUMENT_REF_1'), "")
-                change_count = int(self._clean_val(item.get('CHANGE_REQUEST_COUNT', 0), 0, True))
+                # Extra Info from JSON
+                sale_name = self._clean_val(item.get('SALE_NAME') or item.get('sale_name'), "")
+                sale_code = self._clean_val(item.get('SALE_CODE') or item.get('sale_code'), "")
+                emp_name = self._clean_val(item.get('employee_name') or item.get('EMPLOYEE_NAME'), "")
+                cust_name = self._clean_val(item.get('customer_name') or item.get('CUSTOMER_NAME'), "")
+                cust_phone = self._clean_val(item.get('customer_phone_number') or item.get('customer_phone'), "")
+                cust_email = self._clean_val(item.get('customer_email') or item.get('CUSTOMER_EMAIL'), "")
+                cust_tax = self._clean_val(item.get('customer_tax_no') or item.get('CUSTOMER_TAX_NO'), "")
+                buyer = self._clean_val(item.get('buyer_name') or item.get('BUYER_NAME'), "")
+                bid_status = self._clean_val(item.get('BIDDING_STATUS_NAME') or item.get('bidding_status_name'), "")
+                ref1 = self._clean_val(item.get('DOCUMENT_REF_1') or item.get('document_ref_1'), "")
+                chg_count = int(self._clean_val(item.get('CHANGE_REQUEST_COUNT') or item.get('change_request_count') or 0, 0, True))
+                
+                status = self._clean_val(item.get('status') or item.get('STATUS'), 0, True)
+                grade = self._clean_val(item.get('grade') or item.get('GRADE'), "")
+                cosmetic = self._clean_val(item.get('cosmetic') or item.get('COSMETIC'), "")
+                ot_amount = float(self._clean_val(item.get('ontop_amount') or item.get('ONTOP_AMOUNT') or 0, 0, True))
 
                 stmts.append(libsql_client.Statement(
                     """
@@ -283,128 +241,65 @@ class TursoHandler:
                      amount, net_price, COUPON_TRADE_IN_CODE, invoice_no, 
                      CAMPAIGN_ON_TOP_NAME, COUPON_ON_TOP_BRAND_CODE, COUPON_ON_TOP_BRAND_PRICE,
                      COUPON_ON_TOP_COMPANY_CODE, COUPON_ON_TOP_COMPANY_PRICE,
-                     SALE_NAME, SALE_CODE, customer_name, customer_phone_number, customer_email,
-                     buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT, zone_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     SALE_NAME, SALE_CODE, employee_name, customer_name, customer_phone_number, customer_email,
+                     customer_tax_no, buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT,
+                     status, grade, cosmetic, ontop_amount, campaign_name, zone_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        str(trade_in_id), branch_id, branch_name, document_no, document_date,
-                        is_signed, sign_date, series, brand_name, category_name, part_number,
-                        amount, net_price, coupon_trade_in, invoice_no,
-                        campaign_name, brand_coupon_code, brand_coupon_price,
-                        company_coupon_code, company_coupon_price,
-                        sale_name, sale_code, customer_name, customer_phone, customer_email,
-                        buyer_name, bidding_status, doc_ref_1, change_count, zone_name
+                        str(trade_in_id), branch_id, branch_name, doc_no, doc_date,
+                        is_signed, sign_date, series, brand, cat, part,
+                        amount, net_price, coupon_code, inv_no,
+                        camp_name, b_cp_code, b_cp_price, c_cp_code, c_cp_price,
+                        sale_name, sale_code, emp_name, cust_name, cust_phone, cust_email,
+                        cust_tax, buyer, bid_status, ref1, chg_count,
+                        status, grade, cosmetic, ot_amount, camp_name, zone_name
                     ]
                 ))
             
             if stmts:
-                print(f"⚡ [Turso] Executing batch of {len(stmts)} statements...")
-                try:
-                    if self.client:
-                        self.client.batch(stmts)
-                        print(f"✅ [Turso] Successfully inserted/updated {len(stmts)} records")
-                    else:
-                        print("🔄 [Turso] No client found. Using HTTP Fallback...")
-                        self._execute_batch_http(stmts)
-                except Exception as batch_err:
-                    # ถ้าเจอ 505 หรือ Error อื่นๆ ให้ใช้ HTTP Fallback
-                    print(f"⚠️ [Turso] Batch error: {batch_err}. Switching to HTTP Fallback...")
-                    self._execute_batch_http(stmts)
+                if self.client: self.client.batch(stmts)
+                else: self._execute_batch_http(stmts)
                 return len(stmts)
-            else:
-                print("⚠️ [Turso] No valid records to insert (missing trade_in_id?)")
-                return 0
-                
+            return 0
         except Exception as e:
             print(f"❌ [Turso] Insert batch error: {e}")
-            if trades_data:
-                print(f"   Sample data keys: {list(trades_data[0].keys())}")
             return 0
 
     def _execute_batch_http(self, stmts):
-        """ส่งข้อมูลแบบ Batch ผ่าน HTTP API (v2 pipeline)"""
         url = self.url
-        if url.startswith("libsql://"):
-            url = url.replace("libsql://", "https://")
-            
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
-        }
-        
-        # แปลง Statements เป็นรูปแบบที่ v2 pipeline รองรับ
-        requests_list = []
-        for stmt in stmts:
-            requests_list.append({
-                "type": "execute",
-                "stmt": {
-                    "sql": stmt.sql,
-                    "args": self._format_args(stmt.args)
-                }
-            })
-            
+        if url.startswith("libsql://"): url = url.replace("libsql://", "https://")
+        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        reqs = [{"type": "execute", "stmt": {"sql": s.sql, "args": self._format_args(s.args)}} for s in stmts]
         try:
-            response = requests.post(f"{url}/v2/pipeline", headers=headers, json={"requests": requests_list}, timeout=30)
-            if response.status_code == 200:
-                print(f"✅ [Turso Fallback] Successfully inserted {len(stmts)} records via HTTP")
-                return True
-            else:
-                print(f"❌ [Turso Fallback] HTTP Error: {response.status_code} - {response.text}")
-                return False
-        except Exception as e:
-            print(f"❌ [Turso Fallback] Error: {e}")
-            return False
+            requests.post(f"{url}/v2/pipeline", headers=headers, json={"requests": reqs}, timeout=30)
+            return True
+        except: return False
 
     def get_trades(self, date_start, date_end, branch_id=None):
-        """ดึงข้อมูลรายการเทรดจาก Turso ตามช่วงวันที่และสาขา"""
         try:
-            # แปลงวันที่จาก DD/MM/YYYY เป็น YYYY-MM-DD สำหรับ SQL
-            def to_sql_date(d_str):
-                try:
-                    d, m, y = d_str.split('/')
-                    return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-                except:
-                    return d_str
-
-            s_date = to_sql_date(date_start)
-            e_date = to_sql_date(date_end)
-            
-            query = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
-            params = [s_date, e_date]
-            
+            def to_sql(d):
+                try: 
+                    p = d.split('/')
+                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                except: return d
+            s, e = to_sql(date_start), to_sql(date_end)
+            q = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
+            p = [s, e]
             if branch_id and str(branch_id) != '0':
-                query += " AND branch_id = ?"
-                params.append(str(branch_id))
-            
-            query += " ORDER BY document_date DESC, trade_in_id DESC"
-            
-            result = self._execute_sql(query, params)
-            if not result:
-                return []
-            
-            # ดึงรายชื่อคอลัมน์เพื่อให้แมพเป็น Dict ได้อัตโนมัติ
-            columns = result.columns
+                q += " AND branch_id = ?"
+                p.append(str(branch_id))
+            q += " ORDER BY document_date DESC, trade_in_id DESC"
+            res = self._execute_sql(q, p)
+            if not res: return []
             trades = []
-            for row in result.rows:
-                # สร้าง Dict จาก row และชื่อคอลัมน์
-                trade = dict(zip(columns, row))
-                
-                # 💡 ปรับปรุงคีย์บางตัวให้ตรงกับที่ Frontend/Line Bot คาดหวัง (Compatibility Layer)
-                # เพื่อให้ไม่ต้องแก้โค้ดที่เรียกใช้เยอะ
-                trade['TRADE_ID'] = trade.get('trade_in_id')
-                trade['TRADE_DATE'] = trade.get('document_date')
-                trade['BRANCH_ID'] = trade.get('branch_id')
-                trade['BRANCH_NAME'] = trade.get('branch_name')
-                trade['PRODUCT_NAME'] = trade.get('series')
-                
-                trades.append(trade)
-                
+            for r in res.rows:
+                t = dict(zip(res.columns, r))
+                t.update({'TRADE_ID': t.get('trade_in_id'), 'TRADE_DATE': t.get('document_date'), 
+                          'BRANCH_ID': t.get('branch_id'), 'BRANCH_NAME': t.get('branch_name'), 'PRODUCT_NAME': t.get('series')})
+                trades.append(t)
             return trades
-        except Exception as e:
-            print(f"❌ Turso query error: {e}")
-            return []
+        except: return []
 
     def close(self):
-        if self.client:
-            self.client.close()
+        if self.client: self.client.close()
