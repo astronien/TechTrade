@@ -821,11 +821,12 @@ def fetch_data_from_api(start=0, length=50, **filters):
                             return {
                                 'data': cached_data,
                                 'recordsTotal': len(cached_data),
-                                'recordsFiltered': len(cached_data)
+                                'recordsFiltered': len(cached_data),
+                                'source': 'turso'
                             }
                         else:
                             print(f"📭 [Info] Turso has 'Synced' record but 0 trades found. Returning empty results.")
-                            return {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0}
+                            return {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'turso'}
                     else:
                         print(f"❓ [Cache Miss] No synced records found in Turso for this range. Proceeding to Eve API...")
                     turso.close()
@@ -837,6 +838,8 @@ def fetch_data_from_api(start=0, length=50, **filters):
 
     # 🌐 เรียก Eve API (กรณีไม่มีใน Cache หรือเป็นข้อมูลวันนี้)
     print(f"🌐 [API Call] Requesting fresh data from Eve Techswop API...")
+    
+    # ... (ส่วนเดิมของ headers และการเรียก API) ...
     
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -1012,7 +1015,8 @@ def fetch_data_from_api(start=0, length=50, **filters):
             return {
                 'data': data_obj.get('data', []),
                 'recordsTotal': records_total,
-                'recordsFiltered': records_filtered
+                'recordsFiltered': records_filtered,
+                'source': 'eve_api'
             }
         else:
             print(f"   Unexpected format: {result}")
@@ -1259,6 +1263,7 @@ def get_data_batch():
         all_data = []
         total_records = 0
         errors = []
+        sources_summary = {}
         
         # Vercel Hobby timeout = 60s, ให้ใช้สูงสุด 50s
         is_vercel = os.environ.get('VERCEL', False)
@@ -1283,10 +1288,11 @@ def get_data_batch():
                 branch_filters['branch_id'] = branch_id
                 
                 result = fetch_data_from_api(start=0, length=200, **branch_filters)
+                source = result.get('source', 'unknown')
                 
                 if 'error' in result:
-                    print(f"  ❌ Branch {branch_id}: {result['error']}")
-                    return {'branch_id': branch_id, 'error': result['error'], 'data': [], 'total': 0}
+                    print(f"  ❌ Branch {branch_id}: {result['error']} ({source})")
+                    return {'branch_id': branch_id, 'error': result['error'], 'data': [], 'total': 0, 'source': source}
                 
                 items = result.get('data', [])
                 record_total = result.get('recordsFiltered', len(items))
@@ -1308,7 +1314,7 @@ def get_data_batch():
                             break
                 
                 elapsed_branch = time.time() - branch_start
-                print(f"  ✅ Branch {branch_id}: {len(items)} items in {elapsed_branch:.1f}s")
+                print(f"  ✅ Branch {branch_id}: {len(items)} items in {elapsed_branch:.1f}s ({source})")
                 
                 b_name = branches_dict.get(str(branch_id), f"Branch {branch_id}")
                 for item in items:
@@ -1321,7 +1327,7 @@ def get_data_batch():
                     else:
                         item['branch_name'] = branches_dict.get(real_id, b_name)
                     
-                return {'branch_id': branch_id, 'data': items, 'total': record_total}
+                return {'branch_id': branch_id, 'data': items, 'total': record_total, 'source': source}
                 
             except Exception as e:
                 print(f"  ❌ Branch {branch_id} exception: {e}")
@@ -1339,8 +1345,12 @@ def get_data_batch():
                     break
                     
                 result = future.result()
+                bid = str(result.get('branch_id', ''))
+                if bid:
+                    sources_summary[bid] = result.get('source', 'unknown')
+                
                 if result.get('error'):
-                    errors.append({'branch_id': result['branch_id'], 'error': result['error']})
+                    errors.append({'branch_id': bid, 'error': result['error']})
                 all_data.extend(result.get('data', []))
                 total_records += result.get('total', 0)
         
@@ -1352,7 +1362,8 @@ def get_data_batch():
             'recordsTotal': total_records,
             'recordsFiltered': len(all_data),
             'branchCount': len(branch_ids),
-            'errors': errors if errors else None
+            'errors': errors if errors else None,
+            'sources': sources_summary
         })
         
     except Exception as e:

@@ -3267,6 +3267,11 @@
                     const response = await fetch(`/api/data?${params}`);
                     const data = await response.json();
 
+                    if (data.source) {
+                        const sourceIcon = data.source === 'turso' ? '🗄️ Turso Database' : '🌐 Eve API';
+                        console.log(`📡 [Data Source] Branch ${branchId} loaded from: ${sourceIcon}`);
+                    }
+
                     if (data.error) {
                         container.innerHTML = `
                         <div class="error">
@@ -3357,6 +3362,14 @@
                                 })
                             });
                             const result = await response.json();
+
+                            if (result.sources) {
+                                Object.keys(result.sources).forEach(bid => {
+                                    const src = result.sources[bid];
+                                    const sourceIcon = src === 'turso' ? '🗄️ Turso Database' : '🌐 Eve API';
+                                    console.log(`📡 [Data Source] Branch ${bid} loaded from: ${sourceIcon}`);
+                                });
+                            }
 
                             if (result.error) {
                                 console.error(`❌ Batch ${batchIdx + 1} error:`, result.error);
