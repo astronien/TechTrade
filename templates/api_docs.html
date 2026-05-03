@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation | TechTrade Pro Max</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔌</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg: #0f172a;
+            --sidebar-bg: #1e293b;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --code-bg: #000000;
+            --border: #334155;
+            --accent: #10b981;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 300px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            padding: 2rem 1.5rem;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 2.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--primary);
+        }
+
+        .menu-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+            margin-top: 2rem;
+            font-weight: 600;
+        }
+
+        .menu-item {
+            list-style: none;
+            margin-bottom: 0.5rem;
+        }
+
+        .menu-link {
+            text-decoration: none;
+            color: var(--text-dim);
+            font-size: 0.95rem;
+            display: block;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .menu-link:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .menu-link.active {
+            color: var(--text-main);
+            background: var(--primary);
+        }
+
+        /* Main Content Styling */
+        .main-content {
+            margin-left: 300px;
+            flex: 1;
+            padding: 4rem 6rem;
+            max-width: 1200px;
+        }
+
+        h1 { font-size: 2.5rem; margin-bottom: 1rem; font-weight: 800; }
+        h2 { font-size: 1.8rem; margin-top: 3rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        h3 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 1rem; color: var(--primary); }
+
+        p { margin-bottom: 1.2rem; color: var(--text-dim); font-size: 1.05rem; }
+
+        .endpoint-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .method-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            font-weight: 700;
+            font-size: 0.8rem;
+            margin-right: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .get { background: rgba(16, 185, 129, 0.1); color: var(--accent); border: 1px solid rgba(16, 185, 129, 0.2); }
+
+        .endpoint-url {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .code-block {
+            background: var(--code-bg);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            position: relative;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+        }
+
+        pre {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 0.9rem;
+            color: #e2e8f0;
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .param-table th, .param-table td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .param-table th { color: var(--text-main); font-weight: 600; font-size: 0.9rem; }
+        .param-table td { color: var(--text-dim); font-size: 0.9rem; }
+
+        .required { color: #f43f5e; font-weight: 700; margin-left: 4px; }
+
+        .back-btn {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            background: var(--primary);
+            color: white;
+            padding: 0.5rem 1.25rem;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            z-index: 100;
+        }
+
+        .back-btn:hover { background: var(--primary-hover); transform: translateY(-2px); }
+
+        /* Smooth scroll */
+        html { scroll-behavior: smooth; }
+
+        @media (max-width: 1024px) {
+            .sidebar { display: none; }
+            .main-content { margin-left: 0; padding: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <a href="/" class="back-btn">
+        <span>🏠</span> กลับหน้าหลัก
+    </a>
+
+    <div class="sidebar">
+        <div class="logo">🔌 TechTrade API</div>
+        
+        <div class="menu-label">เริ่มต้นใช้งาน</div>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="#intro" class="menu-link">บทนำ</a></li>
+            <li class="menu-item"><a href="#auth" class="menu-link">การยืนยันตัวตน</a></li>
+        </ul>
+
+        <div class="menu-label">Endpoints</div>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="#get-trades" class="menu-link">รายการ Trade (V2)</a></li>
+            <li class="menu-item"><a href="#get-stats" class="menu-link">สถิติรายโซน</a></li>
+        </ul>
+
+        <div class="menu-label">ตัวอย่างโค้ด</div>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="#example-python" class="menu-link">Python</a></li>
+            <li class="menu-item"><a href="#example-js" class="menu-link">JavaScript</a></li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        <section id="intro">
+            <h1>API Documentation</h1>
+            <p>ยินดีต้อนรับสู่คู่มือการใช้งาน TechTrade API สำหรับนักพัฒนาและ Area Manager ที่ต้องการเชื่อมต่อข้อมูลเข้ากับระบบอื่นๆ หรือสร้างรายงานส่วนตัว</p>
+        </section>
+
+        <section id="auth">
+            <h2>การยืนยันตัวตน</h2>
+            <p>ในปัจจุบัน API รองรับการเรียกใช้งานผ่าน Session ของบราวเซอร์ หากคุณล็อกอินเข้าระบบหลักแล้ว คุณจะสามารถเรียกใช้ API เหล่านี้ได้ทันทีผ่าน Domain เดียวกัน</p>
+            <div class="endpoint-card" style="border-left: 4px solid var(--accent);">
+                <p style="color: var(--text-main); font-weight: 600; margin-bottom: 0.5rem;">💡 ข้อควรระวัง</p>
+                <p style="margin-bottom: 0;">หากต้องการเรียกใช้งานจากภายนอก กรุณาติดต่อผู้ดูแลระบบเพื่อขอรับ API Token (Coming Soon)</p>
+            </div>
+        </section>
+
+        <section id="get-trades">
+            <h2>รายการ Trade (V2)</h2>
+            <p>ดึงรายการ Trade-In ทั้งหมดที่ถูกเก็บไว้ใน Turso Database (Cache) โดยเลือกดูรายโซนได้</p>
+            
+            <div class="endpoint-card">
+                <span class="method-badge get">GET</span>
+                <span class="endpoint-url">/api/v2/trades</span>
+            </div>
+
+            <h3>พารามิเตอร์ (Query Parameters)</h3>
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>ชื่อ</th>
+                        <th>ประเภท</th>
+                        <th>คำอธิบาย</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>zone</td>
+                        <td>string</td>
+                        <td>ชื่อโซนที่ต้องการกรอง (เช่น "BKK-1")</td>
+                    </tr>
+                    <tr>
+                        <td>limit</td>
+                        <td>integer</td>
+                        <td>จำนวนรายการสูงสุด (Default: 100)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>ตัวอย่างผลลัพธ์ (Response)</h3>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "trade_in_id": "T6705001",
+      "real_branch_id": "645",
+      "document_no": "IV6705001",
+      "document_date": "2026-01-15",
+      "net_price": 12500.0,
+      "series": "iPhone 15 Pro Max",
+      "status": 4
+    }
+  ]
+}</pre>
+            </div>
+        </section>
+
+        <section id="get-stats">
+            <h2>สถิติรายโซน</h2>
+            <p>ดึงข้อมูลสรุปภาพรวมยอดเทรดแยกตามโซน เหมาะสำหรับการทำ Dashboard</p>
+            
+            <div class="endpoint-card">
+                <span class="method-badge get">GET</span>
+                <span class="endpoint-url">/api/v2/stats</span>
+            </div>
+
+            <h3>ตัวอย่างผลลัพธ์ (Response)</h3>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "stats": [
+    {
+      "zone_name": "BKK-1",
+      "total_trades": 150,
+      "total_value": 1850000.0,
+      "last_updated": "2026-05-03"
+    }
+  ]
+}</pre>
+            </div>
+        </section>
+
+        <section id="example-python">
+            <h2>ตัวอย่างโค้ด (Python)</h2>
+            <div class="code-block">
+<pre><span style="color: #c678dd;">import</span> requests
+
+url = <span style="color: #98c379;">"https://your-domain.com/api/v2/trades"</span>
+params = {
+    <span style="color: #98c379;">"zone"</span>: <span style="color: #98c379;">"BKK-1"</span>,
+    <span style="color: #98c379;">"limit"</span>: <span style="color: #d19a66;">50</span>
+}
+
+response = requests.get(url, params=params)
+data = response.json()
+
+<span style="color: #c678dd;">if</span> data[<span style="color: #98c379;">'success'</span>]:
+    <span style="color: #c678dd;">print</span>(<span style="color: #98c379;">f"พบข้อมูล {data['count']} รายการ"</span>)
+    <span style="color: #c678dd;">for</span> trade <span style="color: #c678dd;">in</span> data[<span style="color: #98c379;">'data'</span>]:
+        <span style="color: #c678dd;">print</span>(trade[<span style="color: #98c379;">'series'</span>], trade[<span style="color: #98c379;">'net_price'</span>])</pre>
+            </div>
+        </section>
+
+        <section id="example-js">
+            <h2>ตัวอย่างโค้ด (JavaScript)</h2>
+            <div class="code-block">
+<pre><span style="color: #c678dd;">async function</span> <span style="color: #61afef;">fetchStats</span>() {
+  <span style="color: #c678dd;">const</span> response = <span style="color: #c678dd;">await</span> <span style="color: #61afef;">fetch</span>(<span style="color: #98c379;">'/api/v2/stats'</span>);
+  <span style="color: #c678dd;">const</span> data = <span style="color: #c678dd;">await</span> response.<span style="color: #61afef;">json</span>();
+  
+  <span style="color: #c678dd;">if</span> (data.success) {
+    console.<span style="color: #61afef;">table</span>(data.stats);
+  }
+}
+
+<span style="color: #61afef;">fetchStats</span>();</pre>
+            </div>
+        </section>
+
+        <footer style="margin-top: 5rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--text-dim); font-size: 0.9rem;">
+            &copy; 2026 TechTrade Pro Max | API Documentation System
+        </footer>
+    </div>
+
+    <script>
+        // Highlighting active menu item on scroll
+        const sections = document.querySelectorAll('section');
+        const navLinks = document.querySelectorAll('.menu-link');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (pageYOffset >= sectionTop - 100) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href').includes(current)) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

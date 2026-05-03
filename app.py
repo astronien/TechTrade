@@ -47,6 +47,10 @@ app.register_blueprint(turso_api)
 def turso_dashboard():
     return render_template('turso_dashboard.html')
 
+@app.route('/api-docs')
+def api_docs():
+    return render_template('api_docs.html')
+
 # Use a fixed secret key for development to avoid session invalidation on restart
 app.secret_key = os.environ.get('SECRET_KEY', 'techtrade_dev_secret_key_fixed_12345')
 app.permanent_session_lifetime = timedelta(days=7) # Remember login for 7 days
