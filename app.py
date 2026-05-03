@@ -38,6 +38,14 @@ def log_debug(msg):
 
 
 app = Flask(__name__)
+# Register Turso API Blueprint
+from api_turso import turso_api
+app.register_blueprint(turso_api)
+
+@app.route('/turso-stats')
+def turso_dashboard():
+    return render_template('turso_dashboard.html')
+
 # Use a fixed secret key for development to avoid session invalidation on restart
 app.secret_key = os.environ.get('SECRET_KEY', 'techtrade_dev_secret_key_fixed_12345')
 app.permanent_session_lifetime = timedelta(days=7) # Remember login for 7 days

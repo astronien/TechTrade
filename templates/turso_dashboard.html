@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turso Data Insights | TechTrade</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.5);
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #10b981;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        h1, h2 { font-family: 'Outfit', sans-serif; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        .logo-area h1 {
+            font-size: 2rem;
+            background: linear-gradient(to right, #818cf8, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 0.5rem 1rem;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--accent);
+            animation: pulse 2s infinite;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            border-radius: 1.5rem;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--primary);
+        }
+
+        .stat-label { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .stat-value { font-size: 2rem; font-weight: 700; }
+
+        /* Main Content */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .chart-container, .table-container {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th { text-align: left; color: var(--text-dim); padding: 1rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+        td { padding: 1rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; }
+
+        .tag {
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            background: rgba(99, 102, 241, 0.2);
+            color: #a5b4fc;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 768px) {
+            .main-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-area">
+                <h1>Turso Insights</h1>
+                <p style="color: var(--text-dim)">Real-time Trade-In Analytics</p>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                Turso Database Connected
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Records</div>
+                <div class="stat-value" id="total-count">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Value (THB)</div>
+                <div class="stat-value" id="total-value">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Active Zones</div>
+                <div class="stat-value" id="total-zones">-</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="chart-container">
+                <h2>Recent Trades</h2>
+                <div style="height: 300px; position: relative;">
+                    <canvas id="tradesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <h2>Latest Activity</h2>
+                <table id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Value</th>
+                            <th>Zone</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                const startTime = performance.now();
+                
+                // Fetch Stats
+                const statsRes = await fetch('/api/v2/stats');
+                const statsData = await statsRes.json();
+                
+                // Fetch Latest Trades
+                const tradesRes = await fetch('/api/v2/trades?limit=10');
+                const tradesData = await tradesRes.json();
+                
+                const endTime = performance.now();
+                console.log(`Turso Fetch Time: ${endTime - startTime}ms`);
+
+                // Update Stats Card
+                if (statsData.success && statsData.stats.length > 0) {
+                    const totalCount = statsData.stats.reduce((acc, curr) => acc + curr.total_trades, 0);
+                    const totalVal = statsData.stats.reduce((acc, curr) => acc + curr.total_value, 0);
+                    
+                    document.getElementById('total-count').innerText = totalCount.toLocaleString();
+                    document.getElementById('total-value').innerText = totalVal.toLocaleString(undefined, {minimumFractionDigits: 2});
+                    document.getElementById('total-zones').innerText = statsData.stats.length;
+                    
+                    renderChart(statsData.stats);
+                }
+
+                // Update Table
+                const tableBody = document.querySelector('#trades-table tbody');
+                tableBody.innerHTML = '';
+                tradesData.data.forEach(trade => {
+                    const row = `
+                        <tr>
+                            <td>${trade.series}</td>
+                            <td style="font-weight:600">฿${trade.amount.toLocaleString()}</td>
+                            <td><span class="tag">${trade.zone_name}</span></td>
+                        </tr>
+                    `;
+                    tableBody.innerHTML += row;
+                });
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+        }
+
+        function renderChart(stats) {
+            const ctx = document.getElementById('tradesChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: stats.map(s => s.zone_name),
+                    datasets: [{
+                        label: 'Total Trades',
+                        data: stats.map(s => s.total_trades),
+                        backgroundColor: '#6366f1',
+                        borderRadius: 8,
+                        borderSkipped: false,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
