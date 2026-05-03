@@ -26,6 +26,7 @@ class TursoHandler:
                     branch_name TEXT,
                     document_no TEXT,
                     document_date TEXT,
+                    IS_SIGNED TEXT,
                     SIGN_DATE TEXT,
                     series TEXT,
                     brand_name TEXT,
@@ -33,12 +34,22 @@ class TursoHandler:
                     part_number TEXT,
                     amount REAL,
                     net_price REAL,
+                    COUPON_TRADE_IN_CODE TEXT,
+                    invoice_no TEXT,
+                    CAMPAIGN_ON_TOP_NAME TEXT,
+                    COUPON_ON_TOP_BRAND_CODE TEXT,
+                    COUPON_ON_TOP_BRAND_PRICE REAL,
+                    COUPON_ON_TOP_COMPANY_CODE TEXT,
+                    COUPON_ON_TOP_COMPANY_PRICE REAL,
                     SALE_NAME TEXT,
                     SALE_CODE TEXT,
                     customer_name TEXT,
                     customer_phone_number TEXT,
+                    customer_email TEXT,
                     buyer_name TEXT,
                     BIDDING_STATUS_NAME TEXT,
+                    DOCUMENT_REF_1 TEXT,
+                    CHANGE_REQUEST_COUNT INTEGER,
                     zone_name TEXT,
                     exported_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -130,10 +141,12 @@ class TursoHandler:
                 if not trade_in_id: continue
                 
                 # ทำความสะอาดข้อมูลอื่นๆ
+                # ข้อมูลหลัก
                 branch_id = str(self._clean_val(item.get('branch_id'), ""))
                 branch_name = self._clean_val(item.get('branch_name'), "")
                 document_no = self._clean_val(item.get('document_no'), "")
                 document_date = self._clean_val(item.get('document_date'), "")
+                is_signed = self._clean_val(item.get('IS_SIGNED'), "")
                 sign_date = self._clean_val(item.get('SIGN_DATE'), "")
                 series = self._clean_val(item.get('series'), "")
                 brand_name = self._clean_val(item.get('brand_name'), "")
@@ -142,38 +155,52 @@ class TursoHandler:
                 
                 amount = float(self._clean_val(item.get('amount', 0), 0, True))
                 
-                # คำนวณ net_price ถ้ามีในข้อมูล หรือใช้ amount แทน
+                # คูปองและ Campaign
+                coupon_trade_in = self._clean_val(item.get('COUPON_TRADE_IN_CODE'), "")
+                invoice_no = self._clean_val(item.get('invoice_no'), "")
+                campaign_name = self._clean_val(item.get('CAMPAIGN_ON_TOP_NAME'), "")
+                brand_coupon_code = self._clean_val(item.get('COUPON_ON_TOP_BRAND_CODE'), "")
+                brand_coupon_price = float(self._clean_val(item.get('COUPON_ON_TOP_BRAND_PRICE', 0), 0, True))
+                company_coupon_code = self._clean_val(item.get('COUPON_ON_TOP_COMPANY_CODE'), "")
+                company_coupon_price = float(self._clean_val(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0), 0, True))
+
+                # คำนวณ net_price
                 if 'net_price' in item:
                     net_price = float(self._clean_val(item.get('net_price', 0), 0, True))
                 else:
-                    try:
-                        tub = float(self._clean_val(item.get('COUPON_ON_TOP_BRAND_PRICE', 0), 0, True))
-                        tuc = float(self._clean_val(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0), 0, True))
-                        net_price = amount + tub + tuc
-                    except:
-                        net_price = amount
+                    net_price = amount + brand_coupon_price + company_coupon_price
 
+                # ข้อมูลพนักงานและลูกค้า
                 sale_name = self._clean_val(item.get('SALE_NAME'), "")
                 sale_code = self._clean_val(item.get('SALE_CODE'), "")
                 customer_name = self._clean_val(item.get('customer_name'), "")
                 customer_phone = self._clean_val(item.get('customer_phone_number'), "")
+                customer_email = self._clean_val(item.get('customer_email'), "")
                 buyer_name = self._clean_val(item.get('buyer_name'), "")
                 bidding_status = self._clean_val(item.get('BIDDING_STATUS_NAME'), "")
+                doc_ref_1 = self._clean_val(item.get('DOCUMENT_REF_1'), "")
+                change_count = int(self._clean_val(item.get('CHANGE_REQUEST_COUNT', 0), 0, True))
 
                 stmts.append(libsql_client.Statement(
                     """
                     INSERT OR REPLACE INTO trades 
-                    (trade_in_id, branch_id, branch_name, document_no, document_date, SIGN_DATE,
-                     series, brand_name, category_name, part_number, amount, net_price,
-                     SALE_NAME, SALE_CODE, customer_name, customer_phone_number, 
-                     buyer_name, BIDDING_STATUS_NAME, zone_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (trade_in_id, branch_id, branch_name, document_no, document_date, 
+                     IS_SIGNED, SIGN_DATE, series, brand_name, category_name, part_number, 
+                     amount, net_price, COUPON_TRADE_IN_CODE, invoice_no, 
+                     CAMPAIGN_ON_TOP_NAME, COUPON_ON_TOP_BRAND_CODE, COUPON_ON_TOP_BRAND_PRICE,
+                     COUPON_ON_TOP_COMPANY_CODE, COUPON_ON_TOP_COMPANY_PRICE,
+                     SALE_NAME, SALE_CODE, customer_name, customer_phone_number, customer_email,
+                     buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT, zone_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        str(trade_in_id), branch_id, branch_name, document_no, document_date, sign_date,
-                        series, brand_name, category_name, part_number, amount, net_price,
-                        sale_name, sale_code, customer_name, customer_phone, 
-                        buyer_name, bidding_status, zone_name
+                        str(trade_in_id), branch_id, branch_name, document_no, document_date,
+                        is_signed, sign_date, series, brand_name, category_name, part_number,
+                        amount, net_price, coupon_trade_in, invoice_no,
+                        campaign_name, brand_coupon_code, brand_coupon_price,
+                        company_coupon_code, company_coupon_price,
+                        sale_name, sale_code, customer_name, customer_phone, customer_email,
+                        buyer_name, bidding_status, doc_ref_1, change_count, zone_name
                     ]
                 ))
             
@@ -203,36 +230,32 @@ class TursoHandler:
             s_date = to_sql_date(date_start)
             e_date = to_sql_date(date_end)
             
-            query = "SELECT * FROM trades WHERE trade_date BETWEEN ? AND ?"
+            query = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
             params = [s_date, e_date]
             
             if branch_id and str(branch_id) != '0':
                 query += " AND branch_id = ?"
                 params.append(str(branch_id))
             
-            query += " ORDER BY trade_date DESC, trade_id DESC"
+            query += " ORDER BY document_date DESC, trade_in_id DESC"
             
             result = self.client.execute(query, params)
             
-            # แปลงกลับเป็น format ที่หน้าเว็บ/Line Bot ต้องการ
+            # ดึงรายชื่อคอลัมน์เพื่อให้แมพเป็น Dict ได้อัตโนมัติ
+            columns = result.columns
             trades = []
             for row in result.rows:
-                # แมพชื่อคอลัมน์กลับ (Turso columns -> API fields)
-                # หมายเหตุ: ใน app.py ใช้คีย์ตัวพิมพ์ใหญ่ตาม API ของ Eve
-                trade = {
-                    'TRADE_ID': row[0],
-                    'TRADE_DATE': datetime.strptime(row[1], '%Y-%m-%d').strftime('%d/%m/%Y') if row[1] else '',
-                    'BRANCH_ID': row[2],
-                    'BRANCH_NAME': row[3],
-                    'SALE_CODE': row[4],
-                    'SALE_NAME': row[5],
-                    'CUSTOMER_NAME': row[6],
-                    'PRODUCT_NAME': row[7],
-                    'IMEI': row[8],
-                    'BIDDING_STATUS_NAME': row[9],
-                    'amount': row[10], # API ใช้ตัวพิมพ์เล็กสำหรับยอดเงิน
-                    'zone_name': row[11]
-                }
+                # สร้าง Dict จาก row และชื่อคอลัมน์
+                trade = dict(zip(columns, row))
+                
+                # 💡 ปรับปรุงคีย์บางตัวให้ตรงกับที่ Frontend/Line Bot คาดหวัง (Compatibility Layer)
+                # เพื่อให้ไม่ต้องแก้โค้ดที่เรียกใช้เยอะ
+                trade['TRADE_ID'] = trade.get('trade_in_id')
+                trade['TRADE_DATE'] = trade.get('document_date')
+                trade['BRANCH_ID'] = trade.get('branch_id')
+                trade['BRANCH_NAME'] = trade.get('branch_name')
+                trade['PRODUCT_NAME'] = trade.get('series')
+                
                 trades.append(trade)
                 
             return trades
