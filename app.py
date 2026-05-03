@@ -791,6 +791,53 @@ def get_datatables_payload(start=0, length=50, date_start=None, date_end=None,
 
 def fetch_data_from_api(start=0, length=50, **filters):
     """ดึงข้อมูลจาก API พร้อมระบบ Auto-Healing"""
+    
+    # 🛡️ Smart Cache: ตรวจสอบข้อมูลใน Turso ก่อน
+    try:
+        date_start = filters.get('date_start')
+        date_end = filters.get('date_end')
+        branch_id = filters.get('branch_id', BRANCH_ID)
+        today_str = datetime.now().strftime('%d/%m/%Y')
+        
+        print(f"🔍 [Fetch] Request for Branch {branch_id} | Range: {date_start} to {date_end}")
+        
+        if date_start and date_end:
+            # 💡 กรณีข้อมูลวันนี้ -> บังคับดึงใหม่
+            if date_end == today_str:
+                print(f"⏩ [Skip Cache] Date is 'Today' ({today_str}). Bypassing Turso to get Real-time data from Eve.")
+            
+            # 💡 กรณีข้อมูลย้อนหลัง -> เช็ค Turso
+            else:
+                print(f"📦 [Check Turso] Searching for historical data in database...")
+                turso = TursoHandler()
+                if turso.client:
+                    sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+                    if turso.is_synced(branch_id, sync_key):
+                        cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+                        turso.close()
+                        
+                        if cached_data:
+                            print(f"✨ [Success] Found {len(cached_data)} records in Turso for Branch {branch_id}. Returning cached data.")
+                            return {
+                                'data': cached_data,
+                                'recordsTotal': len(cached_data),
+                                'recordsFiltered': len(cached_data)
+                            }
+                        else:
+                            print(f"📭 [Info] Turso has 'Synced' record but 0 trades found. Returning empty results.")
+                            return {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0}
+                    else:
+                        print(f"❓ [Cache Miss] No synced records found in Turso for this range. Proceeding to Eve API...")
+                    turso.close()
+        else:
+            print(f"⚠️ [Warning] Date filters missing. Defaulting to Eve API.")
+            
+    except Exception as cache_err:
+        print(f"⚠️ [Error] Smart Cache Exception: {cache_err}. Falling back to Eve API.")
+
+    # 🌐 เรียก Eve API (กรณีไม่มีใน Cache หรือเป็นข้อมูลวันนี้)
+    print(f"🌐 [API Call] Requesting fresh data from Eve Techswop API...")
+    
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Content-Type': 'application/json; charset=utf-8',
@@ -834,21 +881,27 @@ def fetch_data_from_api(start=0, length=50, **filters):
         date_end = filters.get('date_end')
         today_str = datetime.now().strftime('%d/%m/%Y')
         
-        # 🛡️ Smart Cache: ลองดึงจาก Turso ก่อน (ไม่ว่าจะวันนี้หรืออดีต)
+        # 🛡️ Smart Cache: ลองดึงจาก Turso ก่อนถ้าเป็นข้อมูลย้อนหลัง
         if date_start and date_end:
-            turso = TursoHandler()
-            if turso.client:
-                # 1. เช็คว่าเคยดึงสำเร็จหรือยัง (is_synced)
-                if turso.is_synced(branch_id, date_end if date_start == date_end else f"{date_start}-{date_end}"):
-                    cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+            today_str = datetime.now().strftime('%d/%m/%Y')
+            
+            # 💡 ถ้าไม่ใช่ข้อมูลของ "วันนี้" และเคยดึงสำเร็จแล้ว -> ใช้ Turso เลย
+            if date_end != today_str:
+                turso = TursoHandler()
+                if turso.client:
+                    sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+                    if turso.is_synced(branch_id, sync_key):
+                        cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+                        turso.close()
+                        print(f"🚀 [Smart Cache] Using verified historical data from Turso for Branch {branch_id}")
+                        return {
+                            'data': cached_data,
+                            'recordsTotal': len(cached_data),
+                            'recordsFiltered': len(cached_data)
+                        }
                     turso.close()
-                    print(f"🚀 [Smart Cache] Using verified data from Turso for Branch {branch_id}")
-                    return {
-                        'data': cached_data,
-                        'recordsTotal': len(cached_data),
-                        'recordsFiltered': len(cached_data)
-                    }
-                turso.close()
+            else:
+                print(f"🔄 [Real-time] Fetching today's data from Eve API for Branch {branch_id}...")
     except Exception as cache_err:
         print(f"⚠️ Smart Cache Error: {cache_err}")
 
