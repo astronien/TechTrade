@@ -11,14 +11,16 @@ try:
     from google.oauth2 import service_account
     from google_auth_oauthlib.flow import Flow
     from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
+    from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+    import io
     GDRIVE_AVAILABLE = True
 except ImportError:
     try:
         from google.oauth2.credentials import Credentials as OAuthCredentials
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
-        from googleapiclient.http import MediaFileUpload
+        from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+        import io
         GDRIVE_AVAILABLE = True
     except ImportError:
         GDRIVE_AVAILABLE = False
@@ -187,6 +189,33 @@ class GoogleDriveUploader:
         except Exception as e:
             print(f"❌ Error finding monthly file for '{zone_name}' ({year_month}): {e}")
             return None
+
+    def download_file(self, file_id, dest_path):
+        """Download ไฟล์จาก Google Drive
+        Args:
+            file_id: Google Drive file ID
+            dest_path: Path ปลายทางที่จะบันทึก
+        Returns:
+            bool: True ถ้าสำเร็จ
+        """
+        self._ensure_service()
+        try:
+            request = self.service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            
+            # บันทึกลงไฟล์
+            with open(dest_path, 'wb') as f:
+                f.write(fh.getvalue())
+            
+            print(f"✅ Downloaded file {file_id} to {dest_path}")
+            return True
+        except Exception as e:
+            print(f"❌ Error downloading file {file_id}: {e}")
+            return False
 
     def create_folder(self, folder_name, parent_id=None):
         """สร้าง folder ใน Google Drive (ถ้ายังไม่มี)
