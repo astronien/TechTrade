@@ -39,6 +39,9 @@ def log_debug(msg):
 
 
 app = Flask(__name__)
+from flask_cors import CORS
+CORS(app) # อนุญาตให้ทุก Domain เข้าถึงได้ (สามารถกำหนดเฉพาะ Domain ได้ภายหลัง)
+
 # Register Turso API Blueprint
 from api_turso import turso_api
 app.register_blueprint(turso_api)

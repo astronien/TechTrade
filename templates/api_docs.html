@@ -229,10 +229,16 @@
 
         <section id="auth">
             <h2>การยืนยันตัวตน</h2>
-            <p>ในปัจจุบัน API รองรับการเรียกใช้งานผ่าน Session ของบราวเซอร์ หากคุณล็อกอินเข้าระบบหลักแล้ว คุณจะสามารถเรียกใช้ API เหล่านี้ได้ทันทีผ่าน Domain เดียวกัน</p>
+            <p>API นี้รองรับการเรียกใช้งานจากภายนอก (Cross-Origin) โดยคุณต้องส่ง <strong>API Key</strong> มาใน HTTP Header ดังนี้:</p>
+            
+            <div class="code-block">
+                <pre>X-API-Key: techtrade_pro_secret_2026</pre>
+            </div>
+
             <div class="endpoint-card" style="border-left: 4px solid var(--accent);">
-                <p style="color: var(--text-main); font-weight: 600; margin-bottom: 0.5rem;">💡 ข้อควรระวัง</p>
-                <p style="margin-bottom: 0;">หากต้องการเรียกใช้งานจากภายนอก กรุณาติดต่อผู้ดูแลระบบเพื่อขอรับ API Token (Coming Soon)</p>
+                <p style="color: var(--text-main); font-weight: 600; margin-bottom: 0.5rem;">💡 ข้อมูลสำคัญ</p>
+                <p style="margin-bottom: 0.5rem;">1. หากเรียกใช้งานจากสคริปต์ภายในโดเมนเดียวกัน (Browser Session) ไม่จำเป็นต้องส่ง API Key</p>
+                <p style="margin-bottom: 0;">2. คุณสามารถเปลี่ยน API Key ได้ในไฟล์ .env ของระบบ</p>
             </div>
         </section>
 
@@ -259,6 +265,16 @@
                         <td>zone</td>
                         <td>string</td>
                         <td>ชื่อโซนที่ต้องการกรอง (เช่น "BKK-1")</td>
+                    </tr>
+                    <tr>
+                        <td>start_date</td>
+                        <td>string</td>
+                        <td>วันที่เริ่มต้น รูปแบบ YYYY-MM-DD (เช่น "2026-01-01")</td>
+                    </tr>
+                    <tr>
+                        <td>end_date</td>
+                        <td>string</td>
+                        <td>วันที่สิ้นสุด รูปแบบ YYYY-MM-DD (เช่น "2026-01-31")</td>
                     </tr>
                     <tr>
                         <td>limit</td>
@@ -321,10 +337,16 @@
 url = <span style="color: #98c379;">"https://your-domain.com/api/v2/trades"</span>
 params = {
     <span style="color: #98c379;">"zone"</span>: <span style="color: #98c379;">"BKK-1"</span>,
+    <span style="color: #98c379;">"start_date"</span>: <span style="color: #98c379;">"2026-01-01"</span>,
+    <span style="color: #98c379;">"end_date"</span>: <span style="color: #98c379;">"2026-01-31"</span>,
     <span style="color: #98c379;">"limit"</span>: <span style="color: #d19a66;">50</span>
 }
 
-response = requests.get(url, params=params)
+headers = {
+    <span style="color: #98c379;">"X-API-Key"</span>: <span style="color: #98c379;">"techtrade_pro_secret_2026"</span>
+}
+
+response = requests.get(url, params=params, headers=headers)
 data = response.json()
 
 <span style="color: #c678dd;">if</span> data[<span style="color: #98c379;">'success'</span>]:
