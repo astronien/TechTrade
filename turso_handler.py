@@ -48,9 +48,54 @@ class TursoHandler:
             self.client.execute("CREATE INDEX IF NOT EXISTS idx_branch ON trades(branch_id)")
             
             print("✅ Turso table and indexes initialized")
+            # 3. ตารางประวัติการ Sync (เพื่อเช็คว่าสาขาไหนดึงมาแล้ว แม้จะมี 0 รายการ)
+            self.client.execute("""
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    branch_id TEXT,
+                    sync_date TEXT,
+                    record_count INTEGER,
+                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (branch_id, sync_date)
+                )
+            """)
+            
+            print("✅ Database tables ready")
             return True
         except Exception as e:
-            print(f"❌ Turso init error: {e}")
+            print(f"❌ Database init error: {e}")
+            return False
+
+    def is_synced(self, branch_id, sync_date):
+        """เช็คว่าสาขานี้ในวันที่นี้ถูกดึงข้อมูลมาหรือยัง"""
+        if not self.client: return False
+        try:
+            # แปลงวันที่เป็น format SQL (YYYY-MM-DD)
+            if '/' in sync_date:
+                d, m, y = sync_date.split('/')
+                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                
+            res = self.client.execute(
+                "SELECT 1 FROM sync_history WHERE branch_id = ? AND sync_date = ?",
+                [str(branch_id), sync_date]
+            )
+            return len(res.rows) > 0
+        except:
+            return False
+
+    def mark_synced(self, branch_id, sync_date, count):
+        """บันทึกว่าสาขานี้ในวันที่นี้ดึงข้อมูลมาแล้ว"""
+        if not self.client: return
+        try:
+            if '/' in sync_date:
+                d, m, y = sync_date.split('/')
+                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                
+            self.client.execute(
+                "INSERT OR REPLACE INTO sync_history (branch_id, sync_date, record_count) VALUES (?, ?, ?)",
+                [str(branch_id), sync_date, count]
+            )
+        except Exception as e:
+            print(f"⚠️ mark_synced error: {e}")
             return False
 
     def _clean_val(self, val, default=None, is_num=False):

@@ -834,22 +834,23 @@ def fetch_data_from_api(start=0, length=50, **filters):
         date_end = filters.get('date_end')
         today_str = datetime.now().strftime('%d/%m/%Y')
         
-        # ถ้าไม่ใช่การดึงข้อมูลของ "วันนี้" (เช่น เป็นการดึงย้อนหลัง) ให้ลองดูใน Turso
-        if date_start and date_end and date_end != today_str:
+        # 🛡️ Smart Cache: ลองดึงจาก Turso ก่อน (ไม่ว่าจะวันนี้หรืออดีต)
+        if date_start and date_end:
             turso = TursoHandler()
             if turso.client:
-                cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
-                turso.close()
-                
-                if cached_data:
-                    print(f"🚀 [Smart Cache] Found {len(cached_data)} records in Turso for {date_start}-{date_end}")
+                # 1. เช็คว่าเคยดึงสำเร็จหรือยัง (is_synced)
+                if turso.is_synced(branch_id, date_end if date_start == date_end else f"{date_start}-{date_end}"):
+                    cached_data = turso.get_trades(date_start, date_end, branch_id=branch_id)
+                    turso.close()
+                    print(f"🚀 [Smart Cache] Using verified data from Turso for Branch {branch_id}")
                     return {
                         'data': cached_data,
                         'recordsTotal': len(cached_data),
                         'recordsFiltered': len(cached_data)
                     }
+                turso.close()
     except Exception as cache_err:
-        print(f"⚠️ Smart Cache Error (Fallback to API): {cache_err}")
+        print(f"⚠️ Smart Cache Error: {cache_err}")
 
     # ใช้ Session เพื่อ reuse connection
     with requests.Session() as session:
@@ -933,14 +934,19 @@ def fetch_data_from_api(start=0, length=50, **filters):
             # 🚀 Near Real-time Sync to Turso
             try:
                 trade_data = data_obj.get('data', [])
-                if trade_data:
-                    # หา Zone Name จาก filters (ถ้ามี)
-                    zone_name = filters.get('zone_name', 'Auto-Sync')
-                    turso = TursoHandler()
-                    if turso.client:
-                        inserted = turso.insert_trades_batch(trade_data, zone_name)
-                        print(f"   🗄️ Near Real-time Sync: Saved {inserted} records to Turso")
-                        turso.close()
+                zone_name = filters.get('zone_name', 'Auto-Sync')
+                turso = TursoHandler()
+                if turso.client:
+                    # บันทึกรายการเทรด (ถ้ามี)
+                    if trade_data:
+                        turso.insert_trades_batch(trade_data, zone_name)
+                    
+                    # 💡 บันทึกประวัติการ Sync (เพื่อคราวหน้าจะได้ไม่ต้องดึง API อีก)
+                    sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+                    turso.mark_synced(branch_id, sync_key, len(trade_data))
+                    
+                    print(f"   🗄️ Near Real-time Sync: Marked Branch {branch_id} as synced ({len(trade_data)} records)")
+                    turso.close()
             except Exception as sync_err:
                 print(f"   ⚠️ Turso Sync Error (Non-blocking): {sync_err}")
 
