@@ -56,6 +56,7 @@ class TursoHandler:
                 CREATE TABLE IF NOT EXISTS trades (
                     trade_in_id TEXT PRIMARY KEY,
                     branch_id TEXT,
+                    real_branch_id TEXT,
                     branch_name TEXT,
                     document_no TEXT,
                     document_date TEXT,
@@ -225,8 +226,18 @@ class TursoHandler:
                 # Extraction with Case-insensitive keys
                 branch_id = str(self._clean_val(item.get('branch_id') or item.get('BRANCH_ID'), ""))
                 
-                # ทำความสะอาดชื่อสาขา (เช่น "ID645 : Studio 7" -> "Studio 7")
+                # ทำความสะอาดชื่อสาขา และสกัด real_branch_id (เช่น "ID645 : Studio 7" -> "645")
                 raw_branch_name = self._clean_val(item.get('branch_name') or item.get('BRANCH_NAME'), "")
+                real_branch_id = ""
+                
+                # ลองแกะ ID จากรูปแบบ "ID645"
+                import re
+                id_match = re.search(r'ID(\d+)', raw_branch_name)
+                if id_match:
+                    real_branch_id = id_match.group(1)
+                else:
+                    real_branch_id = branch_id # fallback
+                
                 if ':' in raw_branch_name:
                     branch_name = raw_branch_name.split(':')[-1].strip()
                 else:
@@ -277,7 +288,7 @@ class TursoHandler:
                 stmts.append(libsql_client.Statement(
                     """
                     INSERT OR REPLACE INTO trades 
-                    (trade_in_id, branch_id, branch_name, document_no, document_date, 
+                    (trade_in_id, branch_id, real_branch_id, branch_name, document_no, document_date, 
                      IS_SIGNED, SIGN_DATE, series, brand_name, category_name, part_number, 
                      amount, net_price, COUPON_TRADE_IN_CODE, invoice_no, 
                      CAMPAIGN_ON_TOP_NAME, COUPON_ON_TOP_BRAND_CODE, COUPON_ON_TOP_BRAND_PRICE,
@@ -285,10 +296,10 @@ class TursoHandler:
                      SALE_NAME, SALE_CODE, employee_name, customer_name, customer_phone_number, customer_email,
                      customer_tax_no, buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT,
                      status, grade, cosmetic, ontop_amount, campaign_name, zone_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        str(trade_in_id), branch_id, branch_name, doc_no, doc_date,
+                        str(trade_in_id), branch_id, real_branch_id, branch_name, doc_no, doc_date,
                         is_signed, sign_date, series, brand, cat, part,
                         amount, net_price, coupon_code, inv_no,
                         camp_name, b_cp_code, b_cp_price, c_cp_code, c_cp_price,
