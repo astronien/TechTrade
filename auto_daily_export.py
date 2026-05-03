@@ -506,7 +506,7 @@ def run_daily_export(force=False):
     # Loop แต่ละ Zone
     for zone_idx, zone in enumerate(zones_to_export):
         zone_name = zone['zone_name']
-        zone_id = zone['id']
+        zone_id = zone['zone_id']
         zone_start = time.time()
         
         print(f"\n{'─' * 40}")
