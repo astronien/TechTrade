@@ -992,17 +992,17 @@ def fetch_data_from_api(start=0, length=50, **filters):
                 trade_data = data_obj.get('data', [])
                 zone_name = filters.get('zone_name', 'Auto-Sync')
                 turso = TursoHandler()
-                if turso.client:
-                    # บันทึกรายการเทรด (ถ้ามี)
-                    if trade_data:
-                        turso.insert_trades_batch(trade_data, zone_name)
-                    
-                    # 💡 บันทึกประวัติการ Sync (เพื่อคราวหน้าจะได้ไม่ต้องดึง API อีก)
-                    sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
-                    turso.mark_synced(branch_id, sync_key, len(trade_data))
-                    
-                    print(f"   🗄️ Near Real-time Sync: Marked Branch {branch_id} as synced ({len(trade_data)} records)")
-                    turso.close()
+                
+                # บันทึกรายการเทรด (ถ้ามี) - TursoHandler จะจัดการ Fallback เองภายใน
+                if trade_data:
+                    turso.insert_trades_batch(trade_data, zone_name)
+                
+                # 💡 บันทึกประวัติการ Sync (เพื่อให้คราวหน้าจะได้ไม่ต้องดึง API อีก)
+                sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+                turso.mark_synced(branch_id, sync_key, len(trade_data))
+                
+                print(f"   🗄️ Near Real-time Sync: Processed Branch {branch_id} ({len(trade_data)} records)")
+                turso.close()
             except Exception as sync_err:
                 print(f"   ⚠️ Turso Sync Error (Non-blocking): {sync_err}")
 
