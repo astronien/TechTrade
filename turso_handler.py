@@ -138,21 +138,31 @@ class TursoHandler:
 
     def is_synced(self, branch_id, sync_date):
         try:
+            # ป้องกัน Error 'too many values to unpack' กรณีเป็นช่วงวันที่ (เช่น 01/01/2026-02/01/2026)
             if '-' not in sync_date and '/' in sync_date:
-                d, m, y = sync_date.split('/')
-                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                parts = sync_date.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            
             res = self._execute_sql("SELECT branch_id FROM sync_history WHERE branch_id = ? AND sync_date = ?", [str(branch_id), sync_date])
             return res and len(res.rows) > 0
         except: return False
 
     def mark_synced(self, branch_id, sync_date, count):
         try:
+            # ป้องกัน Error 'too many values to unpack' กรณีเป็นช่วงวันที่
             if '-' not in sync_date and '/' in sync_date:
-                d, m, y = sync_date.split('/')
-                sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                parts = sync_date.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            
             self._execute_sql("INSERT OR REPLACE INTO sync_history (branch_id, sync_date, record_count) VALUES (?, ?, ?)", [str(branch_id), sync_date, count])
             return True
-        except: return False
+        except Exception as e:
+            print(f"⚠️ mark_synced error: {e}")
+            return False
 
     def _clean_val(self, val, default=None, is_num=False):
         if val is None: return 0.0 if is_num else default
@@ -190,7 +200,14 @@ class TursoHandler:
 
                 # Extraction with Case-insensitive keys
                 branch_id = str(self._clean_val(item.get('branch_id') or item.get('BRANCH_ID'), ""))
-                branch_name = self._clean_val(item.get('branch_name') or item.get('BRANCH_NAME'), "")
+                
+                # ทำความสะอาดชื่อสาขา (เช่น "ID645 : Studio 7" -> "Studio 7")
+                raw_branch_name = self._clean_val(item.get('branch_name') or item.get('BRANCH_NAME'), "")
+                if ':' in raw_branch_name:
+                    branch_name = raw_branch_name.split(':')[-1].strip()
+                else:
+                    branch_name = raw_branch_name
+                
                 doc_no = self._clean_val(item.get('document_no') or item.get('DOCUMENT_NO'), "")
                 doc_date = self._parse_eve_date(item.get('document_date') or item.get('DOCUMENT_DATE'))
                 
@@ -198,8 +215,8 @@ class TursoHandler:
                 sign_date = self._parse_eve_date(item.get('SIGN_DATE') or item.get('sign_date'))
                 
                 series = self._clean_val(item.get('series') or item.get('SERIES'), "")
-                brand = self._clean_val(item.get('brand_name') or item.get('BRAND_NAME'), "")
-                cat = self._clean_val(item.get('category_name') or item.get('CATEGORY_NAME'), "")
+                brand = self._clean_val(item.get('brand_name') or item.get('BRAND_NAME') or item.get('brand'), "")
+                cat = self._clean_val(item.get('category_name') or item.get('CATEGORY_NAME') or item.get('category'), "")
                 part = self._clean_val(item.get('part_number') or item.get('PART_NUMBER'), "")
                 
                 amount = float(self._clean_val(item.get('amount') or item.get('AMOUNT') or 0, 0, True))
@@ -213,7 +230,7 @@ class TursoHandler:
                 c_cp_code = self._clean_val(item.get('COUPON_ON_TOP_COMPANY_CODE') or item.get('coupon_on_top_company_code'), "")
                 c_cp_price = float(self._clean_val(item.get('COUPON_ON_TOP_COMPANY_PRICE') or 0, 0, True))
                 
-                net_price = float(item.get('net_price', amount + b_cp_price + c_cp_price))
+                net_price = float(item.get('net_price') or item.get('NET_PRICE') or (amount + b_cp_price + c_cp_price))
 
                 # Extra Info from JSON
                 sale_name = self._clean_val(item.get('SALE_NAME') or item.get('sale_name'), "")
@@ -258,12 +275,19 @@ class TursoHandler:
                 ))
             
             if stmts:
-                if self.client: self.client.batch(stmts)
-                else: self._execute_batch_http(stmts)
-                return len(stmts)
-            return 0
-        except Exception as e:
-            print(f"❌ [Turso] Insert batch error: {e}")
+                # ลองแบบ Batch ก่อน ถ้าพังหรือ Error 505 ให้สลับไป HTTP ทันที
+                try:
+                    if self.client: 
+                        self.client.batch(stmts)
+                        return len(stmts)
+                    else:
+                        return len(stmts) if self._execute_batch_http(stmts) else 0
+                except Exception as e:
+                    if "505" in str(e) or "Invalid response status" in str(e):
+                        print("🔄 [Turso] Batch 505 Error. Using HTTP Fallback...")
+                        return len(stmts) if self._execute_batch_http(stmts) else 0
+                    print(f"❌ [Turso] Insert batch error: {e}")
+                    return 0
             return 0
 
     def _execute_batch_http(self, stmts):
