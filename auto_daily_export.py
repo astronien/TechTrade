@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 from google_drive_uploader import GoogleDriveUploader
+from turso_handler import TursoHandler
 
 
 def get_auto_export_config():
@@ -437,6 +438,21 @@ def run_daily_export(force=False):
     
     print(f"✅ Google Drive connected: {test_result.get('email', '')}")
     
+    # 3.1 Initialize Turso handler
+    turso_url = os.getenv('TURSO_DATABASE_URL')
+    turso_token = os.getenv('TURSO_AUTH_TOKEN')
+    turso = None
+    
+    if turso_url and turso_token:
+        turso = TursoHandler(turso_url, turso_token)
+        if turso.init_db():
+            print("✅ Turso Database connected and initialized")
+        else:
+            print("⚠️ Turso initialization failed, will continue with Drive only")
+            turso = None
+    else:
+        print("⚠️ Turso credentials not found in environment, skipping Turso export")
+    
     # 4. กำหนดวันที่ที่จะ export (วันก่อนหน้า)
     bkk_tz = pytz.timezone('Asia/Bangkok')
     now_bkk = datetime.now(bkk_tz)
@@ -582,6 +598,11 @@ def run_daily_export(force=False):
                 'duration_seconds': zone_duration
             })
             
+            # 5.1 บันทึกลง Turso (ขนานกัน)
+            if turso and trade_data:
+                inserted = turso.insert_trades_batch(trade_data, zone_name)
+                print(f"   🗄️ Saved {inserted} records to Turso Database")
+
             total_records += len(trade_data)
             total_files += 1
             
@@ -629,7 +650,11 @@ def run_daily_export(force=False):
     
     total_duration = time.time() - start_time
     
-    # 8. ส่ง Telegram notification (ใช้ bot/chat เดียวกับ auto-cancel)
+    # 8. ปิดการเชื่อมต่อ Turso
+    if turso:
+        turso.close()
+        
+    # 9. ส่ง Telegram notification (ใช้ bot/chat เดียวกับ auto-cancel)
     try:
         from app import get_auto_cancel_config, send_telegram_notification
         
