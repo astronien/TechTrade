@@ -140,14 +140,27 @@ class TursoHandler:
             response = requests.post(f"{url}/v2/pipeline", headers=headers, json=data, timeout=15)
             if response.status_code == 200:
                 result_data = response.json()
-                class MockResult:
-                    def __init__(self, res_obj):
-                        self.columns = [c['name'] for c in res_obj['cols']]
-                        self.rows = [[(val.get('value') if isinstance(val, dict) else val) for val in r] for r in res_obj['rows']]
-                return MockResult(result_data['results'][0]['response']['result'])
+                result_item = result_data.get('results', [{}])[0]
+                
+                if result_item.get('type') == 'error':
+                    error_msg = result_item.get('error', {}).get('message', 'Unknown Turso Error')
+                    print(f"❌ [Turso API Error] {error_msg}")
+                    return None
+                
+                if 'response' in result_item and 'result' in result_item['response']:
+                    res_obj = result_item['response']['result']
+                    class MockResult:
+                        def __init__(self, r_obj):
+                            self.columns = [c['name'] for c in r_obj.get('cols', [])]
+                            self.rows = [[(val.get('value') if isinstance(val, dict) else val) for val in r] for r in r_obj.get('rows', [])]
+                    return MockResult(res_obj)
+            else:
+                print(f"❌ [Turso HTTP Error] Status: {response.status_code}, Body: {response.text}")
             return None
         except Exception as e:
-            print(f"❌ [Turso Fallback] Error: {e}")
+            print(f"❌ [Turso Fallback Exception] Error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _format_args(self, params):
@@ -163,16 +176,63 @@ class TursoHandler:
 
     def is_synced(self, branch_id, sync_date):
         try:
-            # ป้องกัน Error 'too many values to unpack' กรณีเป็นช่วงวันที่ (เช่น 01/01/2026-02/01/2026)
+            # 1. ตรวจสอบจาก sync_history (วิธีดั้งเดิม)
+            search_date = sync_date
             if '-' not in sync_date and '/' in sync_date:
                 parts = sync_date.split('/')
                 if len(parts) == 3:
                     d, m, y = parts
-                    sync_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                    search_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
             
-            res = self._execute_sql("SELECT branch_id FROM sync_history WHERE branch_id = ? AND sync_date = ?", [str(branch_id), sync_date])
-            return res and len(res.rows) > 0
-        except: return False
+            res = self._execute_sql("SELECT branch_id FROM sync_history WHERE branch_id = ? AND sync_date = ?", [str(branch_id), search_date])
+            if res and len(res.rows) > 0:
+                return True
+                
+            # 2. Fallback: ตรวจสอบจากตาราง trades โดยตรง (กรณีข้อมูลมีอยู่แล้วแต่ประวัติหาย หรือเป็นช่วงวันที่)
+            iso_start = None
+            iso_end = None
+            
+            if '-' in sync_date:
+                start_str, end_str = sync_date.split('-')
+                try:
+                    d1, m1, y1 = start_str.split('/')
+                    d2, m2, y2 = end_str.split('/')
+                    iso_start = f"{y1}-{m1.zfill(2)}-{d1.zfill(2)} 00:00:00"
+                    iso_end = f"{y2}-{m2.zfill(2)}-{d2.zfill(2)} 23:59:59"
+                except: pass
+            else:
+                try:
+                    parts = sync_date.split('/')
+                    if len(parts) == 3:
+                        d, m, y = parts
+                        iso_start = f"{y}-{m.zfill(2)}-{d.zfill(2)} 00:00:00"
+                        iso_end = f"{y}-{m.zfill(2)}-{d.zfill(2)} 23:59:59"
+                except: pass
+
+            if iso_start and iso_end:
+                try:
+                    # ตรวจสอบว่า branch_id เป็นตัวเลขหรือไม่
+                    try:
+                        b_id_val = int(branch_id)
+                    except:
+                        b_id_val = str(branch_id)
+                    
+                    check_sql = "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND exported_at BETWEEN ? AND ?"
+                    count_res = self._execute_sql(check_sql, [b_id_val, iso_start, iso_end])
+                    if count_res:
+                        try:
+                            count = int(count_res.rows[0][0])
+                            # ถ้าเป็นวันเดียว ข้อมูลอาจจะน้อยกว่า 10 ก็ได้ แต่ถ้ามีข้อมูลก็ถือว่า Sync แล้ว
+                            threshold = 10 if '-' in sync_date else 0
+                            if count > threshold:
+                                return True
+                        except: pass
+                except: pass
+            
+            return False
+        except Exception as e:
+            print(f"⚠️ [is_synced Error] {e}")
+            return False
 
     def mark_synced(self, branch_id, sync_date, count):
         try:
