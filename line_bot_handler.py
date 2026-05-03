@@ -520,14 +520,41 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
 
 
 def load_branches_map():
-    """โหลด mapping ของ branch_id กับ branch_name"""
-    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+    """โหลด mapping ของ branch_id กับ branch_name (ดึงจาก DB ก่อน)"""
     branches_map = {}
     
+    # 1. ลองดึงจาก DB (เหมือน load_supersale_config)
     try:
-        with open(branches_file, 'r', encoding='utf-8') as f:
-            branches_data = json.load(f)
-            branches_map = {b['branch_id']: b['branch_name'] for b in branches_data}
+        import psycopg2
+        import psycopg2.extras
+        database_url = os.environ.get('POSTGRES_URL_NON_POOLING') or os.environ.get('DATABASE_URL')
+        if database_url:
+            conn = psycopg2.connect(database_url, cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = conn.cursor()
+            cur.execute("SELECT branch_data FROM cached_branches ORDER BY updated_at DESC LIMIT 1")
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            
+            if row:
+                data = row['branch_data']
+                if isinstance(data, str):
+                    import json
+                    data = json.loads(data)
+                if isinstance(data, list):
+                    branches_map = {str(b.get('branch_id', '')): b.get('branch_name', '') for b in data if b.get('branch_id')}
+                    return branches_map
+    except Exception as e:
+        print(f"⚠️ load_branches_map DB error: {e}")
+
+    # 2. Fallback ไปที่ไฟล์เดิม
+    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+    try:
+        if os.path.exists(branches_file):
+            with open(branches_file, 'r', encoding='utf-8') as f:
+                import json
+                branches_data = json.load(f)
+                branches_map = {str(b.get('branch_id', '')): b.get('branch_name', '') for b in branches_data if b.get('branch_id')}
     except Exception as e:
         print(f"Warning: Could not load branches data: {e}")
     

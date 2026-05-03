@@ -9,10 +9,10 @@ from app import find_branch_by_id, fetch_data_from_api, parse_thai_month, get_mo
 from line_bot_handler import generate_branch_monthly_report
 
 def test_line_bot_report():
-    print("Testing generate_branch_monthly_report for branch 645 (Westgate) for February")
+    print("Testing generate_branch_monthly_report for branch 2957 (New Branch) for May")
     
-    branch_id_input = "645" # How user inputs it
-    month_name = "กุมภาพันธ์"
+    branch_id_input = "2957" # New branch
+    month_name = "พฤษภาคม"
     
     result = generate_branch_monthly_report(
         branch_id_input, 

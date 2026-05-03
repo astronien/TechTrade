@@ -1740,37 +1740,63 @@ def find_zone_by_name(zone_name):
     return None
 
 def find_branch_by_id(branch_id_input):
-    """ค้นหาสาขาจาก ID number (เช่น 9 จาก ID9, 13 จาก ID13) หรือ branch_id"""
+    """ค้นหาสาขาจาก ID number (เช่น 9 จาก ID9, 13 จาก ID13, 2957) หรือ branch_id"""
     import os
     import re
-    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
     
-    try:
-        with open(branches_file, 'r', encoding='utf-8') as f:
-            branches_data = json.load(f)
-        
-        # ลองค้นหาจาก ID number ในชื่อสาขาก่อน (เพื่อให้ตรงกับที่ผู้ใช้ต้องการ)
+    # 1. พยายามดึงจาก DB ก่อน (Source of Truth)
+    branches_data = get_branches_from_db()
+    
+    # 2. ถ้าไม่มีใน DB ให้ลองดึงจากไฟล์เดิม (Fallback)
+    if not branches_data:
         try:
-            search_id = int(branch_id_input)
-            for branch in branches_data:
-                branch_name = branch.get('branch_name', '')
-                # ดึงตัวเลขจาก ID (เช่น "00009 : ID9 : ..." -> 9)
-                match = re.search(r'ID(\d+)', branch_name)
-                if match:
-                    id_number = int(match.group(1))
-                    if id_number == search_id:
-                        return branch
-        except ValueError:
-            pass
-        
-        # ถ้าไม่เจอ ลองค้นหาจาก branch_id ตรงๆ
-        branch_id_str = str(branch_id_input)
-        for branch in branches_data:
-            if str(branch.get('branch_id', '')) == branch_id_str:
-                return branch
+            branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+            if os.path.exists(branches_file):
+                with open(branches_file, 'r', encoding='utf-8') as f:
+                    branches_data = json.load(f)
+        except Exception as e:
+            print(f"⚠️ Fallback file error: {e}")
             
-    except Exception as e:
-        print(f"Error loading branches: {e}")
+    if not branches_data:
+        return None
+    
+    branch_id_str = str(branch_id_input).strip()
+    
+    # พยายามแปลงเป็นตัวเลขเพื่อค้นหาแบบ ID number
+    search_num = None
+    try:
+        # ตัด 0 ข้างหน้าออกถ้ามี (เช่น "09" -> 9)
+        search_num = int(branch_id_str)
+    except ValueError:
+        pass
+        
+    for branch in branches_data:
+        bid = str(branch.get('branch_id', ''))
+        bname = branch.get('branch_name', '')
+        
+        # 1. เช็ค branch_id ตรงๆ (internal ID)
+        if bid == branch_id_str:
+            return branch
+            
+        if search_num is not None:
+            # 2. เช็คจาก ID prefix ในชื่อ (เช่น "ID9", "ID2957")
+            match = re.search(r'ID(\d+)', bname)
+            if match and int(match.group(1)) == search_num:
+                return branch
+                
+            # 3. เช็คจากตัวเลขที่ปรากฏในชื่อ (เช่น "02957 : 2957 : ...")
+            # ค้นหาตัวเลขทั้งหมดในชื่อ แล้วเช็คว่ามีตัวไหนตรงกับ search_num
+            numbers_in_name = re.findall(r'\d+', bname)
+            for n_str in numbers_in_name:
+                try:
+                    if int(n_str) == search_num:
+                        return branch
+                except:
+                    continue
+                    
+        # 4. เช็คชื่อเต็มแบบ Case-insensitive
+        if branch_id_str.lower() in bname.lower():
+            return branch
     
     return None
 
