@@ -36,8 +36,12 @@ class TursoHandler:
         
         if HAS_LIBSQL and self.url and self.token:
             try:
-                # Use the standard create_client which handles sync/async context
-                self.client = libsql_client.create_client(url=self.url, auth_token=self.token)
+                # Use HTTP-only client to avoid event loop warnings in sync context
+                url_http = self.url
+                if url_http.startswith("libsql://"):
+                    url_http = url_http.replace("libsql://", "https://")
+                
+                self.client = libsql_client.create_client(url=url_http, auth_token=self.token)
             except Exception as e:
                 print(f"⚠️ [Turso] Client init warning: {e}")
                 self.client = None
@@ -173,6 +177,52 @@ class TursoHandler:
             elif isinstance(p, float): formatted.append({"type": "float", "value": p})
             else: formatted.append({"type": "text", "value": str(p)})
         return formatted
+
+    def check_sync_status_batch(self, branch_ids, date_start, date_end):
+        """ตรวจสอบสถานะการ Sync ของหลายสาขาพร้อมกัน"""
+        if not branch_ids: return {}
+        try:
+            def to_sql(d):
+                try: 
+                    p = d.split('/')
+                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                except: return d
+            
+            iso_start, iso_end = to_sql(date_start), to_sql(date_end)
+            
+            # กรองเฉพาะ ID ที่เป็นตัวเลข (real_branch_id)
+            valid_ids = []
+            for b in branch_ids:
+                try: valid_ids.append(str(int(b)))
+                except: pass
+            
+            if not valid_ids: return {}
+
+            placeholders = ', '.join(['?'] * len(valid_ids))
+            sql = f"""
+                SELECT real_branch_id, COUNT(*) 
+                FROM trades 
+                WHERE real_branch_id IN ({placeholders}) 
+                AND document_date BETWEEN ? AND ? 
+                GROUP BY real_branch_id
+            """
+            params = valid_ids + [iso_start, iso_end]
+            res = self._execute_sql(sql, params)
+            
+            sync_map = {str(bid): False for bid in branch_ids}
+            if res:
+                threshold = 10 if date_start != date_end else 0
+                for r in res.rows:
+                    rb_id, count = str(r[0]), int(r[1])
+                    if count > threshold:
+                        # หาว่า real_branch_id นี้ตรงกับ input branch_id ไหน
+                        # (กรณีนี้ branch_id ที่ส่งมาอาจจะเป็น sequential ID หรือ real ID ก็ได้)
+                        sync_map[rb_id] = True
+            
+            return sync_map
+        except Exception as e:
+            print(f"⚠️ [check_sync_status_batch Error] {e}")
+            return {}
 
     def is_synced(self, branch_id, sync_date):
         try:
@@ -401,29 +451,50 @@ class TursoHandler:
         except: return False
 
     def get_trades(self, date_start, date_end, branch_id=None):
+        """ดึงข้อมูลรายการเทรดสาขาเดียว"""
+        return self.get_trades_batch(date_start, date_end, branch_ids=[branch_id] if branch_id else None)
+
+    def get_trades_batch(self, date_start, date_end, branch_ids=None):
+        """ดึงข้อมูลรายการเทรดหลายสาขาพร้อมกัน (Batch Query)"""
         try:
             def to_sql(d):
                 try: 
                     p = d.split('/')
                     return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
                 except: return d
+            
             s, e = to_sql(date_start), to_sql(date_end)
             q = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
             p = [s, e]
-            if branch_id and str(branch_id) != '0':
-                q += " AND real_branch_id = ?"
-                p.append(str(branch_id))
+            
+            if branch_ids:
+                # กรองค่า None หรือ '0' ออก
+                valid_ids = [str(bid) for bid in branch_ids if bid and str(bid) != '0']
+                if valid_ids:
+                    placeholders = ', '.join(['?'] * len(valid_ids))
+                    q += f" AND real_branch_id IN ({placeholders})"
+                    p.extend(valid_ids)
+            
             q += " ORDER BY document_date DESC, trade_in_id DESC"
             res = self._execute_sql(q, p)
             if not res: return []
+            
             trades = []
             for r in res.rows:
                 t = dict(zip(res.columns, r))
-                t.update({'TRADE_ID': t.get('trade_in_id'), 'TRADE_DATE': t.get('document_date'), 
-                          'BRANCH_ID': t.get('branch_id'), 'BRANCH_NAME': t.get('branch_name'), 'PRODUCT_NAME': t.get('series')})
+                # เพิ่มฟิลด์เดิมที่ API คาดหวัง
+                t.update({
+                    'TRADE_ID': t.get('trade_in_id'), 
+                    'TRADE_DATE': t.get('document_date'), 
+                    'BRANCH_ID': t.get('branch_id'), 
+                    'BRANCH_NAME': t.get('branch_name'), 
+                    'PRODUCT_NAME': t.get('series')
+                })
                 trades.append(t)
             return trades
-        except: return []
+        except Exception as err:
+            print(f"❌ [Turso] get_trades_batch error: {err}")
+            return []
 
     def close(self):
         if self.client: self.client.close()

@@ -1462,18 +1462,73 @@ def fetch_and_process_report(filters):
         
         if target_zone:
             branch_ids = target_zone['branch_ids']
-            print(f"   Found {len(branch_ids)} branches: {branch_ids}")
+            date_start = filters.get('date_start')
+            date_end = filters.get('date_end')
+            today_str = datetime.now().strftime('%d/%m/%Y')
             
-            for i, branch_id in enumerate(branch_ids):
-                print(f"   [{i+1}/{len(branch_ids)}] Processing branch {branch_id}...")
-                branch_filters = filters.copy()
-                branch_filters['branch_id'] = branch_id
-                # ลบ zone_id ออกเพื่อไม่ให้ recursive (แม้จริงๆ function นี้ไม่ได้เรียกตัวเอง)
-                if 'zone_id' in branch_filters:
-                    del branch_filters['zone_id']
+            # 🚀 OPTIMIZATION: Use Turso Batch Fetch if not today
+            is_today = (date_end == today_str)
+            if not is_today:
+                print(f"📦 [Zone Batch] Attempting to fetch {len(branch_ids)} branches from Turso...")
+                turso = TursoHandler()
+                import re
                 
-                items = fetch_all_for_branch(branch_filters)
-                all_items.extend(items)
+                # Map sequential IDs to real IDs
+                real_id_map = {} # {real_id: seq_id}
+                real_ids = []
+                for bid in branch_ids:
+                    try:
+                        branch_info = find_branch_by_sequential_id(bid)
+                        if branch_info and 'branch_name' in branch_info:
+                            match = re.search(r'ID(\d+)', branch_info['branch_name'])
+                            if match:
+                                rid = match.group(1)
+                                real_id_map[str(rid)] = str(bid)
+                                real_ids.append(rid)
+                            else:
+                                real_ids.append(str(bid))
+                        else:
+                            real_ids.append(str(bid))
+                    except:
+                        real_ids.append(str(bid))
+                
+                # Check which ones are synced
+                sync_status = turso.check_sync_status_batch(real_ids, date_start, date_end)
+                synced_real_ids = [rid for rid, synced in sync_status.items() if synced]
+                
+                if synced_real_ids:
+                    print(f"✅ [Turso Batch] Found {len(synced_real_ids)}/{len(real_ids)} branches already synced.")
+                    batch_items = turso.get_trades_batch(date_start, date_end, branch_ids=synced_real_ids)
+                    all_items.extend(batch_items)
+                    
+                    # Identify branches that still need fetching (not synced)
+                    synced_seq_ids = [real_id_map.get(rid, rid) for rid in synced_real_ids]
+                    remaining_branch_ids = [bid for bid in branch_ids if str(bid) not in synced_seq_ids]
+                else:
+                    remaining_branch_ids = branch_ids
+                
+                turso.close()
+                
+                # Fetch remaining from API
+                if remaining_branch_ids:
+                    print(f"🔄 [API Fallback] Fetching remaining {len(remaining_branch_ids)} branches from Eve...")
+                    for i, branch_id in enumerate(remaining_branch_ids):
+                        print(f"   [{i+1}/{len(remaining_branch_ids)}] Processing branch {branch_id}...")
+                        branch_filters = filters.copy()
+                        branch_filters['branch_id'] = branch_id
+                        if 'zone_id' in branch_filters: del branch_filters['zone_id']
+                        items = fetch_all_for_branch(branch_filters)
+                        all_items.extend(items)
+            else:
+                # Is today, fetch all from API sequentially (or as before)
+                print(f"⏩ [Skip Cache] Date is 'Today'. Fetching all {len(branch_ids)} branches from Eve.")
+                for i, branch_id in enumerate(branch_ids):
+                    print(f"   [{i+1}/{len(branch_ids)}] Processing branch {branch_id}...")
+                    branch_filters = filters.copy()
+                    branch_filters['branch_id'] = branch_id
+                    if 'zone_id' in branch_filters: del branch_filters['zone_id']
+                    items = fetch_all_for_branch(branch_filters)
+                    all_items.extend(items)
         else:
             print(f"❌ Zone not found: {zone_id}")
             return {'error': 'ไม่พบข้อมูล Zone'}, []
