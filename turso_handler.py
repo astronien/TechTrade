@@ -234,7 +234,16 @@ class TursoHandler:
                     
                     if res_rem:
                         for r in res_rem.rows:
-                            sync_map[str(r[0])] = True
+                            rb_id = str(r[0])
+                            sync_map[rb_id] = True
+                            # 🛠️ Auto-Repair: บันทึกลง sync_history ทันที
+                            # ในอนาคตถ้ามีการค้นหาอีก จะได้ไม่ต้องเช็ค trades table ซ้ำ
+                            try:
+                                # หาจำนวนคร่าวๆ (เราไม่ได้ดึง count มาใน query นี้เพื่อความเร็ว แต่ใส่ 1 ไปก่อนก็ได้ 
+                                # หรือถ้าอยากเป๊ะ ต้องแก้ query ให้ COUNT(*) ด้วย)
+                                self.mark_synced(rb_id, search_date, 1)
+                                print(f"🔧 [Auto-Repair] Marked Branch {rb_id} as synced for {search_date}")
+                            except: pass
                             
             return sync_map
         except Exception as e:
@@ -292,6 +301,11 @@ class TursoHandler:
                             # ถ้าเป็นวันเดียว ข้อมูลอาจจะน้อยกว่า 10 ก็ได้ แต่ถ้ามีข้อมูลก็ถือว่า Sync แล้ว
                             threshold = 10 if '-' in sync_date else 0
                             if count > threshold:
+                                # 🛠️ Auto-Repair: บันทึกลง sync_history ทันที
+                                try:
+                                    self.mark_synced(branch_id, sync_date, count)
+                                    print(f"🔧 [Auto-Repair] Marked Branch {branch_id} as synced for {sync_date}")
+                                except: pass
                                 return True
                         except: pass
                 except: pass
