@@ -1040,17 +1040,82 @@ def fetch_data_from_api(start=0, length=50, **filters):
                 'recordsFiltered': records_filtered,
                 'source': 'eve_api'
             }
-        else:
-            print(f"   Unexpected format: {result}")
         return result
-        
-    except UnboundLocalError:
-        # Case where loop finished without assignment (should raise in loop)
-        return {"error": "API Call Failed"}
-        
     except Exception as e:
-        # Fallback
+        print(f"❌ API Global Error: {e}")
         return {"error": str(e)}
+
+def fetch_zone_data_batch(branch_ids, date_start, date_end):
+    """
+    ดึงข้อมูลแบบ Batch สำหรับหลายสาขา (ใช้สำหรับ LINE Bot Zone Reports)
+    """
+    try:
+        if not branch_ids:
+            return {}
+            
+        print(f"🔍 [Batch] Request for {len(branch_ids)} branches | Range: {date_start} to {date_end}")
+        
+        # 💡 กรณีข้อมูลวันนี้ -> บังคับดึงใหม่ทีละสาขา (เพราะ Eve API ไม่รองรับ Batch Branch IDs)
+        today_str = datetime.now().strftime('%d/%m/%Y')
+        if date_end == today_str:
+            print(f"⏩ [Batch Skip] Date is 'Today'. Using individual fetches for real-time accuracy.")
+            return None
+            
+        turso = TursoHandler()
+        if not (turso.url and turso.token):
+            return None
+            
+        # 1. แปลง branch_ids (Eve IDs) เป็น Real IDs สำหรับ Turso
+        real_ids_map = {} # {real_id: eve_id}
+        real_ids_to_fetch = []
+        
+        for eve_id in branch_ids:
+            real_id = eve_id
+            try:
+                branch_info = find_branch_by_sequential_id(eve_id)
+                if branch_info and 'branch_name' in branch_info:
+                    import re
+                    match = re.search(r'ID(\d+)', branch_info['branch_name'])
+                    if match:
+                        real_id = match.group(1)
+            except:
+                pass
+            real_ids_map[str(real_id)] = str(eve_id)
+            real_ids_to_fetch.append(str(real_id))
+            
+        # 2. ตรวจสอบสถานะการ Sync
+        sync_status = turso.check_sync_status_batch(real_ids_to_fetch, date_start, date_end)
+        
+        # 3. ถ้าทุกสาขา Sync แล้ว -> ดึง Batch
+        all_synced = all(sync_status.values())
+        if all_synced:
+            print(f"✨ [Batch Success] All branches synced in Turso. Fetching {len(real_ids_to_fetch)} branches in one query...")
+            trades = turso.get_trades_batch(real_ids_to_fetch, date_start, date_end)
+            turso.close()
+            
+            # Group back by Eve ID
+            results = {}
+            for real_id, eve_id in real_ids_map.items():
+                b_trades = [t for t in trades if str(t.get('BRANCH_ID')) == str(real_id)]
+                results[str(eve_id)] = {
+                    'data': b_trades,
+                    'recordsTotal': len(b_trades),
+                    'recordsFiltered': len(b_trades),
+                    'source': 'turso'
+                }
+            return results
+        else:
+            unsynced = [real_ids_map[rid] for rid, status in sync_status.items() if not status]
+            print(f"❓ [Batch Miss] {len(unsynced)} branches not synced (e.g. ID {unsynced[:3]}...). Falling back to individual fetches.")
+            turso.close()
+            return None
+            
+    except Exception as e:
+        print(f"⚠️ [Batch Error] {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+        
 
 
 
@@ -4084,7 +4149,8 @@ def line_webhook():
                     find_zone_by_name,
                     find_branch_by_id,
                     parse_thai_month,
-                    get_month_date_range
+                    get_month_date_range,
+                    fetch_batch_func=fetch_zone_data_batch
                 )
                 
                 if reply:

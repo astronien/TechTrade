@@ -76,7 +76,7 @@ def send_line_reply(channel_access_token, reply_token, messages):
              error_msg += f" | Response: {e.response.text}"
         print(error_msg)
         return {"success": False, "error": error_msg}
-def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zone_func, find_branch_func, parse_month_func, get_date_range_func):
+def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zone_func, find_branch_func, parse_month_func, get_date_range_func, fetch_batch_func=None):
     """
     จัดการข้อความจาก LINE และส่งกลับ response message
     
@@ -119,12 +119,12 @@ def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zon
         if zone_index == 0:
             # รายงาน zone [ชื่อโซน] - วันนี้
             zone_name = ' '.join(parts[1:])
-            return generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func)
+            return generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func, fetch_batch_func)
         else:
             # รายงาน [เดือน] zone [ชื่อโซน] - ทั้งเดือน
             month_name = ' '.join(parts[:zone_index])
             zone_name = ' '.join(parts[zone_index+1:])
-            return generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func)
+            return generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func, fetch_batch_func)
     
     elif 'รายวัน' in parts:
         # รายงาน [branch_id] รายวัน
@@ -141,7 +141,7 @@ def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zon
         return "❌ คำสั่งไม่ถูกต้อง\n\nตัวอย่าง:\n• รายงาน zone พี่โอ๊ค\n• รายงาน 9 รายวัน (สาขา ID9)\n• รายงาน 13 พฤศจิกายน (สาขา ID13)\n• รายงาน พฤศจิกายน zone พี่โอ๊ค\n• รายงาน excel รายปี 2024"
 
 
-def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
+def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func, fetch_batch_func=None):
     """สร้างรายงานวันนี้ของ Zone (แยกตามสาขา)"""
     zone = find_zone_func(zone_name)
     
@@ -164,20 +164,30 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func):
     confirmed_all = 0
     last_source = "unknown"
     
+    # ลองใช้ Batch Fetch ถ้ามี
+    batch_data = None
+    if fetch_batch_func:
+        batch_data = fetch_batch_func(branch_ids, today, today)
+    
     for branch_id in branch_ids:
-        filters = {
-            'date_start': today,
-            'date_end': today,
-            'sale_code': '',
-            'customer_sign': '',
-            'session_id': '',
-            'branch_id': str(branch_id)
-        }
+        data = None
+        if batch_data and str(branch_id) in batch_data:
+            data = batch_data[str(branch_id)]
+        else:
+            filters = {
+                'date_start': today,
+                'date_end': today,
+                'sale_code': '',
+                'customer_sign': '',
+                'session_id': '',
+                'branch_id': str(branch_id)
+            }
+            
+            data = fetch_data_func(start=0, length=1000, **filters)
         
-        data = fetch_data_func(start=0, length=1000, **filters)
         last_source = data.get('source', 'unknown')
         
-        branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
+        branch_name = branches_map.get(str(branch_id), f"สาขา {branch_id}")
         if ' : ' in branch_name:
             branch_name = branch_name.split(' : ', 2)[-1]
         
@@ -336,7 +346,7 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     return message
 
 
-def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func):
+def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func, fetch_batch_func=None):
     """สร้างรายงานทั้งเดือนของ Zone (แยกตามสาขา)"""
     zone = find_zone_func(zone_name)
     
@@ -364,20 +374,30 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
     confirmed_all = 0
     last_source = "unknown"
     
+    # ลองใช้ Batch Fetch ถ้ามี
+    batch_data = None
+    if fetch_batch_func:
+        batch_data = fetch_batch_func(branch_ids, date_start, date_end)
+    
     for branch_id in branch_ids:
-        filters = {
-            'date_start': date_start,
-            'date_end': date_end,
-            'sale_code': '',
-            'customer_sign': '',
-            'session_id': '',
-            'branch_id': str(branch_id)
-        }
+        data = None
+        if batch_data and str(branch_id) in batch_data:
+            data = batch_data[str(branch_id)]
+        else:
+            filters = {
+                'date_start': date_start,
+                'date_end': date_end,
+                'sale_code': '',
+                'customer_sign': '',
+                'session_id': '',
+                'branch_id': str(branch_id)
+            }
+            
+            data = fetch_data_func(start=0, length=5000, **filters)
         
-        data = fetch_data_func(start=0, length=5000, **filters)
         last_source = data.get('source', 'unknown')
         
-        branch_name = branches_map.get(branch_id, f"สาขา {branch_id}")
+        branch_name = branches_map.get(str(branch_id), f"สาขา {branch_id}")
         if ' : ' in branch_name:
             branch_name = branch_name.split(' : ', 2)[-1]
         

@@ -182,43 +182,60 @@ class TursoHandler:
         """ตรวจสอบสถานะการ Sync ของหลายสาขาพร้อมกัน"""
         if not branch_ids: return {}
         try:
-            def to_sql(d):
-                try: 
-                    p = d.split('/')
-                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
-                except: return d
+            # 1. เตรียม sync_key สำหรับ sync_history
+            sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+            search_date = sync_key
+            if '-' not in sync_key and '/' in sync_key:
+                parts = sync_key.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    search_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
             
-            iso_start, iso_end = to_sql(date_start), to_sql(date_end)
-            
-            # กรองเฉพาะ ID ที่เป็นตัวเลข (real_branch_id)
-            valid_ids = []
-            for b in branch_ids:
-                try: valid_ids.append(str(int(b)))
-                except: pass
-            
-            if not valid_ids: return {}
-
-            placeholders = ', '.join(['?'] * len(valid_ids))
-            sql = f"""
-                SELECT real_branch_id, COUNT(*) 
-                FROM trades 
-                WHERE real_branch_id IN ({placeholders}) 
-                AND document_date BETWEEN ? AND ? 
-                GROUP BY real_branch_id
-            """
-            params = valid_ids + [iso_start, iso_end]
+            # 2. เช็คจาก sync_history ก่อน
+            placeholders = ', '.join(['?'] * len(branch_ids))
+            sql = f"SELECT branch_id FROM sync_history WHERE sync_date = ? AND branch_id IN ({placeholders})"
+            params = [search_date] + [str(bid) for bid in branch_ids]
             res = self._execute_sql(sql, params)
             
             sync_map = {str(bid): False for bid in branch_ids}
             if res:
-                threshold = 10 if date_start != date_end else 0
                 for r in res.rows:
-                    rb_id, count = str(r[0]), int(r[1])
-                    if count > threshold:
-                        # หาว่า real_branch_id นี้ตรงกับ input branch_id ไหน
-                        # (กรณีนี้ branch_id ที่ส่งมาอาจจะเป็น sequential ID หรือ real ID ก็ได้)
-                        sync_map[rb_id] = True
+                    sync_map[str(r[0])] = True
             
+            # 3. Fallback: สำหรับตัวที่ยัง False ลองเช็คจากตาราง trades โดยตรง
+            remaining_ids = [bid for bid, synced in sync_map.items() if not synced]
+            if remaining_ids:
+                def to_iso(d):
+                    try:
+                        p = d.split('/')
+                        return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                    except: return d
+                
+                iso_start = to_iso(date_start) + " 00:00:00"
+                iso_end = to_iso(date_end) + " 23:59:59"
+                
+                placeholders_rem = ', '.join(['?'] * len(remaining_ids))
+                # กรองเฉพาะตัวเลข
+                valid_rem_ids = []
+                for rid in remaining_ids:
+                    try: valid_rem_ids.append(str(int(rid)))
+                    except: pass
+                
+                if valid_rem_ids:
+                    sql_rem = f"""
+                        SELECT real_branch_id 
+                        FROM trades 
+                        WHERE real_branch_id IN ({', '.join(['?']*len(valid_rem_ids))}) 
+                        AND document_date BETWEEN ? AND ? 
+                        GROUP BY real_branch_id
+                    """
+                    params_rem = valid_rem_ids + [iso_start, iso_end]
+                    res_rem = self._execute_sql(sql_rem, params_rem)
+                    
+                    if res_rem:
+                        for r in res_rem.rows:
+                            sync_map[str(r[0])] = True
+                            
             return sync_map
         except Exception as e:
             print(f"⚠️ [check_sync_status_batch Error] {e}")
