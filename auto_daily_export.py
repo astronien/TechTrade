@@ -1,19 +1,15 @@
-# Auto Daily Export Engine
-# ระบบ export ข้อมูล trade รายวันอัตโนมัติไป Google Drive
+# Auto Daily Turso Sync Engine
+# ระบบ Sync ข้อมูล trade รายวันอัตโนมัติเข้าสู่ Turso Database (ยกเลิก Google Drive ถาวร)
 
 import json
 import os
 import time
-import tempfile
 from datetime import datetime, timedelta
-from collections import defaultdict
-
-from google_drive_uploader import GoogleDriveUploader
 from turso_handler import TursoHandler
 
 
 def get_auto_export_config():
-    """ดึง config auto-export จาก DB"""
+    """ดึง config auto-sync จาก DB"""
     try:
         from app import get_db_connection
         conn = get_db_connection()
@@ -29,30 +25,28 @@ def get_auto_export_config():
             return dict(row)
         return None
     except Exception as e:
-        print(f"❌ Error getting auto-export config: {e}")
+        print(f"❌ Error getting config: {e}")
         return None
 
 
-def save_auto_export_log(log_data):
-    """บันทึก log การ export"""
+def save_auto_sync_log(log_data):
+    """บันทึก log การ sync ข้อมูลเข้า Turso"""
     try:
         from app import get_db_connection
         conn = get_db_connection()
         if not conn:
             return
         cur = conn.cursor()
+        # ใช้ตารางเดิม แต่เปลี่ยนความหมายของฟิลด์บางส่วน
         cur.execute("""
             INSERT INTO auto_export_log 
-            (zone_id, zone_name, date_exported, total_records, file_name, 
-             gdrive_file_id, status, error_message, duration_seconds)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (zone_id, zone_name, date_exported, total_records, status, error_message, duration_seconds)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             log_data.get('zone_id', ''),
             log_data.get('zone_name', ''),
-            log_data.get('date_exported', ''),
+            log_data.get('date_sync', ''),
             log_data.get('total_records', 0),
-            log_data.get('file_name', ''),
-            log_data.get('gdrive_file_id', ''),
             log_data.get('status', 'success'),
             log_data.get('error_message', ''),
             log_data.get('duration_seconds', 0)
@@ -61,11 +55,11 @@ def save_auto_export_log(log_data):
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"❌ Error saving export log: {e}")
+        print(f"❌ Error saving sync log: {e}")
 
 
 def fetch_zone_daily_data(zone, target_date):
-    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุ"""
+    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve"""
     from app import fetch_all_for_branch
     
     date_str = target_date.strftime("%d/%m/%Y")
@@ -74,7 +68,7 @@ def fetch_zone_daily_data(zone, target_date):
     
     print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str}")
     
-    for i, branch_id in enumerate(branch_ids):
+    for branch_id in branch_ids:
         try:
             filters = {
                 'date_start': date_str,
@@ -93,310 +87,8 @@ def fetch_zone_daily_data(zone, target_date):
     return all_items
 
 
-def append_data_to_excel(filepath, trade_data, branches_info=None):
-    """เพิ่มข้อมูลลงในไฟล์ Excel เดิมที่มีอยู่แล้ว
-    Args:
-        filepath: path ของไฟล์ Excel เดิม
-        trade_data: ข้อมูลใหม่ที่จะเพิ่ม
-        branches_info: ข้อมูลสาขา
-    Returns:
-        bool: สำเร็จหรือไม่
-    """
-    if not trade_data:
-        return True
-        
-    try:
-        from openpyxl import load_workbook
-        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-        
-        wb = load_workbook(filepath)
-        ws = wb.active
-        
-        # หาบรรทัดสุดท้าย
-        last_row = ws.max_row
-        
-        # หา headers เพื่อดูว่า column ไหนคืออะไร
-        headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
-        
-        # เตรียม mapping header -> column index
-        header_to_idx = {h: i+1 for i, h in enumerate(headers)}
-        
-        # === Column Definitions (เพื่อ mapping ข้อมูลใหม่) ===
-        standard_columns = [
-            ('branch_id', 'รหัสสาขา'), ('branch_name', 'ชื่อสาขา'), ('document_no', 'เลขที่คำสั่งเทรด'),
-            ('IS_SIGNED', 'ลายเซ็นลูกค้า'), ('SIGN_DATE', 'วันที่ลูกค้าคืนเครื่อง'), ('document_date', 'วันที่คำสั่งเทรด'),
-            ('series', 'สินค้า'), ('category_name', 'ประเภทสินค้า'), ('brand_name', 'แบรนด์'),
-            ('part_number', 'อีมี่/ซีเรียล'), ('amount', 'ราคายืนยัน'), ('COUPON_TRADE_IN_CODE', 'คูปองส่วนลดค่าเครื่อง'),
-            ('invoice_no', 'เลขที่บิลขาย'), ('CAMPAIGN_ON_TOP_NAME', 'โปรโมชั่นส่วนลดแบรนด์'),
-            ('COUPON_ON_TOP_BRAND_CODE', 'คูปองส่วนลดแบรนด์'), ('COUPON_ON_TOP_BRAND_PRICE', 'มูลค่าส่วนลดแบรนด์'),
-            ('COUPON_ON_TOP_COMPANY_CODE', 'คูปองส่วนลดบริษัท'), ('COUPON_ON_TOP_COMPANY_PRICE', 'มูลค่าส่วนลดบริษัท'),
-            ('net_price', 'ราคาสุทธิ'), ('customer_name', 'ชื่อผู้ขาย'), ('customer_phone_number', 'เบอร์โทรศัพท์ผู้ขาย'),
-            ('customer_email', 'อีเมล์ผู้ขาย'), ('buyer_name', 'ผู้รับซื้อ'), ('SALE_CODE', 'รหัสพนักงานขาย'),
-            ('SALE_NAME', 'ชื่อพนักงานขาย'), ('DOCUMENT_REF_1', 'เลขที่เอกสารอ้างอิง'), ('BIDDING_STATUS_NAME', 'สถานะ'),
-            ('CHANGE_REQUEST_COUNT', 'จำนวนที่ถูกแก้ไข'), ('trade_in_id', 'Trade In ID')
-        ]
-        label_to_key = {label: key for key, label in standard_columns}
-        
-        # ป้องกันข้อมูลซ้ำ (เช็คจาก trade_in_id ในไฟล์เดิม)
-        existing_ids = set()
-        if 'Trade In ID' in header_to_idx:
-            tid_col = header_to_idx['Trade In ID']
-            for r in range(2, last_row + 1):
-                val = ws.cell(row=r, column=tid_col).value
-                if val: existing_ids.add(str(val))
-        
-        # เพิ่มข้อมูล
-        thin_border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
-        )
-        
-        added_count = 0
-        for item in trade_data:
-            tid = str(item.get('trade_in_id', ''))
-            if tid in existing_ids:
-                continue
-                
-            # แปลงข้อมูล (เหมือนใน generate_daily_excel)
-            bid_internal = str(item.get('_branch_id', item.get('branch_id', '')))
-            info = branches_info.get(bid_internal, {'name': bid_internal, 'code': bid_internal})
-            item['branch_id'] = info['code']
-            item['branch_name'] = info['name']
-            
-            try:
-                amt = float(item.get('amount', 0) or 0)
-                tub = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
-                tuc = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
-                item['net_price'] = amt + tub + tuc
-            except:
-                item['net_price'] = float(item.get('amount', 0) or 0)
-
-            last_row += 1
-            added_count += 1
-            
-            for col_idx, header in enumerate(headers, start=1):
-                cell = ws.cell(row=last_row, column=col_idx)
-                cell.border = thin_border
-                
-                if header == 'ลำดับ':
-                    cell.value = last_row - 1
-                elif header in label_to_key:
-                    key = label_to_key[header]
-                    value = item.get(key, '')
-                    
-                    # Date formatting
-                    if key in ['document_date', 'SIGN_DATE'] and isinstance(value, str) and value.startswith('/Date('):
-                        import re
-                        match = re.search(r'\((\d+)\)', value)
-                        if match:
-                            ts = int(match.group(1)) / 1000
-                            value = datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
-                    
-                    cell.value = value
-                else:
-                    # คอลัมน์อื่นๆ ที่ไม่ได้อยู่ใน Standard
-                    cell.value = item.get(header, '')
-        
-        wb.save(filepath)
-        print(f"   📝 Appended {added_count} new records to existing file")
-        return True
-    except Exception as e:
-        print(f"   ❌ Error appending to Excel: {e}")
-        return False
-
-
-def generate_daily_excel(trade_data, zone_name, target_date, branches_info=None):
-    """สร้างไฟล์ Excel รายงานรายวัน
-    Args:
-        trade_data: list of trade records
-        zone_name: ชื่อ zone
-        target_date: datetime date
-        branches_info: dict mapping branch_id -> branch_name
-    Returns:
-        str: filepath ของไฟล์ Excel
-    """
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-    from openpyxl.utils import get_column_letter
-    import re
-    
-    wb = Workbook()
-    ws = wb.active
-    
-    date_display = target_date.strftime("%d/%m/%Y")
-    # Excel sheet title ห้ามมี / \ * ? [ ]
-    sheet_title_date = target_date.strftime("%d-%m-%Y")
-    ws.title = f"รายงาน {sheet_title_date}"
-    
-    # === Data Table ===
-    # Start from row 1 (No header/footer as requested)
-    header_row = 1
-    
-    header_fill = PatternFill(start_color="667eea", end_color="667eea", fill_type="solid")
-    header_font = Font(bold=True, size=10, color="FFFFFF")
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
-    # === Column Definitions ===
-    # Standard columns with Thai labels (matching index.html)
-    standard_columns = [
-        ('branch_id', 'รหัสสาขา'),
-        ('branch_name', 'ชื่อสาขา'),
-        ('document_no', 'เลขที่คำสั่งเทรด'),
-        ('IS_SIGNED', 'ลายเซ็นลูกค้า'),
-        ('SIGN_DATE', 'วันที่ลูกค้าคืนเครื่อง'),
-        ('document_date', 'วันที่คำสั่งเทรด'),
-        ('series', 'สินค้า'),
-        ('category_name', 'ประเภทสินค้า'),
-        ('brand_name', 'แบรนด์'),
-        ('part_number', 'อีมี่/ซีเรียล'),
-        ('amount', 'ราคายืนยัน'),
-        ('COUPON_TRADE_IN_CODE', 'คูปองส่วนลดค่าเครื่อง'),
-        ('invoice_no', 'เลขที่บิลขาย'),
-        ('CAMPAIGN_ON_TOP_NAME', 'โปรโมชั่นส่วนลดแบรนด์'),
-        ('COUPON_ON_TOP_BRAND_CODE', 'คูปองส่วนลดแบรนด์'),
-        ('COUPON_ON_TOP_BRAND_PRICE', 'มูลค่าส่วนลดแบรนด์'),
-        ('COUPON_ON_TOP_COMPANY_CODE', 'คูปองส่วนลดบริษัท'),
-        ('COUPON_ON_TOP_COMPANY_PRICE', 'มูลค่าส่วนลดบริษัท'),
-        ('net_price', 'ราคาสุทธิ'),
-        ('customer_name', 'ชื่อผู้ขาย'),
-        ('customer_phone_number', 'เบอร์โทรศัพท์ผู้ขาย'),
-        ('customer_email', 'อีเมล์ผู้ขาย'),
-        ('buyer_name', 'ผู้รับซื้อ'),
-        ('SALE_CODE', 'รหัสพนักงานขาย'),
-        ('SALE_NAME', 'ชื่อพนักงานขาย'),
-        ('DOCUMENT_REF_1', 'เลขที่เอกสารอ้างอิง'),
-        ('BIDDING_STATUS_NAME', 'สถานะ'),
-        ('CHANGE_REQUEST_COUNT', 'จำนวนที่ถูกแก้ไข'),
-        ('trade_in_id', 'Trade In ID')
-    ]
-    
-    # ดึง keys ทั้งหมดจากข้อมูลรายการแรก (ถ้ามี) เพื่อหาคอลัมน์อื่นๆ
-    all_api_keys = []
-    if trade_data:
-        all_api_keys = list(trade_data[0].keys())
-        
-    # คอลัมน์ที่จะใช้จริง (ลำดับ + Standard + Others)
-    final_headers = ['ลำดับ']
-    header_to_key = { 'ลำดับ': None }
-    
-    # 1. ใส่ Standard Columns
-    for key, label in standard_columns:
-        final_headers.append(label)
-        header_to_key[label] = key
-        
-    # 2. ใส่คอลัมน์ที่เหลือจาก API
-    standard_keys = [c[0] for c in standard_columns]
-    for key in all_api_keys:
-        if key not in standard_keys and key not in ['_branch_id']: 
-            final_headers.append(key)
-            header_to_key[key] = key
-
-    for col_idx, header in enumerate(final_headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx)
-        cell.value = header
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.border = thin_border
-    
-    # === Data Rows ===
-    AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
-    agreed_fill = PatternFill(start_color="d4edda", end_color="d4edda", fill_type="solid")
-    cancelled_fill = PatternFill(start_color="f8d7da", end_color="f8d7da", fill_type="solid")
-    
-    total_amount = 0
-    total_net_amount = 0
-    agreed_count = 0
-    
-    for row_idx, item in enumerate(trade_data, start=header_row + 1):
-        # Calculate derived fields
-        bid_internal = str(item.get('_branch_id', item.get('branch_id', '')))
-        
-        # Get parsed branch info (code and name)
-        info = branches_info.get(bid_internal, {'name': bid_internal, 'code': bid_internal})
-        item['branch_id'] = info['code']
-        item['branch_name'] = info['name']
-        
-        # Net Price
-        try:
-            amt = float(item.get('amount', 0) or 0)
-            tub = float(item.get('COUPON_ON_TOP_BRAND_PRICE', 0) or 0)
-            tuc = float(item.get('COUPON_ON_TOP_COMPANY_PRICE', 0) or 0)
-            item['net_price'] = amt + tub + tuc
-        except:
-            item['net_price'] = float(item.get('amount', 0) or 0)
-
-        status_name = item.get('BIDDING_STATUS_NAME', '')
-        is_agreed = status_name in AGREED_STATUSES or item.get('status') == 3
-        if is_agreed:
-            agreed_count += 1
-            total_amount += float(item.get('amount', 0) or 0)
-            total_net_amount += item['net_price']
-
-        # Build Row Data
-        for col_idx, header in enumerate(final_headers, start=1):
-            key = header_to_key[header]
-            cell = ws.cell(row=row_idx, column=col_idx)
-            
-            if header == 'ลำดับ':
-                value = row_idx - header_row
-            else:
-                value = item.get(key, '')
-                
-                # Special formatting
-                if key in ['document_date', 'SIGN_DATE'] and isinstance(value, str) and value.startswith('/Date('):
-                    try:
-                        ts = int(re.search(r'\d+', value).group()) / 1000
-                        value = datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
-                    except: pass
-                elif key == 'IS_SIGNED':
-                    value = 'เซ็นแล้ว' if value == '1' else 'ยังไม่เซ็น'
-                elif key in ['amount', 'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_PRICE', 'net_price']:
-                    try: value = float(value) if value else 0
-                    except: value = 0
-            
-            cell.value = value
-            cell.border = thin_border
-            cell.alignment = Alignment(vertical='center')
-            
-            # Color coding
-            if is_agreed:
-                cell.fill = agreed_fill
-            elif 'ยกเลิก' in status_name:
-                cell.fill = cancelled_fill
-                cell.fill = cancelled_fill
-    
-    # === Summary Row Removed per User Request ===
-    
-    # === Column widths ===
-    widths = [
-        6, 20, 15, 20, 20, 
-        15, 15, 25, 20, 20, 
-        15, 30, 20, 15, 
-        20, 15, 15,
-        15, 20, 25, 15, 25, 25,
-        20, 20, 20, 15,
-        15, 25
-    ]
-    for i, w in enumerate(widths):
-        ws.column_dimensions[get_column_letter(i + 1)].width = w
-    
-    # === Save ===
-    date_str = target_date.strftime("%Y-%m-%d")
-    filename = f"{date_str}_{zone_name}.xlsx"
-    temp_dir = '/tmp' if os.path.exists('/tmp') else tempfile.gettempdir()
-    filepath = os.path.join(temp_dir, filename)
-    
-    wb.save(filepath)
-    print(f"✅ Daily Excel saved: {filepath} ({len(trade_data)} records)")
-    
-    return filepath
-
-
 def run_daily_export(force=False):
-    """ฟังก์ชันหลัก: Export ข้อมูลรายวันไป Google Drive
+    """ฟังก์ชันหลัก: Sync ข้อมูลรายวันเข้า Turso Database
     Args:
         force: True = บังคับรัน (ไม่ตรวจสอบว่ารันไปแล้วหรือยัง)
     Returns:
@@ -405,7 +97,7 @@ def run_daily_export(force=False):
     import pytz
     
     print("\n" + "=" * 60)
-    print(f"📤 Auto Daily Export Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🗄️ Auto Turso Sync Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
     start_time = time.time()
@@ -413,58 +105,39 @@ def run_daily_export(force=False):
     # 1. ดึง config
     config = get_auto_export_config()
     if not config:
-        print("⚠️ No auto-export config found")
+        print("⚠️ No auto-sync config found")
         return {'success': False, 'message': 'ไม่พบ config กรุณาตั้งค่าก่อน'}
     
     if not force and not config.get('enabled'):
-        print("⚠️ Auto-export is disabled")
-        return {'success': False, 'message': 'ระบบ auto-export ปิดอยู่'}
+        print("⚠️ Auto-sync is disabled")
+        return {'success': False, 'message': 'ระบบ auto-sync ปิดอยู่'}
     
-    # 2. ตรวจสอบ Google Drive credentials
-    gdrive_credentials = config.get('gdrive_credentials', '')
-    root_folder_id = config.get('gdrive_folder_id', '')
-    max_files = config.get('max_files_per_zone', 365)
-    
-    if not gdrive_credentials or not root_folder_id:
-        print("❌ Google Drive credentials or folder ID not configured")
-        return {'success': False, 'message': 'กรุณาตั้งค่า Google Drive credentials และ Folder ID'}
-    
-    # 3. Initialize Google Drive uploader
-    uploader = GoogleDriveUploader(gdrive_credentials)
-    test_result = uploader.test_connection()
-    if not test_result['success']:
-        print(f"❌ Google Drive connection failed: {test_result['message']}")
-        return {'success': False, 'message': f'เชื่อมต่อ Google Drive ไม่สำเร็จ: {test_result["message"]}'}
-    
-    print(f"✅ Google Drive connected: {test_result.get('email', '')}")
-    
-    # 3.1 Initialize Turso handler
+    # 2. Initialize Turso handler
     turso_url = os.getenv('TURSO_DATABASE_URL')
     turso_token = os.getenv('TURSO_AUTH_TOKEN')
-    turso = None
     
-    if turso_url and turso_token:
-        turso = TursoHandler(turso_url, turso_token)
-        if turso.init_db():
-            print("✅ Turso Database connected and initialized")
-        else:
-            print("⚠️ Turso initialization failed, will continue with Drive only")
-            turso = None
-    else:
-        print("⚠️ Turso credentials not found in environment, skipping Turso export")
+    if not turso_url or not turso_token:
+        print("❌ Turso credentials not found in environment")
+        return {'success': False, 'message': 'กรุณาตั้งค่า Turso URL และ Token ใน environment'}
+        
+    turso = TursoHandler(turso_url, turso_token)
+    if not turso.init_db():
+        print("❌ Turso initialization failed")
+        return {'success': False, 'message': 'เชื่อมต่อ Turso Database ไม่สำเร็จ'}
     
-    # 4. กำหนดวันที่ที่จะ export (วันก่อนหน้า)
+    print("✅ Turso Database connected and ready")
+    
+    # 3. กำหนดวันที่ที่จะ sync (วันก่อนหน้า)
     bkk_tz = pytz.timezone('Asia/Bangkok')
     now_bkk = datetime.now(bkk_tz)
     target_date = (now_bkk - timedelta(days=1)).date()
     target_date_dt = datetime.combine(target_date, datetime.min.time())
     
     date_str_display = target_date.strftime("%d/%m/%Y")
+    print(f"📅 Sync date: {date_str_display}")
     
-    print(f"📅 Export date: {date_str_display}")
-    
-    # 5. ดึง Zone list
-    from app import load_custom_zones_from_file, get_branches_from_db
+    # 4. ดึง Zone list
+    from app import load_custom_zones_from_file
     
     zone_ids_config = config.get('zone_ids', [])
     if isinstance(zone_ids_config, str):
@@ -476,164 +149,73 @@ def run_daily_export(force=False):
     all_zones = load_custom_zones_from_file()
     
     if zone_ids_config:
-        # เฉพาะ zone ที่เลือก
-        zones_to_export = [z for z in all_zones if z['zone_id'] in zone_ids_config]
+        zones_to_sync = [z for z in all_zones if z['zone_id'] in zone_ids_config]
     else:
-        # ทุก zone
-        zones_to_export = all_zones
+        zones_to_sync = all_zones
     
-    if not zones_to_export:
-        print("⚠️ No zones to export")
-        return {'success': False, 'message': 'ไม่มี zone ที่ต้องการ export'}
+    if not zones_to_sync:
+        print("⚠️ No zones to sync")
+        return {'success': False, 'message': 'ไม่มี zone ที่ต้องการ sync'}
     
-    print(f"📋 Zones to export: {len(zones_to_export)}")
+    print(f"📋 Zones to sync: {len(zones_to_sync)}")
     
-    # 6. สร้าง branch name lookup
-    branches = get_branches_from_db()
-    branches_info = {}
-    for b in branches:
-        bid = str(b.get('branch_id', ''))
-        bname_full = b.get('branch_name', bid)
-        
-        b_code = bid
-        b_name_only = bname_full
-        
-        if ' : ' in bname_full:
-            parts = bname_full.split(' : ')
-            raw_code = parts[0].strip()
-            if raw_code.isdigit():
-                b_code = str(int(raw_code))
-            else:
-                b_code = raw_code
-                
-            b_name_only = parts[-1].strip() if len(parts) > 1 else bname_full
-            
-        branches_info[bid] = {
-            'code': b_code,
-            'name': b_name_only
-        }
-    
-    # 7. Export แต่ละ Zone
+    # 5. Sync แต่ละ Zone
     results = []
     total_records = 0
-    total_files = 0
+    total_synced_zones = 0
     total_errors = 0
     
-    # Loop แต่ละ Zone
-    for zone_idx, zone in enumerate(zones_to_export):
+    for zone_idx, zone in enumerate(zones_to_sync):
         zone_name = zone['zone_name']
         zone_id = zone['zone_id']
         zone_start = time.time()
         
-        print(f"\n{'─' * 40}")
-        print(f"📦 [{zone_idx+1}/{len(zones_to_export)}] Processing Zone: {zone_name}")
+        print(f"\n📦 [{zone_idx+1}/{len(zones_to_sync)}] Syncing Zone: {zone_name}")
         
         try:
-            # 1. ดึงข้อมูลวันนี้
+            # 1. ดึงข้อมูลวันนี้จาก Eve
             trade_data = fetch_zone_daily_data(zone, target_date_dt)
             
-            # 2. ตรวจสอบไฟล์สะสมของเดือนนี้ใน Drive
-            year_month = target_date.strftime('%Y-%m')
-            existing_file = uploader.find_monthly_file(root_folder_id, zone_name, year_month)
-            
-            # เตรียมไฟล์ปลายทาง (ใน /tmp สำหรับ Vercel)
-            temp_dir = tempfile.gettempdir()
-            month_start_str = target_date.replace(day=1).strftime('%Y-%m-%d')
-            today_str = target_date.strftime('%Y-%m-%d')
-            new_filename = f"{zone_name}_{month_start_str}_to_{today_str}.xlsx"
-            filepath = os.path.join(temp_dir, new_filename)
-            
-            old_file_id = None
-            if existing_file:
-                print(f"   📂 Found existing monthly file: {existing_file['name']}")
-                old_file_id = existing_file['id']
-                # โหลดมาเขียนต่อ
-                download_path = os.path.join(temp_dir, f"old_{existing_file['name']}")
-                if uploader.download_file(old_file_id, download_path):
-                    # ย้ายมาเป็นไฟล์ที่จะใช้ทำงาน
-                    import shutil
-                    shutil.copy2(download_path, filepath)
-                    # เขียนต่อ
-                    append_data_to_excel(filepath, trade_data, branches_info)
-                    if os.path.exists(download_path): os.remove(download_path)
-                else:
-                    # ถ้าโหลดไม่ได้ ให้สร้างใหม่แทน
-                    filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
+            # 2. บันทึกลง Turso
+            inserted = 0
+            if trade_data:
+                inserted = turso.insert_trades_batch(trade_data, zone_name)
+                print(f"   ✅ Saved {inserted} records to Turso Database")
             else:
-                # ถ้าไม่เจอไฟล์สะสม (เช่น วันที่ 1) สร้างไฟล์ใหม่
-                filepath = generate_daily_excel(trade_data, zone_name, target_date_dt, branches_info)
-                # เปลี่ยนชื่อให้เป็นรูปแบบสะสม
-                os.rename(filepath, os.path.join(temp_dir, new_filename))
-                filepath = os.path.join(temp_dir, new_filename)
+                print("   ℹ️ No data found for this zone on target date")
 
-            # 3. หารหัส Folder ของ Zone
-            zone_folder_id = uploader.ensure_folder_path(root_folder_id, zone_name)
-            if not zone_folder_id:
-                raise Exception(f"Failed to find or create folder for zone '{zone_name}'")
-            
-            # 4. Upload ตัวใหม่
-            upload_result = uploader.upload_file(filepath, zone_folder_id, new_filename)
-            if not upload_result:
-                raise Exception("Upload failed")
-            
-            # 5. ลบไฟล์เก่าใน Drive (เพื่อให้เหลือแค่ตัวล่าสุดตัวเดียว)
-            if old_file_id and upload_result:
-                uploader.delete_file(old_file_id)
-                print(f"   🗑️ Removed previous monthly file: {existing_file['name']}")
-            
-            # 6. FIFO cleanup (เผื่อไว้ถ้ามีไฟล์เก่าของเดือนอื่นๆ เยอะเกิน)
-            deleted_count = uploader.fifo_cleanup(root_folder_id, zone_name, max_files)
-            
             zone_duration = time.time() - zone_start
             
             # บันทึก log
-            save_auto_export_log({
+            save_auto_sync_log({
                 'zone_id': zone_id,
                 'zone_name': zone_name,
-                'date_exported': date_str_display,
-                'total_records': len(trade_data),
-                'file_name': new_filename,
-                'gdrive_file_id': upload_result.get('id', ''),
+                'date_sync': date_str_display,
+                'total_records': inserted,
                 'status': 'success',
                 'duration_seconds': zone_duration
             })
             
-            # 5.1 บันทึกลง Turso (ขนานกัน)
-            if turso and trade_data:
-                inserted = turso.insert_trades_batch(trade_data, zone_name)
-                print(f"   🗄️ Saved {inserted} records to Turso Database")
-
-            total_records += len(trade_data)
-            total_files += 1
+            total_records += inserted
+            total_synced_zones += 1
             
             results.append({
                 'zone_name': zone_name,
-                'records': len(trade_data),
+                'records': inserted,
                 'status': 'success',
-                'deleted_old': deleted_count,
                 'duration': f"{zone_duration:.1f}s"
             })
-            
-            print(f"✅ Zone '{zone_name}': {len(trade_data)} records uploaded ({zone_duration:.1f}s)")
-            
-            # ลบ temp file
-            try:
-                os.remove(filepath)
-            except:
-                pass
             
         except Exception as e:
             zone_duration = time.time() - zone_start
             error_msg = str(e)
-            print(f"❌ Zone '{zone_name}' failed: {error_msg}")
+            print(f"❌ Zone '{zone_name}' sync failed: {error_msg}")
             
-            save_auto_export_log({
+            save_auto_sync_log({
                 'zone_id': zone_id,
                 'zone_name': zone_name,
-                'date_exported': date_str_display,
+                'date_sync': date_str_display,
                 'total_records': 0,
-                'file_name': '',
-                'gdrive_file_id': '',
                 'status': 'failed',
                 'error_message': error_msg,
                 'duration_seconds': zone_duration
@@ -649,12 +231,9 @@ def run_daily_export(force=False):
             })
     
     total_duration = time.time() - start_time
-    
-    # 8. ปิดการเชื่อมต่อ Turso
-    if turso:
-        turso.close()
+    turso.close()
         
-    # 9. ส่ง Telegram notification (ใช้ bot/chat เดียวกับ auto-cancel)
+    # 6. ส่ง Telegram notification
     try:
         from app import get_auto_cancel_config, send_telegram_notification
         
@@ -664,38 +243,38 @@ def run_daily_export(force=False):
             chat_id = cancel_config.get('telegram_chat_id', '')
             
             if bot_token and chat_id:
-                msg = f"""📤 <b>Auto Daily Export Report</b>
+                msg = f"""🗄️ <b>Auto Turso Sync Report</b>
 📅 ข้อมูลวันที่: {date_str_display}
 ⏰ เวลารัน: {now_bkk.strftime('%d/%m/%Y %H:%M')}
 
 📊 <b>สรุป:</b>
-🗺️ Zone ทั้งหมด: {len(zones_to_export)}
-✅ สำเร็จ: {total_files} zone
+🗺️ Zone ทั้งหมด: {len(zones_to_sync)}
+✅ สำเร็จ: {total_synced_zones} zone
 ❌ ล้มเหลว: {total_errors} zone
-📋 รายการทั้งหมด: {total_records:,} records
+📋 รายการใหม่: {total_records:,} records
 ⏱️ ใช้เวลา: {total_duration:.1f} วินาที
 
 📋 <b>รายละเอียด:</b>"""
                 
                 for r in results:
                     if r['status'] == 'success':
-                        msg += f"\n✅ {r['zone_name']}: {r['records']:,} records ({r['duration']})"
+                        msg += f"\n✅ {r['zone_name']}: {r['records']:,} records"
                     else:
-                        msg += f"\n❌ {r['zone_name']}: {r.get('error', 'unknown error')}"
+                        msg += f"\n❌ {r['zone_name']}: {r.get('error', 'error')}"
                 
                 send_telegram_notification(bot_token, chat_id, msg)
     except Exception as tg_err:
         print(f"⚠️ Telegram notification error: {tg_err}")
     
     print(f"\n{'=' * 60}")
-    print(f"📤 Auto Daily Export Completed in {total_duration:.1f}s")
-    print(f"   Files: {total_files}, Records: {total_records}, Errors: {total_errors}")
+    print(f"🗄️ Auto Turso Sync Completed in {total_duration:.1f}s")
+    print(f"   Zones: {total_synced_zones}, Records: {total_records}, Errors: {total_errors}")
     print(f"{'=' * 60}\n")
     
     return {
         'success': total_errors == 0,
-        'total_zones': len(zones_to_export),
-        'total_files': total_files,
+        'total_zones': len(zones_to_sync),
+        'total_synced': total_synced_zones,
         'total_records': total_records,
         'total_errors': total_errors,
         'duration': f"{total_duration:.1f}s",

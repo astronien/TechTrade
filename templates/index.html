@@ -438,16 +438,15 @@
         <!-- Auto Export Page -->
         <div id="autoexportPage" class="page-section">
             <div class="container">
-                <h1>📤 Auto Daily Export to Google Drive</h1>
+                <h1>🗄️ Auto Daily Turso Sync</h1>
 
                 <div class="search-panel">
                     <!-- Toggle -->
                     <div
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
                         <div>
-                            <h3 style="margin:0; color: var(--text-main);">Auto Export</h3>
-                            <small style="color: var(--text-muted);">ดึงข้อมูลเทรดรายวัน สร้าง Excel แล้วอัพโหลดไป
-                                Google Drive อัตโนมัติ</small>
+                            <h3 style="margin:0; color: var(--text-main);">Auto Sync to Turso</h3>
+                            <small style="color: var(--text-muted);">ดึงข้อมูลเทรดรายวันและบันทึกเข้าสู่ Turso Database อัตโนมัติ</small>
                         </div>
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                             <input type="checkbox" id="aeEnabled" style="width: 20px; height: 20px; cursor: pointer;">
@@ -460,7 +459,7 @@
                     <!-- เวลา -->
                     <div class="form-row">
                         <div class="form-group">
-                            <label>⏰ เวลา Export (ทุกวัน)</label>
+                            <label>⏰ เวลา Sync (ทุกวัน)</label>
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 <select id="aeHour" class="form-control" style="width: 80px;">
                                     <script>
@@ -481,19 +480,12 @@
                                     จะดึงข้อมูลของวันก่อนหน้า</span>
                             </div>
                         </div>
-
-                        <div class="form-group">
-                            <label>📁 FIFO Limit (จำนวนไฟล์สูงสุดต่อ Zone)</label>
-                            <input type="number" id="aeMaxFiles" value="365" min="30" max="3650" class="form-control"
-                                style="width: 120px;">
-                            <small style="color: var(--text-muted);">เมื่อครบจะลบไฟล์เก่าสุดออก (FIFO)</small>
-                        </div>
                     </div>
 
                     <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
 
                     <!-- Zone Selection -->
-                    <h3 style="color: var(--primary); margin-bottom: 15px;">🗺️ เลือก Zone ที่ต้องการ Export</h3>
+                    <h3 style="color: var(--primary); margin-bottom: 15px;">🗺️ เลือก Zone ที่ต้องการ Sync</h3>
                     <div style="margin-bottom: 15px;">
                         <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                             <select id="aeZoneSelect" class="form-control" style="flex: 1;">
@@ -505,45 +497,7 @@
                                 style="padding: 8px 16px; font-size: 13px; white-space: nowrap;">📋 ทั้งหมด</button>
                         </div>
                         <div id="aeSelectedZones" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
-                        <small style="color: var(--text-muted);">ว่าง = export ทุก Zone</small>
-                    </div>
-
-                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
-
-                    <!-- Google Drive Settings -->
-                    <h3 style="color: #4285f4; margin-bottom: 15px;">📁 Google Drive Settings</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Folder ID</label>
-                            <input type="text" id="aeFolderId" placeholder="Google Drive Folder ID" class="form-control">
-                            <small style="color: var(--text-muted);">ID ของ folder ที่ต้องการเก็บไฟล์ (จาก URL ของ
-                                Drive)</small>
-                        </div>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <label>🔐 เชื่อมต่อ Google Drive (OAuth2)</label>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
-                            <div>
-                                <small style="color: var(--text-muted);">Client ID</small>
-                                <input type="text" id="aeClientId" placeholder="OAuth Client ID" class="form-control" style="font-size: 12px;">
-                            </div>
-                            <div>
-                                <small style="color: var(--text-muted);">Client Secret</small>
-                                <input type="password" id="aeClientSecret" placeholder="OAuth Client Secret" class="form-control" style="font-size: 12px;">
-                            </div>
-                        </div>
-                        <small style="color: var(--text-muted); display: block; margin-top: 5px;">
-                            ⚠️ ต้องเพิ่ม Redirect URI: <code style="color: #4285f4;">https://report-trade.vercel.app/api/admin/gdrive-callback</code> ใน Google Cloud Console > Credentials > OAuth 2.0 Client IDs
-                        </small>
-                    </div>
-                    <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
-                        <button onclick="connectGoogleDrive()" class="secondary"
-                            style="padding: 8px 20px; background: #4285f4; color: white; border: none;">🔗
-                            เชื่อมต่อ Google Drive</button>
-                        <button onclick="testGDriveConnection()" class="secondary"
-                            style="padding: 8px 20px; background: #34a853; color: white; border: none;">✅
-                            ทดสอบการเชื่อมต่อ</button>
-                        <span id="aeGdriveStatus" style="margin-left: 10px; font-size: 13px;"></span>
+                        <small style="color: var(--text-muted);">ว่าง = sync ทุก Zone</small>
                     </div>
 
                     <hr style="border: none; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
@@ -2156,7 +2110,7 @@
             }
 
             async function testAutoExport() {
-                if (!confirm('🧪 ทดสอบรัน Auto Export เดี๋ยวนี้?\n\nระบบจะดึงข้อมูลวันก่อนหน้าจากทุก Zone ที่เลือก\nสร้าง Excel และ upload ไป Google Drive จริง\n\nกรุณาบันทึก config ก่อนกดทดสอบ')) return;
+                if (!confirm('🧪 ทดสอบรัน Auto Sync เดี๋ยวนี้?\n\nระบบจะดึงข้อมูลวันก่อนหน้าจากทุก Zone ที่เลือก\nและบันทึกลง Turso Database ทันที\n\nกรุณาบันทึก config ก่อนกดทดสอบ')) return;
                 
                 const btn = event.target;
                 const origText = btn.innerHTML;
@@ -2172,7 +2126,7 @@
                     
                     if (data.success) {
                         const r = data.result || {};
-                        alert(`✅ รัน Auto Export เสร็จแล้ว!\n\n🗺️ Zone: ${r.total_zones || 0}\n📁 ไฟล์: ${r.total_files || 0}\n📋 รายการ: ${r.total_records || 0}\n❌ Errors: ${r.total_errors || 0}\n⏱️ ใช้เวลา: ${r.duration || '?'}\n\nดูรายละเอียดใน Telegram และ Log`);
+                        alert(`✅ รัน Auto Sync (Turso) เสร็จแล้ว!\n\n🗺️ Zone: ${r.total_zones || 0}\n✅ สำเร็จ: ${r.total_synced || 0}\n📋 รายการ: ${r.total_records || 0}\n❌ Errors: ${r.total_errors || 0}\n⏱️ ใช้เวลา: ${r.duration || '?'}\n\nดูรายละเอียดใน Telegram และ Log`);
                         loadAutoExportLogs();
                     } else {
                         alert(`❌ ${data.error || 'ไม่สำเร็จ'}`);
