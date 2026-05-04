@@ -383,7 +383,9 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
         data = None
         if batch_data and str(branch_id) in batch_data:
             data = batch_data[str(branch_id)]
-        else:
+        
+        # ถ้าไม่มีใน batch หรือ batch return None -> fallback ดึงทีละสาขา
+        if not data:
             filters = {
                 'date_start': date_start,
                 'date_end': date_end,
@@ -392,8 +394,10 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
                 'session_id': '',
                 'branch_id': str(branch_id)
             }
-            
             data = fetch_data_func(start=0, length=5000, **filters)
+        
+        if not data:
+            data = {'data': [], 'source': 'unknown'}
         
         last_source = data.get('source', 'unknown')
         

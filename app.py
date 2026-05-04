@@ -1094,12 +1094,23 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
         
         if synced_real_ids:
             print(f"✨ [Hybrid Batch] Fetching {len(synced_real_ids)} synced branches from Turso...")
-            trades = turso.get_trades_batch(synced_real_ids, date_start, date_end)
+            # ✅ FIX: เรียก get_trades_batch ด้วย argument ที่ถูกต้อง (date_start, date_end, branch_ids=)
+            trades = turso.get_trades_batch(date_start, date_end, branch_ids=synced_real_ids)
+            
+            print(f"   Total trades returned from Turso: {len(trades)}")
+            
+            # Debug: แสดง sample ของ real_branch_id ที่เจอใน trades
+            sample_ids = list(set(str(t.get('real_branch_id') or t.get('BRANCH_ID', '')) for t in trades[:20]))
+            print(f"   Sample real_branch_id/BRANCH_ID in trades: {sample_ids[:5]}")
+            print(f"   Expected real_ids: {synced_real_ids[:5]}")
             
             # จัดกลุ่มข้อมูลตาม Eve ID
             for real_id in synced_real_ids:
                 eve_id = real_ids_map.get(str(real_id))
-                b_trades = [t for t in trades if str(t.get('BRANCH_ID')) == str(real_id)]
+                # ✅ เช็คทั้ง real_branch_id และ BRANCH_ID เพื่อรองรับทั้ง 2 รูปแบบ
+                b_trades = [t for t in trades if 
+                            str(t.get('real_branch_id', '')) == str(real_id) or 
+                            str(t.get('BRANCH_ID', '')) == str(real_id)]
                 results[str(eve_id)] = {
                     'data': b_trades,
                     'recordsTotal': len(b_trades),
@@ -1108,8 +1119,27 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
                 }
         
         if unsynced_real_ids:
-            print(f"❓ [Hybrid Batch] {len(unsynced_real_ids)} branches not synced. They will be fetched individually.")
-            
+            print(f"❓ [Hybrid Batch] {len(unsynced_real_ids)} branches not synced. Fetching from Eve API individually...")
+            for real_id in unsynced_real_ids:
+                eve_id = real_ids_map.get(str(real_id))
+                if not eve_id:
+                    continue
+                try:
+                    filters = {
+                        'date_start': date_start,
+                        'date_end': date_end,
+                        'sale_code': '',
+                        'customer_sign': '',
+                        'session_id': '',
+                        'branch_id': str(eve_id)
+                    }
+                    api_result = fetch_data_from_api(start=0, length=5000, **filters)
+                    results[str(eve_id)] = api_result
+                    print(f"   ✅ [Hybrid Batch] Fetched Branch {eve_id} (real: {real_id}) from Eve API: {len(api_result.get('data', []))} records")
+                except Exception as fetch_err:
+                    print(f"   ⚠️ [Hybrid Batch] Failed to fetch Branch {eve_id}: {fetch_err}")
+                    results[str(eve_id)] = {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'error'}
+
         turso.close()
         return results
             
