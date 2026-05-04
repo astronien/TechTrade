@@ -1996,15 +1996,6 @@
                             document.getElementById('aeMinute').value = m;
                         }
                         
-                        document.getElementById('aeMaxFiles').value = c.max_files_per_zone || 365;
-                        document.getElementById('aeFolderId').value = c.gdrive_folder_id || '';
-                        
-                        // แสดงสถานะ OAuth2
-                        if (c.gdrive_credentials === '***') {
-                            document.getElementById('aeGdriveStatus').innerHTML = '🔑 มี credentials อยู่แล้ว';
-                            document.getElementById('aeGdriveStatus').style.color = '#10b981';
-                        }
-                        
                         // Zone IDs
                         let zoneIds = c.zone_ids || [];
                         if (typeof zoneIds === 'string') {
@@ -2033,10 +2024,7 @@
                 const config = {
                     enabled: document.getElementById('aeEnabled').checked,
                     schedule_time: `${document.getElementById('aeHour').value}:${document.getElementById('aeMinute').value}`,
-                    zone_ids: aeSelectedZoneIds,
-                    gdrive_folder_id: document.getElementById('aeFolderId').value.trim(),
-                    gdrive_credentials: '***',  // ไม่ overwrite credentials ที่เก็บไว้
-                    max_files_per_zone: parseInt(document.getElementById('aeMaxFiles').value) || 365
+                    zone_ids: aeSelectedZoneIds
                 };
 
                 try {
@@ -2047,7 +2035,7 @@
                     });
                     const data = await response.json();
                     if (data.success) {
-                        alert(`✅ บันทึกสำเร็จ!\n\nระบบจะ export ${config.enabled ? 'เวลา ' + config.schedule_time + ' น. ทุกวัน' : '(ปิดอยู่)'}`);
+                        alert(`✅ บันทึกสำเร็จ!\n\nระบบจะ sync ข้อมูล ${config.enabled ? 'เวลา ' + config.schedule_time + ' น. ทุกวัน' : '(ปิดอยู่)'}`);
                     } else {
                         alert(`❌ ${data.error || 'บันทึกไม่สำเร็จ'}`);
                     }
@@ -2056,58 +2044,7 @@
                 }
             }
 
-            async function connectGoogleDrive() {
-                const clientId = document.getElementById('aeClientId').value.trim();
-                const clientSecret = document.getElementById('aeClientSecret').value.trim();
-                
-                if (!clientId || !clientSecret) {
-                    alert('กรุณาใส่ Client ID และ Client Secret');
-                    return;
-                }
-                
-                try {
-                    const response = await fetch('/api/admin/gdrive-auth', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret })
-                    });
-                    const data = await response.json();
-                    
-                    if (data.success && data.auth_url) {
-                        window.open(data.auth_url, '_blank');
-                    } else {
-                        alert('❌ ' + (data.message || 'ไม่สามารถสร้าง auth URL'));
-                    }
-                } catch (error) {
-                    alert('❌ Error: ' + error.message);
-                }
-            }
 
-            async function testGDriveConnection() {
-                const statusEl = document.getElementById('aeGdriveStatus');
-                statusEl.innerHTML = '🔄 กำลังทดสอบ...';
-                statusEl.style.color = '#f59e0b';
-                
-                try {
-                    const response = await fetch('/api/admin/auto-export-test-gdrive', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ gdrive_credentials: '***' })
-                    });
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        statusEl.innerHTML = `✅ ${data.message}`;
-                        statusEl.style.color = '#10b981';
-                    } else {
-                        statusEl.innerHTML = `❌ ${data.message}`;
-                        statusEl.style.color = '#dc2626';
-                    }
-                } catch (error) {
-                    statusEl.innerHTML = `❌ ${error.message}`;
-                    statusEl.style.color = '#dc2626';
-                }
-            }
 
             async function testAutoExport() {
                 if (!confirm('🧪 ทดสอบรัน Auto Sync เดี๋ยวนี้?\n\nระบบจะดึงข้อมูลวันก่อนหน้าจากทุก Zone ที่เลือก\nและบันทึกลง Turso Database ทันที\n\nกรุณาบันทึก config ก่อนกดทดสอบ')) return;
