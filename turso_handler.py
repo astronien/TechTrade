@@ -43,7 +43,9 @@ class TursoHandler:
                 
                 self.client = libsql_client.create_client(url=url_http, auth_token=self.token)
             except Exception as e:
-                print(f"⚠️ [Turso] Client init warning: {e}")
+                # Silence common event loop warnings as we are using HTTP intentionaly
+                if "event loop" not in str(e).lower():
+                    print(f"⚠️ [Turso] Client init warning: {e}")
                 self.client = None
 
     def init_db(self, reset=False):

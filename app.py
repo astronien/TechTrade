@@ -2058,37 +2058,42 @@ def find_branch_by_id(branch_id_input):
     
     return None
 
+_BRANCHES_DICT_CACHE = None
+
 def find_branch_by_sequential_id(seq_id):
-    """ค้นหาสาขาจาก branch_id (sequential index)"""
+    """ค้นหาสาขาจาก branch_id (sequential index) ด้วยระบบ Cache"""
+    global _BRANCHES_DICT_CACHE
     import os
     import json
-    branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
     
-    print(f"🔍 DEBUG find_branch_by_sequential_id: Looking for seq_id={seq_id} (type: {type(seq_id)})")
-    
-    try:
-        with open(branches_file, 'r', encoding='utf-8') as f:
-            branches_data = json.load(f)
-        
-        print(f"🔍 DEBUG find_branch_by_sequential_id: Loaded {len(branches_data)} branches from file")
-        
+    # 1. โหลดข้อมูลเข้า Cache ครั้งแรกครั้งเดียว
+    if _BRANCHES_DICT_CACHE is None:
         try:
-            seq_id_int = int(seq_id)
-            print(f"🔍 DEBUG find_branch_by_sequential_id: Converted to int: {seq_id_int}")
-            
-            for branch in branches_data:
-                if branch.get('branch_id') == seq_id_int:
-                    print(f"✅ DEBUG find_branch_by_sequential_id: Found branch: {branch.get('branch_name')}")
-                    return branch
-            
-            print(f"⚠️ DEBUG find_branch_by_sequential_id: No branch found with branch_id={seq_id_int}")
-        except ValueError:
-            print(f"❌ DEBUG find_branch_by_sequential_id: Cannot convert '{seq_id}' to int")
-            pass
-            
-    except Exception as e:
-        print(f"❌ DEBUG find_branch_by_sequential_id: Error loading branches: {e}")
-    
+            branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+            if os.path.exists(branches_file):
+                with open(branches_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # สร้าง Dict สำหรับค้นหาด้วย branch_id อย่างรวดเร็ว
+                    _BRANCHES_DICT_CACHE = {str(b.get('branch_id')): b for b in data}
+                    print(f"📦 [Cache Build] Loaded {len(_BRANCHES_DICT_CACHE)} branches into memory.")
+            else:
+                _BRANCHES_DICT_CACHE = {}
+                print(f"⚠️ [Cache Build] extracted_branches.json not found.")
+        except Exception as e:
+            print(f"❌ [Cache Build] Error loading branches: {e}")
+            _BRANCHES_DICT_CACHE = {}
+
+    # 2. ค้นหาจาก Cache
+    try:
+        s_id = str(seq_id)
+        branch = _BRANCHES_DICT_CACHE.get(s_id)
+        if branch:
+            # print(f"✅ [Cache Hit] Found branch: {branch.get('branch_name')}") # ลด Log เพื่อความเร็ว
+            return branch
+        # print(f"⚠️ [Cache Miss] No branch found with ID {s_id}")
+    except:
+        pass
+        
     return None
 
 def get_real_branch_id(branch):
