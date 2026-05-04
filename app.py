@@ -1086,16 +1086,19 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
         # 2. ตรวจสอบสถานะการ Sync
         sync_status = turso.check_sync_status_batch(real_ids_to_fetch, date_start, date_end)
         
-        # 3. ถ้าทุกสาขา Sync แล้ว -> ดึง Batch
-        all_synced = all(sync_status.values())
-        if all_synced:
-            print(f"✨ [Batch Success] All branches synced in Turso. Fetching {len(real_ids_to_fetch)} branches in one query...")
-            trades = turso.get_trades_batch(real_ids_to_fetch, date_start, date_end)
-            turso.close()
+        # 3. Hybrid Fetch: ดึงเฉพาะสาขาที่ Sync แล้วออกมาแบบ Batch
+        synced_real_ids = [rid for rid, status in sync_status.items() if status]
+        unsynced_real_ids = [rid for rid, status in sync_status.items() if not status]
+        
+        results = {}
+        
+        if synced_real_ids:
+            print(f"✨ [Hybrid Batch] Fetching {len(synced_real_ids)} synced branches from Turso...")
+            trades = turso.get_trades_batch(synced_real_ids, date_start, date_end)
             
-            # Group back by Eve ID
-            results = {}
-            for real_id, eve_id in real_ids_map.items():
+            # จัดกลุ่มข้อมูลตาม Eve ID
+            for real_id in synced_real_ids:
+                eve_id = real_ids_map.get(str(real_id))
                 b_trades = [t for t in trades if str(t.get('BRANCH_ID')) == str(real_id)]
                 results[str(eve_id)] = {
                     'data': b_trades,
@@ -1103,12 +1106,12 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
                     'recordsFiltered': len(b_trades),
                     'source': 'turso'
                 }
-            return results
-        else:
-            unsynced = [real_ids_map[rid] for rid, status in sync_status.items() if not status]
-            print(f"❓ [Batch Miss] {len(unsynced)} branches not synced (e.g. ID {unsynced[:3]}...). Falling back to individual fetches.")
-            turso.close()
-            return None
+        
+        if unsynced_real_ids:
+            print(f"❓ [Hybrid Batch] {len(unsynced_real_ids)} branches not synced. They will be fetched individually.")
+            
+        turso.close()
+        return results
             
     except Exception as e:
         print(f"⚠️ [Batch Error] {e}")
