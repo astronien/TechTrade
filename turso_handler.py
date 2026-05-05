@@ -413,6 +413,89 @@ class TursoHandler:
             print(f"⚠️ [verify_sync_count Error] {e}")
             return True, None, None  # ถ้า error ให้ผ่านไปก่อน (fail-safe)
 
+    def verify_sync_count_batch(self, branch_ids, date_start, date_end):
+        """
+        Batch version of verify_sync_count to check multiple branches at once.
+        Returns a dict: {branch_id: (is_valid, stored, actual)}
+        """
+        if not branch_ids: return {}
+        try:
+            def to_iso(d):
+                try:
+                    p = d.split('/')
+                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                except: return d
+
+            sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+            search_date = sync_key
+            if '-' not in sync_key and '/' in sync_key:
+                parts = sync_key.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    search_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+
+            # 1. ดึง stored counts ทั้งหมดจาก sync_history
+            placeholders = ', '.join(['?'] * len(branch_ids))
+            sql_stored = f"SELECT branch_id, record_count FROM sync_history WHERE sync_date = ? AND branch_id IN ({placeholders})"
+            params_stored = [search_date] + [str(bid) for bid in branch_ids]
+            res_stored = self._execute_sql(sql_stored, params_stored)
+            
+            stored_map = {}
+            if res_stored:
+                for r in res_stored.rows:
+                    stored_map[str(r[0])] = int(r[1]) if r[1] is not None else None
+
+            # 2. นับ counts จริงทั้งหมดจาก trades table
+            iso_start = to_iso(date_start) + " 00:00:00"
+            iso_end   = to_iso(date_end)   + " 23:59:59"
+            
+            # กรองเฉพาะตัวเลขเพื่อความเร็ว
+            valid_ids = []
+            for rid in branch_ids:
+                try: valid_ids.append(str(int(rid)))
+                except: pass
+            
+            actual_map = {}
+            if valid_ids:
+                placeholders_act = ', '.join(['?'] * len(valid_ids))
+                sql_act = f"""
+                    SELECT real_branch_id, COUNT(*) 
+                    FROM trades 
+                    WHERE real_branch_id IN ({placeholders_act}) 
+                    AND document_date BETWEEN ? AND ? 
+                    GROUP BY real_branch_id
+                """
+                params_act = valid_ids + [iso_start, iso_end]
+                res_act = self._execute_sql(sql_act, params_act)
+                if res_act:
+                    for r in res_act.rows:
+                        actual_map[str(r[0])] = int(r[1])
+
+            # 3. ประมวลผลเปรียบเทียบ
+            results = {}
+            for bid in branch_ids:
+                bid_str = str(bid)
+                stored = stored_map.get(bid_str)
+                actual = actual_map.get(bid_str, 0)
+                
+                if stored is None:
+                    results[bid_str] = (True, None, actual)
+                    continue
+                
+                if stored == 0:
+                    is_valid = actual == 0
+                else:
+                    diff = abs(actual - stored)
+                    diff_pct = diff / stored
+                    is_valid = diff <= 3 or diff_pct <= 0.05
+                
+                results[bid_str] = (is_valid, stored, actual)
+                
+            return results
+        except Exception as e:
+            print(f"⚠️ [verify_sync_count_batch Error] {e}")
+            return {str(bid): (True, None, None) for bid in branch_ids}
+
     def _clean_val(self, val, default=None, is_num=False):
         if val is None: return 0.0 if is_num else default
         if isinstance(val, float):

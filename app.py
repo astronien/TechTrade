@@ -1101,16 +1101,20 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
         synced_real_ids = [rid for rid, status in sync_status.items() if status]
         unsynced_real_ids = [rid for rid, status in sync_status.items() if not status]
         
-        # ✅ Count Verification: ตรวจสอบความถูกต้องของสาขาที่คิดว่า Synced แล้ว
+        # ✅ Count Verification (Batch): ตรวจสอบความถูกต้องของสาขาที่คิดว่า Synced แล้วพร้อมกันทีเดียว
         verified_synced_ids = []
-        for rid in synced_real_ids:
-            is_valid, stored, actual = turso.verify_sync_count(rid, date_start, date_end)
-            if is_valid:
-                verified_synced_ids.append(rid)
-            else:
-                print(f"🔄 [Batch Count Mismatch] Branch {rid}: stored={stored} vs actual={actual}. Invalidating...")
-                turso.invalidate_sync(rid, f"{date_start}-{date_end}" if date_start != date_end else date_start)
-                unsynced_real_ids.append(rid)
+        if synced_real_ids:
+            print(f"🕵️ [Batch Verify] Checking consistency for {len(synced_real_ids)} synced branches...")
+            verification_results = turso.verify_sync_count_batch(synced_real_ids, date_start, date_end)
+            
+            for rid in synced_real_ids:
+                is_valid, stored, actual = verification_results.get(rid, (True, None, None))
+                if is_valid:
+                    verified_synced_ids.append(rid)
+                else:
+                    print(f"🔄 [Batch Count Mismatch] Branch {rid}: stored={stored} vs actual={actual}. Invalidating...")
+                    turso.invalidate_sync(rid, f"{date_start}-{date_end}" if date_start != date_end else date_start)
+                    unsynced_real_ids.append(rid)
         
         synced_real_ids = verified_synced_ids
         results = {}
@@ -1142,26 +1146,33 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
                 }
         
         if unsynced_real_ids:
-            print(f"❓ [Hybrid Batch] {len(unsynced_real_ids)} branches not synced. Fetching from Eve API individually...")
-            for real_id in unsynced_real_ids:
-                eve_id = real_ids_map.get(str(real_id))
-                if not eve_id:
-                    continue
+            print(f"❓ [Hybrid Batch] {len(unsynced_real_ids)} branches not synced or invalid. Fetching from Eve API in parallel...")
+            
+            from concurrent.futures import ThreadPoolExecutor
+            
+            def fetch_single_branch(rid):
+                eid = real_ids_map.get(str(rid))
+                if not eid: return None, None
                 try:
-                    filters = {
-                        'date_start': date_start,
-                        'date_end': date_end,
-                        'sale_code': '',
-                        'customer_sign': '',
-                        'session_id': '',
-                        'branch_id': str(eve_id)
+                    f = {
+                        'date_start': date_start, 'date_end': date_end,
+                        'sale_code': '', 'customer_sign': '',
+                        'session_id': '', 'branch_id': str(eid)
                     }
-                    api_result = fetch_data_from_api(start=0, length=5000, **filters)
-                    results[str(eve_id)] = api_result
-                    print(f"   ✅ [Hybrid Batch] Fetched Branch {eve_id} (real: {real_id}) from Eve API: {len(api_result.get('data', []))} records")
-                except Exception as fetch_err:
-                    print(f"   ⚠️ [Hybrid Batch] Failed to fetch Branch {eve_id}: {fetch_err}")
-                    results[str(eve_id)] = {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'error'}
+                    res = fetch_data_from_api(start=0, length=5000, **f)
+                    return str(eid), res
+                except Exception as e:
+                    print(f"   ❌ [Parallel Fetch Error] Branch {eid}: {e}")
+                    return str(eid), {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'error'}
+
+            # จำกัดจำนวน worker เพื่อไม่ให้ Eve API โดนกระหน่ำเกินไป (เช่น 10-15)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                fetch_results = list(executor.map(fetch_single_branch, unsynced_real_ids))
+            
+            for eid, res in fetch_results:
+                if eid and res:
+                    results[eid] = res
+                    print(f"   ✅ [Hybrid Batch] Parallel Fetched Branch {eid}: {len(res.get('data', []))} records")
 
         turso.close()
         return results
