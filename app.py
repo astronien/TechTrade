@@ -4156,30 +4156,12 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').stri
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '').strip()
 
 def reply_line_message(reply_token, message):
-    """ส่ง Reply Message ไปยัง LINE (Original Working Version)"""
+    """ส่ง Reply Message ไปยัง LINE โดยเรียกใช้ logic จาก line_bot_handler (รองรับข้อความยาว)"""
     try:
-        url = 'https://api.line.me/v2/bot/message/reply'
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
-        }
-        payload = {
-            'replyToken': reply_token,
-            'messages': [{'type': 'text', 'text': message}]
-        }
-        
-        log_debug(f"Sending reply to {reply_token[:10]}...")
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code != 200:
-            log_debug(f"❌ Failed to reply: {response.status_code} {response.text}")
-        else:
-            log_debug("✅ Reply success")
-            
-        return response.json()
+        return send_line_reply(LINE_CHANNEL_ACCESS_TOKEN, reply_token, message)
     except Exception as e:
-        log_debug(f"❌ Error sending reply: {e}")
-        return None
+        log_debug(f"❌ Error in reply_line_message: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.route('/webhook/line', methods=['POST'])
 def line_webhook():
