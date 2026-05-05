@@ -11,6 +11,8 @@ import atexit
 import os as _os  # Moved to top for safety
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
 from turso_handler import TursoHandler
+import pandas as pd
+import io
 
 # Debug Log to Database (Persistent)
 def log_debug(msg):
@@ -4141,6 +4143,95 @@ def get_auto_export_logs():
         return jsonify({'success': True, 'logs': logs})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==========================================
+# Attach Rate Analysis API
+# ==========================================
+
+@app.route('/api/attach-rate/analyze', methods=['POST'])
+def analyze_attach_rate():
+    if 'file' not in request.files:
+        return jsonify({"success": False, "error": "No file uploaded"})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"success": False, "error": "No selected file"})
+
+    try:
+        # Read file into Pandas
+        file_bytes = file.read()
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(file_bytes))
+        else:
+            df = pd.read_excel(io.BytesIO(file_bytes))
+
+        # Clean column names
+        df.columns = [c.strip() for c in df.columns]
+
+        # Required columns check
+        required = ['Doc No', 'Product (Name)', 'Category (Name)', 'Number', 'Total Price']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            return jsonify({"success": False, "error": f"Missing columns: {', '.join(missing)}"})
+
+        # Identify Primary vs Attach
+        primary_keywords = ['iphone', 'ipad', 'mac', 'watch', 'phone', 'samsung galaxy', 'vivo', 'oppo', 'xiaomi']
+        
+        def is_primary(row):
+            cat = str(row['Category (Name)']).lower()
+            prod = str(row['Product (Name)']).lower()
+            return any(k in cat or k in prod for k in primary_keywords)
+
+        df['is_primary'] = df.apply(is_primary, axis=1)
+        df['is_attach'] = ~df['is_primary']
+
+        # Group by Doc No
+        grouped = df.groupby('Doc No').agg({
+            'is_primary': 'sum',
+            'is_attach': 'sum',
+            'Total Price': 'sum',
+            'Branch (Name)': 'first' if 'Branch (Name)' in df.columns else 'Category (Name)',
+            'Doc Date': 'first' if 'Doc Date' in df.columns else 'Doc No'
+        })
+
+        # Calculate metrics
+        total_primary_units = grouped['is_primary'].sum()
+        total_attach_units = grouped['is_attach'].sum()
+        overall_attach_rate = (total_attach_units / total_primary_units * 100) if total_primary_units > 0 else 0
+
+        # Branch breakdown
+        branch_col = 'Branch (Name)' if 'Branch (Name)' in df.columns else 'Category (Name)'
+        branch_stats = grouped.groupby(branch_col).agg({
+            'is_primary': 'sum',
+            'is_attach': 'sum',
+            'Total Price': 'sum'
+        })
+        branch_stats['attach_rate'] = (branch_stats['is_attach'] / branch_stats['is_primary'] * 100).fillna(0)
+        
+        # Top Attach Products
+        attach_df = df[df['is_attach']]
+        top_attach = attach_df.groupby('Product (Name)')['Number'].sum().sort_values(ascending=False).head(10).to_dict()
+
+        return jsonify({
+            "success": True,
+            "summary": {
+                "total_sales": float(grouped['Total Price'].sum()),
+                "total_primary": int(total_primary_units),
+                "total_attach": int(total_attach_units),
+                "attach_rate": round(float(overall_attach_rate), 2),
+                "total_transactions": int(len(grouped)),
+                "docs_with_primary": int(len(grouped[grouped['is_primary'] > 0]))
+            },
+            "branch_breakdown": branch_stats.reset_index().to_dict(orient='records'),
+            "top_attach": [{"name": k, "value": int(v)} for k, v in top_attach.items()]
+        })
+
+    except Exception as e:
+        print(f"❌ Attach Rate Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)})
+
 
 # เริ่ม scheduler เมื่อ app start (เฉพาะ non-debug reloader)
 # import os as _os # Moved to top
