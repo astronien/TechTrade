@@ -49,21 +49,49 @@ def verify_line_signature(channel_secret, body, signature):
     return hmac.compare_digest(expected_signature, signature)
 
 def send_line_reply(channel_access_token, reply_token, messages):
-    """Send reply message to LINE API manually"""
+    """Send reply message to LINE API manually (supports auto-chunking for long text)"""
     url = 'https://api.line.me/v2/bot/message/reply'
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {channel_access_token}'
     }
     
+    final_messages = []
+    
+    # ถ้าส่งมาเป็น string ให้แปลงเป็น list ของ dict
     if isinstance(messages, str):
-        messages = [{'type': 'text', 'text': messages}]
+        # 🛡️ Chunking Logic: LINE จำกัด 5,000 ตัวอักษรต่อ 1 ข้อความ และ 5 ข้อความต่อ 1 Reply
+        if len(messages) > 5000:
+            print(f"📏 Message too long ({len(messages)} chars). Splitting into chunks...")
+            text = messages
+            while text and len(final_messages) < 5:
+                if len(text) <= 5000:
+                    final_messages.append({'type': 'text', 'text': text})
+                    break
+                
+                # พยายามตัดที่บรรทัดใหม่เพื่อความสวยงาม
+                chunk_limit = 4900
+                split_pos = text.rfind('\n', 0, chunk_limit)
+                if split_pos == -1: split_pos = chunk_limit
+                
+                final_messages.append({'type': 'text', 'text': text[:split_pos].strip()})
+                text = text[split_pos:].strip()
+                
+            # ถ้ายังเหลือข้อความอีกแต่ครบ 5 ข้อความแล้ว ให้ Truncate และใส่ ...
+            if text and len(final_messages) == 5:
+                last_msg = final_messages[-1]['text']
+                if len(last_msg) > 4900: last_msg = last_msg[:4890]
+                final_messages[-1]['text'] = last_msg + "\n\n...(ข้อความถูกตัดเพราะยาวเกินไป)"
+        else:
+            final_messages = [{'type': 'text', 'text': messages}]
     elif isinstance(messages, dict):
-        messages = [messages]
+        final_messages = [messages]
+    else:
+        final_messages = messages
         
     data = {
         'replyToken': reply_token,
-        'messages': messages
+        'messages': final_messages
     }
     
     try:
