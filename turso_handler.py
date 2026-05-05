@@ -225,7 +225,7 @@ class TursoHandler:
                 
                 if valid_rem_ids:
                     sql_rem = f"""
-                        SELECT real_branch_id 
+                        SELECT real_branch_id, COUNT(*) 
                         FROM trades 
                         WHERE real_branch_id IN ({', '.join(['?']*len(valid_rem_ids))}) 
                         AND document_date BETWEEN ? AND ? 
@@ -237,14 +237,12 @@ class TursoHandler:
                     if res_rem:
                         for r in res_rem.rows:
                             rb_id = str(r[0])
+                            actual_count = int(r[1])
                             sync_map[rb_id] = True
-                            # 🛠️ Auto-Repair: บันทึกลง sync_history ทันที
-                            # ในอนาคตถ้ามีการค้นหาอีก จะได้ไม่ต้องเช็ค trades table ซ้ำ
+                            # 🛠️ Auto-Repair: บันทึกลง sync_history ทันทีพร้อมจำนวนจริง
                             try:
-                                # หาจำนวนคร่าวๆ (เราไม่ได้ดึง count มาใน query นี้เพื่อความเร็ว แต่ใส่ 1 ไปก่อนก็ได้ 
-                                # หรือถ้าอยากเป๊ะ ต้องแก้ query ให้ COUNT(*) ด้วย)
-                                self.mark_synced(rb_id, search_date, 1)
-                                print(f"🔧 [Auto-Repair] Marked Branch {rb_id} as synced for {search_date}")
+                                self.mark_synced(rb_id, search_date, actual_count)
+                                print(f"🔧 [Auto-Repair] Marked Branch {rb_id} as synced with {actual_count} records for {search_date}")
                             except: pass
                             
             return sync_map
@@ -331,6 +329,89 @@ class TursoHandler:
         except Exception as e:
             print(f"⚠️ mark_synced error: {e}")
             return False
+
+    def invalidate_sync(self, branch_id, sync_date):
+        """ลบประวัติ sync เพื่อบังคับให้ดึงข้อมูลใหม่จาก Eve API"""
+        try:
+            search_date = sync_date
+            if '-' not in sync_date and '/' in sync_date:
+                parts = sync_date.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    search_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            self._execute_sql(
+                "DELETE FROM sync_history WHERE branch_id = ? AND sync_date = ?",
+                [str(branch_id), search_date]
+            )
+            print(f"🗑️ [Invalidate] Cleared sync record for Branch {branch_id} on {search_date}")
+            return True
+        except Exception as e:
+            print(f"⚠️ invalidate_sync error: {e}")
+            return False
+
+    def verify_sync_count(self, branch_id, date_start, date_end):
+        """
+        เปรียบ record_count ที่บันทึกไว้ตอน sync กับ count จริงในตาราง trades
+        คืนค่า (is_valid, stored_count, actual_count)
+          - is_valid=True  → ข้อมูลน่าจะครบ (หรือตรวจสอบไม่ได้)
+          - is_valid=False → จำนวนไม่ตรง ควร re-sync
+        """
+        try:
+            def to_iso(d):
+                try:
+                    p = d.split('/')
+                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                except: return d
+
+            sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
+            search_date = sync_key
+            if '-' not in sync_key and '/' in sync_key:
+                parts = sync_key.split('/')
+                if len(parts) == 3:
+                    d, m, y = parts
+                    search_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+
+            # 1. ดึง stored count จาก sync_history
+            res = self._execute_sql(
+                "SELECT record_count FROM sync_history WHERE branch_id = ? AND sync_date = ?",
+                [str(branch_id), search_date]
+            )
+            if not res or not res.rows:
+                # ไม่มีใน sync_history เลย → ไม่สามารถตรวจสอบได้ (ถือว่า pass)
+                return True, None, None
+
+            stored_count = int(res.rows[0][0]) if res.rows[0][0] is not None else None
+            if stored_count is None:
+                return True, None, None
+
+            # 2. นับ count จริงใน trades table
+            iso_start = to_iso(date_start) + " 00:00:00"
+            iso_end   = to_iso(date_end)   + " 23:59:59"
+            count_res = self._execute_sql(
+                "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND document_date BETWEEN ? AND ?",
+                [str(branch_id), iso_start, iso_end]
+            )
+            if not count_res or not count_res.rows:
+                return True, stored_count, None
+
+            actual_count = int(count_res.rows[0][0])
+
+            # 3. เปรียบเทียบ — ยอมรับความต่างได้ไม่เกิน 5% หรือ 3 records (เผื่อ Eve มี record เพิ่มทีหลัง)
+            if stored_count == 0:
+                is_valid = actual_count == 0
+            else:
+                diff = abs(actual_count - stored_count)
+                diff_pct = diff / stored_count
+                is_valid = diff <= 3 or diff_pct <= 0.05  # ต่างไม่เกิน 3 records หรือ 5%
+
+            if not is_valid:
+                print(f"⚠️ [Count Mismatch] Branch {branch_id} | stored={stored_count} actual={actual_count} | diff={actual_count - stored_count:+d}")
+
+            return is_valid, stored_count, actual_count
+
+        except Exception as e:
+            print(f"⚠️ [verify_sync_count Error] {e}")
+            return True, None, None  # ถ้า error ให้ผ่านไปก่อน (fail-safe)
 
     def _clean_val(self, val, default=None, is_num=False):
         if val is None: return 0.0 if is_num else default

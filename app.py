@@ -835,20 +835,31 @@ def fetch_data_from_api(start=0, length=50, **filters):
 
                     sync_key = date_end if date_start == date_end else f"{date_start}-{date_end}"
                     if turso.is_synced(turso_branch_id, sync_key):
-                        cached_data = turso.get_trades(date_start, date_end, branch_id=turso_branch_id)
-                        turso.close()
+                        # ✅ Count Verification: เปรียบ stored count กับ actual count ใน Turso
+                        count_valid, stored_cnt, actual_cnt = turso.verify_sync_count(turso_branch_id, date_start, date_end)
                         
-                        if cached_data:
-                            print(f"✨ [Success] Found {len(cached_data)} records in Turso for Branch {branch_id}. Returning cached data.")
-                            return {
-                                'data': cached_data,
-                                'recordsTotal': len(cached_data),
-                                'recordsFiltered': len(cached_data),
-                                'source': 'turso'
-                            }
+                        if not count_valid:
+                            print(f"🔄 [Count Mismatch] Branch {turso_branch_id}: stored={stored_cnt} vs actual={actual_cnt}. Invalidating and re-syncing from Eve...")
+                            turso.invalidate_sync(turso_branch_id, sync_key)
+                            turso.close()
+                            # ปล่อยให้ fall-through ไป Eve API เพื่อ re-sync
                         else:
-                            print(f"📭 [Info] Turso has 'Synced' record but 0 trades found. Returning empty results.")
-                            return {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'turso'}
+                            if stored_cnt is not None:
+                                print(f"✅ [Count OK] Branch {turso_branch_id}: stored={stored_cnt} actual={actual_cnt}")
+                            cached_data = turso.get_trades(date_start, date_end, branch_id=turso_branch_id)
+                            turso.close()
+                            
+                            if cached_data:
+                                print(f"✨ [Success] Found {len(cached_data)} records in Turso for Branch {branch_id}. Returning cached data.")
+                                return {
+                                    'data': cached_data,
+                                    'recordsTotal': len(cached_data),
+                                    'recordsFiltered': len(cached_data),
+                                    'source': 'turso'
+                                }
+                            else:
+                                print(f"📭 [Info] Turso has 'Synced' record but 0 trades found. Returning empty results.")
+                                return {'data': [], 'recordsTotal': 0, 'recordsFiltered': 0, 'source': 'turso'}
                     else:
                         print(f"❓ [Cache Miss] No synced records found in Turso for this range. Proceeding to Eve API...")
                     turso.close()
@@ -1090,6 +1101,18 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
         synced_real_ids = [rid for rid, status in sync_status.items() if status]
         unsynced_real_ids = [rid for rid, status in sync_status.items() if not status]
         
+        # ✅ Count Verification: ตรวจสอบความถูกต้องของสาขาที่คิดว่า Synced แล้ว
+        verified_synced_ids = []
+        for rid in synced_real_ids:
+            is_valid, stored, actual = turso.verify_sync_count(rid, date_start, date_end)
+            if is_valid:
+                verified_synced_ids.append(rid)
+            else:
+                print(f"🔄 [Batch Count Mismatch] Branch {rid}: stored={stored} vs actual={actual}. Invalidating...")
+                turso.invalidate_sync(rid, f"{date_start}-{date_end}" if date_start != date_end else date_start)
+                unsynced_real_ids.append(rid)
+        
+        synced_real_ids = verified_synced_ids
         results = {}
         
         if synced_real_ids:
