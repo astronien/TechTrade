@@ -4197,28 +4197,66 @@ def analyze_attach_rate():
         df['is_primary'] = df.apply(is_primary, axis=1)
         df['is_attach'] = ~df['is_primary']
 
+        # Determine specific devices
+        def check_device(row, keywords):
+            cat = str(row['Category (Name)']).lower()
+            prod = str(row['Product (Name)']).lower()
+            return any(k in cat or k in prod for k in keywords)
+
+        df['is_mac'] = df.apply(lambda r: check_device(r, ['mac', 'macbook', 'imac', 'mac studio']), axis=1)
+        df['is_ipad'] = df.apply(lambda r: check_device(r, ['ipad']), axis=1)
+        df['is_iphone'] = df.apply(lambda r: check_device(r, ['iphone']), axis=1)
+        df['is_watch'] = df.apply(lambda r: check_device(r, ['watch']), axis=1)
+
         # Group by Doc No
-        grouped = df.groupby('Doc No').agg({
+        agg_dict = {
             'is_primary': 'sum',
             'is_attach': 'sum',
-            'Total Price': 'sum',
-            'Branch (Name)': 'first' if 'Branch (Name)' in df.columns else 'Category (Name)',
-            'Doc Date': 'first' if 'Doc Date' in df.columns else 'Doc No'
-        })
+            'is_mac': 'sum',
+            'is_ipad': 'sum',
+            'is_iphone': 'sum',
+            'is_watch': 'sum',
+            'Total Price': 'sum'
+        }
+        
+        if 'Branch (Name)' in df.columns:
+            agg_dict['Branch (Name)'] = 'first'
+        if 'Officer (Name)' in df.columns:
+            agg_dict['Officer (Name)'] = 'first'
+        if 'Doc Date' in df.columns:
+            agg_dict['Doc Date'] = 'first'
+            
+        grouped = df.groupby('Doc No').agg(agg_dict)
 
         # Calculate metrics
         total_primary_units = grouped['is_primary'].sum()
         total_attach_units = grouped['is_attach'].sum()
+        total_mac = grouped['is_mac'].sum()
+        total_ipad = grouped['is_ipad'].sum()
+        total_iphone = grouped['is_iphone'].sum()
+        total_watch = grouped['is_watch'].sum()
         overall_attach_rate = (total_attach_units / total_primary_units * 100) if total_primary_units > 0 else 0
 
-        # Branch breakdown
-        branch_col = 'Branch (Name)' if 'Branch (Name)' in df.columns else 'Category (Name)'
-        branch_stats = grouped.groupby(branch_col).agg({
+        # Staff breakdown
+        staff_col = 'Officer (Name)' if 'Officer (Name)' in df.columns else 'Branch (Name)' if 'Branch (Name)' in df.columns else 'Category (Name)'
+        staff_stats = grouped.groupby(staff_col).agg({
             'is_primary': 'sum',
             'is_attach': 'sum',
+            'is_mac': 'sum',
+            'is_ipad': 'sum',
+            'is_iphone': 'sum',
+            'is_watch': 'sum',
             'Total Price': 'sum'
         })
-        branch_stats['attach_rate'] = (branch_stats['is_attach'] / branch_stats['is_primary'] * 100).fillna(0)
+        staff_stats['attach_rate'] = (staff_stats['is_attach'] / staff_stats['is_primary'] * 100).fillna(0)
+        
+        # Add Branch Name to staff_stats if available
+        if 'Branch (Name)' in df.columns and staff_col == 'Officer (Name)':
+            branch_map = grouped.groupby(staff_col)['Branch (Name)'].first()
+            staff_stats['Branch (Name)'] = branch_map
+        
+        # Sort by Attach Rate or Sales
+        staff_stats = staff_stats.sort_values(by=['is_primary', 'attach_rate'], ascending=[False, False])
         
         # Top Attach Products
         attach_df = df[df['is_attach']]
@@ -4230,11 +4268,15 @@ def analyze_attach_rate():
                 "total_sales": float(grouped['Total Price'].sum()),
                 "total_primary": int(total_primary_units),
                 "total_attach": int(total_attach_units),
+                "total_mac": int(total_mac),
+                "total_ipad": int(total_ipad),
+                "total_iphone": int(total_iphone),
+                "total_watch": int(total_watch),
                 "attach_rate": round(float(overall_attach_rate), 2),
                 "total_transactions": int(len(grouped)),
                 "docs_with_primary": int(len(grouped[grouped['is_primary'] > 0]))
             },
-            "branch_breakdown": branch_stats.reset_index().to_dict(orient='records'),
+            "staff_breakdown": staff_stats.reset_index().to_dict(orient='records'),
             "top_attach": [{"name": k, "value": int(v)} for k, v in top_attach.items()]
         })
 
