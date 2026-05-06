@@ -4150,20 +4150,25 @@ def get_auto_export_logs():
 
 @app.route('/api/attach-rate/analyze', methods=['POST'])
 def analyze_attach_rate():
-    if 'file' not in request.files:
-        return jsonify({"success": False, "error": "No file uploaded"})
-    
-    file = request.files['file']
-    if file.filename == '':
+    files = request.files.getlist('file')
+    if not files or files[0].filename == '':
         return jsonify({"success": False, "error": "No selected file"})
 
+    device_type = request.form.get('device', 'all')
+    scope = request.form.get('scope', 'overview')
+
     try:
-        # Read file into Pandas
-        file_bytes = file.read()
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(file_bytes))
-        else:
-            df = pd.read_excel(io.BytesIO(file_bytes))
+        # Read files into Pandas
+        df_list = []
+        for file in files:
+            file_bytes = file.read()
+            if file.filename.endswith('.csv'):
+                df_part = pd.read_csv(io.BytesIO(file_bytes))
+            else:
+                df_part = pd.read_excel(io.BytesIO(file_bytes))
+            df_list.append(df_part)
+            
+        df = pd.concat(df_list, ignore_index=True)
 
         # Clean column names
         df.columns = [c.strip() for c in df.columns]
@@ -4175,7 +4180,14 @@ def analyze_attach_rate():
             return jsonify({"success": False, "error": f"Missing columns: {', '.join(missing)}"})
 
         # Identify Primary vs Attach
-        primary_keywords = ['iphone', 'ipad', 'mac', 'watch', 'phone', 'samsung galaxy', 'vivo', 'oppo', 'xiaomi']
+        if device_type == 'iphone':
+            primary_keywords = ['iphone']
+        elif device_type == 'ipad':
+            primary_keywords = ['ipad']
+        elif device_type == 'mac':
+            primary_keywords = ['mac', 'macbook', 'imac', 'mac studio']
+        else:
+            primary_keywords = ['iphone', 'ipad', 'mac', 'watch', 'phone', 'samsung galaxy', 'vivo', 'oppo', 'xiaomi']
         
         def is_primary(row):
             cat = str(row['Category (Name)']).lower()
