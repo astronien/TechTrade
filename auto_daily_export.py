@@ -164,6 +164,8 @@ def run_daily_export(force=False):
     total_records = 0
     total_synced_zones = 0
     total_errors = 0
+    total_warnings = 0
+    warnings = []
     
     for zone_idx, zone in enumerate(zones_to_sync):
         zone_name = zone['zone_name']
@@ -177,12 +179,42 @@ def run_daily_export(force=False):
             trade_data = fetch_zone_daily_data(zone, target_date_dt)
             
             # 2. บันทึกลง Turso
+            eve_count = len(trade_data)
             inserted = 0
             if trade_data:
                 inserted = turso.insert_trades_batch(trade_data, zone_name)
                 print(f"   ✅ Saved {inserted} records to Turso Database")
             else:
                 print("   ℹ️ No data found for this zone on target date")
+
+            # 3. Reconcile: Eve snapshot vs Turso snapshot after write
+            reconcile = turso.reconcile_snapshot(trade_data, zone_name, target_date.strftime("%Y-%m-%d"))
+            is_consistent = bool(reconcile.get('success')) and inserted == eve_count
+            if is_consistent:
+                print(f"   ✅ Reconcile OK: Eve={eve_count} / Turso={reconcile.get('turso_count')}")
+                status = 'success'
+                error_message = ''
+            else:
+                total_warnings += 1
+                status = 'warning'
+                error_message = (
+                    f"Reconcile mismatch: Eve={eve_count}, inserted={inserted}, "
+                    f"Turso={reconcile.get('turso_count')}, "
+                    f"missing={reconcile.get('missing_count')}, extra={reconcile.get('extra_count')}"
+                )
+                warnings.append({
+                    'zone_name': zone_name,
+                    'date': target_date.strftime("%Y-%m-%d"),
+                    'expected_count': eve_count,
+                    'inserted_count': inserted,
+                    'turso_count': reconcile.get('turso_count'),
+                    'missing_count': reconcile.get('missing_count'),
+                    'extra_count': reconcile.get('extra_count'),
+                    'missing_ids_sample': reconcile.get('missing_ids_sample', []),
+                    'extra_ids_sample': reconcile.get('extra_ids_sample', []),
+                    'checksum_match': reconcile.get('checksum_match')
+                })
+                print(f"   ⚠️ {error_message}")
 
             zone_duration = time.time() - zone_start
             
@@ -192,7 +224,8 @@ def run_daily_export(force=False):
                 'zone_name': zone_name,
                 'date_sync': date_str_display,
                 'total_records': inserted,
-                'status': 'success',
+                'status': status,
+                'error_message': error_message,
                 'duration_seconds': zone_duration
             })
             
@@ -202,7 +235,10 @@ def run_daily_export(force=False):
             results.append({
                 'zone_name': zone_name,
                 'records': inserted,
-                'status': 'success',
+                'eve_records': eve_count,
+                'turso_records': reconcile.get('turso_count'),
+                'status': status,
+                'reconcile': reconcile,
                 'duration': f"{zone_duration:.1f}s"
             })
             
@@ -251,6 +287,7 @@ def run_daily_export(force=False):
 🗺️ Zone ทั้งหมด: {len(zones_to_sync)}
 ✅ สำเร็จ: {total_synced_zones} zone
 ❌ ล้มเหลว: {total_errors} zone
+⚠️ ข้อมูลไม่ตรง: {total_warnings} zone
 📋 รายการใหม่: {total_records:,} records
 ⏱️ ใช้เวลา: {total_duration:.1f} วินาที
 
@@ -259,6 +296,9 @@ def run_daily_export(force=False):
                 for r in results:
                     if r['status'] == 'success':
                         msg += f"\n✅ {r['zone_name']}: {r['records']:,} records"
+                    elif r['status'] == 'warning':
+                        rec = r.get('reconcile', {})
+                        msg += f"\n⚠️ {r['zone_name']}: Eve {r.get('eve_records', 0):,} / Turso {rec.get('turso_count', 0):,}"
                     else:
                         msg += f"\n❌ {r['zone_name']}: {r.get('error', 'error')}"
                 
@@ -268,15 +308,17 @@ def run_daily_export(force=False):
     
     print(f"\n{'=' * 60}")
     print(f"🗄️ Auto Turso Sync Completed in {total_duration:.1f}s")
-    print(f"   Zones: {total_synced_zones}, Records: {total_records}, Errors: {total_errors}")
+    print(f"   Zones: {total_synced_zones}, Records: {total_records}, Errors: {total_errors}, Warnings: {total_warnings}")
     print(f"{'=' * 60}\n")
     
     return {
-        'success': total_errors == 0,
+        'success': total_errors == 0 and total_warnings == 0,
         'total_zones': len(zones_to_sync),
         'total_synced': total_synced_zones,
         'total_records': total_records,
         'total_errors': total_errors,
+        'total_warnings': total_warnings,
+        'warnings': warnings,
         'duration': f"{total_duration:.1f}s",
         'results': results
     }

@@ -4048,7 +4048,9 @@ def test_auto_export():
     try:
         from auto_daily_export import run_daily_export
         result = run_daily_export(force=True)
-        return jsonify({'success': True, 'message': 'รัน Turso Sync เสร็จแล้ว', 'result': result})
+        status_code = 200 if result.get('success') else 500
+        message = 'รัน Turso Sync เสร็จแล้ว' if result.get('success') else 'รัน Turso Sync เสร็จแล้ว แต่พบข้อมูลไม่ตรงกันหรือมีข้อผิดพลาด'
+        return jsonify({'success': result.get('success', False), 'message': message, 'result': result}), status_code
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4107,7 +4109,9 @@ def vercel_cron_auto_export():
             print(f"✅ Time to run! Executing auto-export...")
             from auto_daily_export import run_daily_export
             result = run_daily_export(force=True)
-            return jsonify({'success': True, 'message': 'Export executed', 'result': result}), 200
+            status_code = 200 if result.get('success') else 500
+            message = 'Export executed' if result.get('success') else 'Export executed but reconciliation failed'
+            return jsonify({'success': result.get('success', False), 'message': message, 'result': result}), status_code
         else:
             return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
     

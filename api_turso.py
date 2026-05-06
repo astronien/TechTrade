@@ -53,12 +53,12 @@ def get_trades():
             params.append(zone_name)
         
         if start_date:
-            conditions.append("document_date >= ?")
-            params.append(start_date)
+            conditions.append("substr(document_date, 1, 10) >= ?")
+            params.append(turso._normalize_date_only(start_date))
             
         if end_date:
-            conditions.append("document_date <= ?")
-            params.append(end_date)
+            conditions.append("substr(document_date, 1, 10) <= ?")
+            params.append(turso._normalize_date_only(end_date))
             
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -113,5 +113,31 @@ def get_stats():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        turso.close()
+
+
+@turso_api.route('/api/v2/sync-health', methods=['GET'])
+@require_api_key
+def get_sync_health():
+    """
+    Read-only endpoint for checking Turso coverage by zone/date.
+
+    Optional query params:
+      - start_date: YYYY-MM-DD or DD/MM/YYYY
+      - end_date: YYYY-MM-DD or DD/MM/YYYY
+      - zone: exact zone_name
+    """
+    turso = TursoHandler()
+    try:
+        result = turso.get_sync_health(
+            start_date=request.args.get('start_date'),
+            end_date=request.args.get('end_date'),
+            zone_name=request.args.get('zone')
+        )
+        status_code = 200 if result.get('success') else 500
+        return jsonify(result), status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         turso.close()

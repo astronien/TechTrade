@@ -717,3 +717,74 @@ uwsgi --http 0.0.0.0:5000 --wsgi-file app.py --callable app --processes 4
 สำหรับคำถามหรือปัญหา กรุณาติดต่อ:
 - Email: support@example.com
 - GitHub Issues: https://github.com/your-repo/issues
+
+---
+
+## 7. Turso Sync และการตรวจสอบความตรงกันกับ Eve
+
+ระบบ auto-export จะดึงข้อมูลจาก **Eve** แล้วบันทึก snapshot ลง **Turso** จากนั้นทำ reconciliation หลังบันทึกทุกครั้ง โดยตรวจสอบว่า record ที่ส่งเข้า Turso มีจำนวนตรงกับ record ที่อ่านกลับจาก Turso ในช่วงวันที่และสาขาเดียวกันหรือไม่ หากไม่ตรง ระบบจะรายงาน `success: false` พร้อมรายการ mismatch เพื่อให้ cron/monitoring ตรวจพบปัญหาได้ทันที
+
+### 7.1 ตรวจสอบสถานะข้อมูลที่อยู่ใน Turso
+
+```http
+GET /api/v2/sync-health?start_date=2026-05-01&end_date=2026-05-06&zone_name=Zone%20Name
+```
+
+| Parameter | Type | Required | Description |
+|---|---:|---:|---|
+| `start_date` | string | No | วันที่เริ่มต้น รองรับ `YYYY-MM-DD` หรือ `dd/mm/yyyy` |
+| `end_date` | string | No | วันที่สิ้นสุด รองรับ `YYYY-MM-DD` หรือ `dd/mm/yyyy` |
+| `zone_name` | string | No | ชื่อ zone ที่ต้องการกรอง |
+
+**Response ตัวอย่าง:**
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "zone_name": "BKK",
+      "trade_date": "2026-05-06",
+      "turso_count": 128,
+      "first_exported_at": "2026-05-06 00:05:12",
+      "last_exported_at": "2026-05-06 00:05:14"
+    }
+  ]
+}
+```
+
+### 7.2 ตรวจจากผลลัพธ์ auto-export
+
+เมื่อเรียก endpoint cron หรือปุ่มทดสอบ auto-export ระบบจะตอบ `success: false` และ HTTP 500 ถ้า reconciliation พบว่าข้อมูลไม่ตรงกัน เพื่อให้ scheduled workflow แจ้งเตือนหรือ fail ได้ทันที
+
+```http
+POST /api/admin/auto-export-test
+POST /api/admin/auto-export-cron
+```
+
+ตัวอย่าง response เมื่อพบ mismatch:
+
+```json
+{
+  "success": false,
+  "message": "Export executed but reconciliation failed",
+  "result": {
+    "success": false,
+    "message": "Sync completed with warnings",
+    "warnings": [
+      {
+        "zone_name": "BKK",
+        "expected_count": 128,
+        "inserted_count": 128,
+        "turso_count": 126,
+        "missing_trade_ids": ["12345", "12346"]
+      }
+    ]
+  }
+}
+```
+
+### 7.3 วิธีตอบคำถามว่า “Eve กับ Turso ตรงกันไหม”
+
+ให้ดูจากสามชั้นพร้อมกัน ได้แก่ จำนวนรายการที่ Eve ส่งมา (`expected_count`), จำนวนที่ระบบพยายามเขียนเข้า Turso (`inserted_count`), และจำนวนที่อ่านกลับจาก Turso (`turso_count`) พร้อมรายการ `missing_trade_ids` ถ้ามี ความหมายโดยสรุปคือถ้า `warnings` ว่างและ `success: true` แปลว่าข้อมูลชุดล่าสุดที่ sync ผ่านการเทียบ count และ ID แล้ว แต่ถ้า `warnings` ไม่ว่างให้ re-sync ช่วงวันที่/zone นั้นและตรวจสาเหตุจาก log ทันที
