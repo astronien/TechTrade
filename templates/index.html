@@ -1292,14 +1292,6 @@
                 });
             }
 
-                branchSelect.value = '';
-                branchSelect.disabled = true;
-
-                const zone = ZONES_DATA.find(z => z.zone_id === selectedZone);
-                document.getElementById('reportBranchStatus').textContent =
-                    `🗺️ เลือก Zone: ${zone.zone_name} (${branches.length} สาขา)`;
-                document.getElementById('reportBranchStatus').className = 'form-text text-success';
-            }
 
             // ฟังก์ชันจัดการเมื่อเลือกสาขา (Report Page)
             function handleReportBranchChange() {
