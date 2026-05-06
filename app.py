@@ -4249,6 +4249,7 @@ def analyze_attach_rate():
             'Total Price': 'sum'
         })
         staff_stats['attach_rate'] = (staff_stats['is_attach'] / staff_stats['is_primary'] * 100).fillna(0)
+        staff_stats['attach_rate'] = staff_stats['attach_rate'].replace([float('inf'), float('-inf')], 0)
         
         # Add Branch Name to staff_stats if available
         if 'Branch (Name)' in df.columns and staff_col == 'Officer (Name)':
