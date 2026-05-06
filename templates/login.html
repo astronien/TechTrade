@@ -4,30 +4,95 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>เข้าสู่ระบบ - Trade-In Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --primary: #5b5cf6;
+            --primary-dark: #4338ca;
+            --accent: #f43f5e;
+            --text-main: #172033;
+            --text-muted: #64748b;
+            --line: #dbe3ef;
+            --surface: rgba(255, 255, 255, 0.9);
+            --shadow: 0 32px 90px rgba(30, 27, 75, 0.22), 0 14px 34px rgba(15, 23, 42, 0.10);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            font-family: 'Kanit', 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            position: relative;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 24px;
+            color: var(--text-main);
+            background:
+                radial-gradient(circle at 14% 16%, rgba(244, 63, 94, 0.18) 0, transparent 32%),
+                radial-gradient(circle at 84% 8%, rgba(91, 92, 246, 0.28) 0, transparent 36%),
+                linear-gradient(135deg, #eef4ff 0%, #f8fbff 48%, #fff7fb 100%);
+            overflow: hidden;
+        }
+
+        body::before,
+        body::after {
+            content: '';
+            position: fixed;
+            pointer-events: none;
+            border-radius: 999px;
+            filter: blur(1px);
+        }
+
+        body::before {
+            width: 520px;
+            height: 520px;
+            right: -170px;
+            top: -170px;
+            background: radial-gradient(circle, rgba(67, 56, 202, 0.30), rgba(67, 56, 202, 0.03) 66%, transparent 72%);
+        }
+
+        body::after {
+            width: 580px;
+            height: 580px;
+            left: -230px;
+            bottom: -260px;
+            background: radial-gradient(circle, rgba(244, 63, 94, 0.20), rgba(14, 165, 233, 0.04) 58%, transparent 75%);
         }
 
         .login-container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
+            position: relative;
+            z-index: 1;
             width: 100%;
-            max-width: 400px;
+            max-width: 440px;
+            padding: 40px;
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.72);
+            border-radius: 32px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            animation: popIn 0.5s ease-out;
+            overflow: hidden;
+        }
+
+        .login-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), transparent 42%);
+        }
+
+        .login-container > * {
+            position: relative;
+            z-index: 1;
         }
 
         .login-header {
@@ -36,59 +101,86 @@
         }
 
         .login-header h1 {
-            color: #333;
-            font-size: 28px;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            color: var(--text-main);
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            background: linear-gradient(120deg, #0f172a, var(--primary-dark), #ec4899);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         .login-header p {
-            color: #666;
+            color: var(--text-muted);
             font-size: 14px;
+            font-weight: 500;
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
 
         .form-group label {
             display: block;
-            color: #333;
-            font-weight: 500;
             margin-bottom: 8px;
+            color: #475569;
             font-size: 14px;
+            font-weight: 700;
         }
 
         .form-group input {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 14px;
-            transition: all 0.3s;
+            min-height: 48px;
+            padding: 13px 15px;
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid var(--line);
+            border-radius: 15px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+            font-size: 15px;
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: rgba(91, 92, 246, 0.8);
+            background: #ffffff;
+            box-shadow: 0 0 0 4px rgba(91, 92, 246, 0.14), 0 12px 26px rgba(91, 92, 246, 0.08);
         }
 
         .login-button {
+            position: relative;
             width: 100%;
+            min-height: 50px;
+            margin-top: 4px;
             padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
+            background: linear-gradient(135deg, var(--primary-dark), var(--primary) 58%, #8b5cf6);
             border: none;
-            border-radius: 10px;
+            border-radius: 999px;
+            box-shadow: 0 18px 34px -12px rgba(79, 70, 229, 0.62);
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 800;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
+            overflow: hidden;
+        }
+
+        .login-button::after {
+            content: '';
+            position: absolute;
+            inset: 1px;
+            border-radius: inherit;
+            pointer-events: none;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), transparent 62%);
         }
 
         .login-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 22px 40px -14px rgba(79, 70, 229, 0.7);
+            filter: saturate(1.06);
         }
 
         .login-button:active {
@@ -96,19 +188,22 @@
         }
 
         .login-button:disabled {
-            opacity: 0.6;
+            opacity: 0.65;
             cursor: not-allowed;
             transform: none;
+            box-shadow: none;
         }
 
         .error-message {
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
             display: none;
+            margin-bottom: 18px;
+            padding: 13px 14px;
+            color: #b91c1c;
+            background: rgba(254, 226, 226, 0.88);
+            border: 1px solid rgba(248, 113, 113, 0.30);
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 500;
         }
 
         .error-message.show {
@@ -118,14 +213,38 @@
         .default-credentials {
             margin-top: 20px;
             padding: 15px;
-            background: #f8f9fa;
-            border-radius: 10px;
+            background: rgba(248, 250, 252, 0.92);
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            border-radius: 16px;
+            color: var(--text-muted);
             font-size: 13px;
-            color: #666;
         }
 
         .default-credentials strong {
-            color: #333;
+            color: var(--text-main);
+        }
+
+        @keyframes popIn {
+            from {
+                opacity: 0;
+                transform: translateY(18px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @media (max-width: 520px) {
+            body {
+                padding: 16px;
+            }
+
+            .login-container {
+                padding: 30px 22px;
+                border-radius: 26px;
+            }
         }
     </style>
 </head>
