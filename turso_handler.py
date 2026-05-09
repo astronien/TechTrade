@@ -105,6 +105,8 @@ class TursoHandler:
 
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_zone_date ON trades(zone_name, document_date)")
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_branch ON trades(branch_id)")
+            self._execute_sql("CREATE INDEX IF NOT EXISTS idx_real_branch ON trades(real_branch_id)")
+            self._execute_sql("CREATE INDEX IF NOT EXISTS idx_doc_date ON trades(document_date)")
             # Backward-compatible migration for databases created before created_at existed.
             try:
                 self._execute_sql("ALTER TABLE trades ADD COLUMN created_at DATETIME")
@@ -242,7 +244,7 @@ class TursoHandler:
                 """
                 SELECT trade_in_id, document_date, document_no, net_price, amount
                 FROM trades
-                WHERE zone_name = ? AND substr(document_date, 1, 10) = ?
+                WHERE zone_name = ? AND document_date = ?
                 """,
                 [zone_name, date_only]
             )
@@ -299,10 +301,10 @@ class TursoHandler:
             conditions = []
             params = []
             if start_date:
-                conditions.append("substr(document_date, 1, 10) >= ?")
+                conditions.append("document_date >= ?")
                 params.append(self._normalize_date_only(start_date))
             if end_date:
-                conditions.append("substr(document_date, 1, 10) <= ?")
+                conditions.append("document_date <= ?")
                 params.append(self._normalize_date_only(end_date))
             if zone_name:
                 conditions.append("zone_name = ?")
@@ -312,13 +314,13 @@ class TursoHandler:
             res = self._execute_sql(f"""
                 SELECT
                     zone_name,
-                    substr(document_date, 1, 10) AS trade_date,
+                    document_date AS trade_date,
                     COUNT(*) AS turso_count,
                     MIN(exported_at) AS first_exported_at,
                     MAX(exported_at) AS last_exported_at
                 FROM trades
                 {where_sql}
-                GROUP BY zone_name, substr(document_date, 1, 10)
+                GROUP BY zone_name, document_date
                 ORDER BY trade_date DESC, zone_name ASC
             """, params)
 
@@ -381,7 +383,7 @@ class TursoHandler:
                         SELECT real_branch_id, COUNT(*)
                         FROM trades
                         WHERE real_branch_id IN ({', '.join(['?']*len(valid_rem_ids))})
-                        AND substr(document_date, 1, 10) BETWEEN ? AND ?
+                        AND document_date BETWEEN ? AND ?
                         GROUP BY real_branch_id
                     """
                     params_rem = valid_rem_ids + [iso_start, iso_end]
@@ -446,7 +448,7 @@ class TursoHandler:
                     except:
                         b_id_val = str(branch_id)
 
-                    check_sql = "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND substr(document_date, 1, 10) BETWEEN ? AND ?"
+                    check_sql = "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND document_date BETWEEN ? AND ?"
                     count_res = self._execute_sql(check_sql, [b_id_val, iso_start, iso_end])
                     if count_res:
                         try:
@@ -541,7 +543,7 @@ class TursoHandler:
             iso_start = to_iso(date_start)
             iso_end   = to_iso(date_end)
             count_res = self._execute_sql(
-                "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND substr(document_date, 1, 10) BETWEEN ? AND ?",
+                "SELECT COUNT(*) FROM trades WHERE real_branch_id = ? AND document_date BETWEEN ? AND ?",
                 [str(branch_id), iso_start, iso_end]
             )
             if not count_res or not count_res.rows:
@@ -615,7 +617,7 @@ class TursoHandler:
                     SELECT real_branch_id, COUNT(*)
                     FROM trades
                     WHERE real_branch_id IN ({placeholders_act})
-                    AND substr(document_date, 1, 10) BETWEEN ? AND ?
+                    AND document_date BETWEEN ? AND ?
                     GROUP BY real_branch_id
                 """
                 params_act = valid_ids + [iso_start, iso_end]
@@ -814,7 +816,7 @@ class TursoHandler:
                 except: return d
 
             s, e = to_sql(date_start), to_sql(date_end)
-            q = "SELECT * FROM trades WHERE substr(document_date, 1, 10) BETWEEN ? AND ?"
+            q = "SELECT * FROM trades WHERE document_date BETWEEN ? AND ?"
             p = [s, e]
 
             if branch_ids:
@@ -845,6 +847,83 @@ class TursoHandler:
         except Exception as err:
             print(f"❌ [Turso] get_trades_batch error: {err}")
             return []
+
+    def get_report_summary(self, date_start, date_end, branch_ids=None):
+        """ดึงข้อมูลสรุปรายงานแบบ Aggregated (Server-side) เพื่อความรวดเร็ว"""
+        try:
+            def to_sql(d):
+                try:
+                    p = d.split('/')
+                    return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+                except: return d
+
+            s, e = to_sql(date_start), to_sql(date_end)
+            
+            # Base query
+            where_clause = "WHERE document_date BETWEEN ? AND ?"
+            params = [s, e]
+
+            if branch_ids:
+                valid_ids = [str(bid) for bid in branch_ids if bid and str(bid) != '0']
+                if valid_ids:
+                    placeholders = ', '.join(['?'] * len(valid_ids))
+                    where_clause += f" AND real_branch_id IN ({placeholders})"
+                    params.extend(valid_ids)
+
+            # 1. สรุปตามสถานะ
+            status_sql = f"""
+                SELECT BIDDING_STATUS_NAME, COUNT(*) as count, SUM(amount) as amount
+                FROM trades {where_clause}
+                GROUP BY BIDDING_STATUS_NAME
+            """
+            status_res = self._execute_sql(status_sql, params)
+            
+            # 2. สรุปตามแบรนด์
+            brand_sql = f"""
+                SELECT brand_name, COUNT(*) as count, SUM(amount) as amount
+                FROM trades {where_clause}
+                GROUP BY brand_name
+            """
+            brand_res = self._execute_sql(brand_sql, params)
+
+            # 3. สรุปตามวัน (Daily)
+            daily_sql = f"""
+                SELECT 
+                    document_date, 
+                    COUNT(*) as count, 
+                    SUM(amount) as totalAmount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN 1 ELSE 0 END) as confirmedCount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN amount ELSE 0 END) as confirmedAmount
+                FROM trades {where_clause}
+                GROUP BY document_date
+                ORDER BY document_date ASC
+            """
+            daily_res = self._execute_sql(daily_sql, params)
+
+            # 4. สรุปตามพนักงานขาย (Sales)
+            sales_sql = f"""
+                SELECT 
+                    SALE_CODE, 
+                    SALE_NAME, 
+                    COUNT(*) as count, 
+                    SUM(amount) as totalAmount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN 1 ELSE 0 END) as confirmedCount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN amount ELSE 0 END) as confirmedAmount
+                FROM trades {where_clause}
+                GROUP BY SALE_CODE, SALE_NAME
+            """
+            sales_res = self._execute_sql(sales_sql, params)
+
+            return {
+                'success': True,
+                'status_summary': [dict(zip(status_res.columns, r)) for r in status_res.rows] if status_res else [],
+                'brand_summary': [dict(zip(brand_res.columns, r)) for r in brand_res.rows] if brand_res else [],
+                'daily_summary': [dict(zip(daily_res.columns, r)) for r in daily_res.rows] if daily_res else [],
+                'sales_summary': [dict(zip(sales_res.columns, r)) for r in sales_res.rows] if sales_res else []
+            }
+        except Exception as err:
+            print(f"❌ [Turso] get_report_summary error: {err}")
+            return {'success': False, 'error': str(err)}
 
     def close(self):
         if self.client: self.client.close()
