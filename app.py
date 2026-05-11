@@ -4048,8 +4048,8 @@ def test_auto_export():
     try:
         from auto_daily_export import run_daily_export
         result = run_daily_export(force=True)
-        status_code = 200 if result.get('success') else 500
-        message = 'รัน Turso Sync เสร็จแล้ว' if result.get('success') else 'รัน Turso Sync เสร็จแล้ว แต่พบข้อมูลไม่ตรงกันหรือมีข้อผิดพลาด'
+        status_code = 200 if result.get('sync_completed') else 500
+        message = 'รัน Turso Sync เสร็จแล้ว' if result.get('sync_completed') else 'รัน Turso Sync ล้มเหลว'
         return jsonify({'success': result.get('success', False), 'message': message, 'result': result}), status_code
     except Exception as e:
         import traceback
@@ -4058,7 +4058,8 @@ def test_auto_export():
 
 @app.route('/api/admin/auto-export-cron', methods=['GET', 'POST'])
 def vercel_cron_auto_export():
-    """Endpoint สำหรับ GitHub Actions Cron ยิงมาทุกๆ 15 นาที สำหรับ auto-export"""
+    """Endpoint สำหรับ GitHub Actions Cron ยิงมาทุกๆ 15 นาที สำหรับ auto-export
+    ใช้ background thread เพื่อไม่ให้ Vercel timeout (Hobby plan = 10s)"""
     try:
         # Check authorization
         cron_secret = os.environ.get("CRON_SECRET", "")
@@ -4106,12 +4107,23 @@ def vercel_cron_auto_export():
                 conn.close()
         
         if not already_run:
-            print(f"✅ Time to run! Executing auto-export...")
-            from auto_daily_export import run_daily_export
-            result = run_daily_export(force=True)
-            status_code = 200 if result.get('success') else 500
-            message = 'Export executed' if result.get('success') else 'Export executed but reconciliation failed'
-            return jsonify({'success': result.get('success', False), 'message': message, 'result': result}), status_code
+            print(f"✅ Time to run! Starting auto-export in background...")
+            
+            import threading
+            def _run_export_background():
+                try:
+                    from auto_daily_export import run_daily_export
+                    result = run_daily_export(force=True)
+                    print(f"📤 Background export result: sync_completed={result.get('sync_completed')}, data_consistent={result.get('data_consistent')}")
+                except Exception as bg_e:
+                    print(f"❌ Background export error: {bg_e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            bg_thread = threading.Thread(target=_run_export_background, daemon=True)
+            bg_thread.start()
+            
+            return jsonify({'success': True, 'message': 'Export started in background'}), 200
         else:
             return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
     

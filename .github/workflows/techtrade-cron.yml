@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger Auto-Cancel Endpoint
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://report-trade.vercel.app/api/admin/auto-cancel-cron" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 30 -X POST "https://report-trade.vercel.app/api/admin/auto-cancel-cron" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: Trigger Auto-Export Endpoint
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://report-trade.vercel.app/api/admin/auto-export-cron" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 30 -X POST "https://report-trade.vercel.app/api/admin/auto-export-cron" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

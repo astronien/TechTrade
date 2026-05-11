@@ -313,6 +313,8 @@ def run_daily_export(force=False):
     
     return {
         'success': total_errors == 0 and total_warnings == 0,
+        'sync_completed': total_errors == 0,
+        'data_consistent': total_warnings == 0,
         'total_zones': len(zones_to_sync),
         'total_synced': total_synced_zones,
         'total_records': total_records,
