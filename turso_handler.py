@@ -485,6 +485,18 @@ class TursoHandler:
             print(f"⚠️ mark_synced error: {e}")
             return False
 
+    def delete_zone_records(self, zone_name, target_date):
+        """ลบข้อมูลทั้งหมดของโซนและวันที่ระบุ เพื่อเตรียมลงข้อมูลใหม่แบบ 100% Parity"""
+        try:
+            date_only = self._normalize_date_only(target_date)
+            sql = "DELETE FROM trades WHERE zone_name = ? AND document_date = ?"
+            self._execute_sql(sql, [zone_name, date_only])
+            print(f"🗑️ [Turso] Cleared existing records for Zone '{zone_name}' on {date_only}")
+            return True
+        except Exception as e:
+            print(f"❌ [Turso] delete_zone_records error: {e}")
+            return False
+
     def invalidate_sync(self, branch_id, sync_date):
         """ลบประวัติ sync เพื่อบังคับให้ดึงข้อมูลใหม่จาก Eve API"""
         try:

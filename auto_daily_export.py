@@ -69,6 +69,8 @@ def fetch_zone_daily_data(zone, target_date):
     
     print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str} (Parallel)")
     
+    all_success = True
+    
     def fetch_single_branch(branch_id):
         try:
             filters = {
@@ -81,20 +83,22 @@ def fetch_zone_daily_data(zone, target_date):
             items = fetch_all_for_branch(filters)
             for item in items:
                 item['_branch_id'] = branch_id
-            return items
+            return items, True
         except Exception as e:
             print(f"   ❌ Branch {branch_id} error: {e}")
-            return []
+            return [], False
 
     # ใช้ ThreadPoolExecutor ดึงข้อมูลสาขาพร้อมกัน (Max 15 workers)
     max_workers = min(15, len(branch_ids)) if branch_ids else 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_branch = {executor.submit(fetch_single_branch, bid): bid for bid in branch_ids}
         for future in as_completed(future_to_branch):
-            items = future.result()
+            items, success = future.result()
+            if not success:
+                all_success = False
             all_items.extend(items)
     
-    return all_items
+    return all_items, all_success
 
 
 def run_daily_export(force=False, target_dt=None):
@@ -192,11 +196,18 @@ def run_daily_export(force=False, target_dt=None):
         
         try:
             # 1. ดึงข้อมูลวันนี้จาก Eve
-            trade_data = fetch_zone_daily_data(zone, target_date_dt)
+            trade_data, all_success = fetch_zone_daily_data(zone, target_date_dt)
             
             # 2. บันทึกลง Turso
             eve_count = len(trade_data)
             inserted = 0
+            
+            # ถ้าดึงสำเร็จครบทุกสาขา ให้ล้างข้อมูลเก่าของโซนนั้นในวันนี้ก่อน เพื่อความถูกต้อง 100%
+            if all_success:
+                turso.delete_zone_records(zone_name, target_date_dt)
+            else:
+                print(f"   ⚠️ Warning: Some branches in Zone '{zone_name}' failed to fetch. Updating without clearing.")
+
             if trade_data:
                 inserted = turso.insert_trades_batch(trade_data, zone_name)
                 print(f"   ✅ Saved {inserted} records to Turso Database")
