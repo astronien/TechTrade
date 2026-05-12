@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from turso_handler import TursoHandler
 
 
@@ -59,16 +60,16 @@ def save_auto_sync_log(log_data):
 
 
 def fetch_zone_daily_data(zone, target_date):
-    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve"""
+    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve (แบบ Parallel)"""
     from app import fetch_all_for_branch
     
     date_str = target_date.strftime("%d/%m/%Y")
     branch_ids = zone.get('branch_ids', [])
     all_items = []
     
-    print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str}")
+    print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str} (Parallel)")
     
-    for branch_id in branch_ids:
+    def fetch_single_branch(branch_id):
         try:
             filters = {
                 'date_start': date_str,
@@ -80,17 +81,27 @@ def fetch_zone_daily_data(zone, target_date):
             items = fetch_all_for_branch(filters)
             for item in items:
                 item['_branch_id'] = branch_id
-            all_items.extend(items)
+            return items
         except Exception as e:
             print(f"   ❌ Branch {branch_id} error: {e}")
+            return []
+
+    # ใช้ ThreadPoolExecutor ดึงข้อมูลสาขาพร้อมกัน (Max 15 workers)
+    max_workers = min(15, len(branch_ids)) if branch_ids else 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_branch = {executor.submit(fetch_single_branch, bid): bid for bid in branch_ids}
+        for future in as_completed(future_to_branch):
+            items = future.result()
+            all_items.extend(items)
     
     return all_items
 
 
-def run_daily_export(force=False):
+def run_daily_export(force=False, target_dt=None):
     """ฟังก์ชันหลัก: Sync ข้อมูลรายวันเข้า Turso Database
     Args:
         force: True = บังคับรัน (ไม่ตรวจสอบว่ารันไปแล้วหรือยัง)
+        target_dt: วันที่ต้องการรัน (ถ้าไม่ระบุจะรันเมื่อวาน)
     Returns:
         dict: ผลการรัน
     """
@@ -130,8 +141,13 @@ def run_daily_export(force=False):
     # 3. กำหนดวันที่ที่จะ sync (วันก่อนหน้า)
     bkk_tz = pytz.timezone('Asia/Bangkok')
     now_bkk = datetime.now(bkk_tz)
-    target_date = (now_bkk - timedelta(days=1)).date()
-    target_date_dt = datetime.combine(target_date, datetime.min.time())
+    
+    if target_dt is None:
+        target_date = (now_bkk - timedelta(days=1)).date()
+        target_date_dt = datetime.combine(target_date, datetime.min.time())
+    else:
+        target_date_dt = target_dt
+        target_date = target_dt.date() if isinstance(target_dt, datetime) else target_dt
     
     date_str_display = target_date.strftime("%d/%m/%Y")
     print(f"📅 Sync date: {date_str_display}")

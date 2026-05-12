@@ -4083,7 +4083,9 @@ def vercel_cron_auto_export():
         else:
             target_dt_past = target_dt_today
         
-        print(f"📤 Export Cron Ping: Now={now_bkk.strftime('%H:%M')}, Target={schedule_time}")
+        log_msg = f"📤 Export Cron Ping: Now={now_bkk.strftime('%H:%M')}, Target={schedule_time}"
+        print(log_msg)
+        log_debug(log_msg)
         
         # Check if already ran for this schedule
         conn = get_db_connection()
@@ -4107,23 +4109,17 @@ def vercel_cron_auto_export():
                 conn.close()
         
         if not already_run:
-            print(f"✅ Time to run! Starting auto-export in background...")
+            log_debug(f"✅ Time to run! Executing auto-export synchronously...")
+            print(f"✅ Time to run! Executing auto-export synchronously...")
             
-            import threading
-            def _run_export_background():
-                try:
-                    from auto_daily_export import run_daily_export
-                    result = run_daily_export(force=True)
-                    print(f"📤 Background export result: sync_completed={result.get('sync_completed')}, data_consistent={result.get('data_consistent')}")
-                except Exception as bg_e:
-                    print(f"❌ Background export error: {bg_e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            bg_thread = threading.Thread(target=_run_export_background, daemon=True)
-            bg_thread.start()
-            
-            return jsonify({'success': True, 'message': 'Export started in background'}), 200
+            try:
+                from auto_daily_export import run_daily_export
+                result = run_daily_export(force=True)
+                log_debug(f"📤 Export result: sync_completed={result.get('sync_completed')}, records={result.get('total_records')}")
+                return jsonify({'success': True, 'message': 'Export completed successfully', 'result': result}), 200
+            except Exception as e:
+                log_debug(f"❌ Export execution error: {str(e)}")
+                return jsonify({'success': False, 'error': str(e)}), 500
         else:
             return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
     
