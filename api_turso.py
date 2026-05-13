@@ -39,8 +39,9 @@ def get_trades():
     limit = request.args.get('limit', 100, type=int)
     
     turso = TursoHandler()
-    if not turso.client:
-        return jsonify({'error': 'Database connection failed'}), 500
+    # ตรวจสอบความพร้อมของ URL/Token แทน client เพื่อรองรับ HTTP Fallback (จำเป็นบน Vercel)
+    if not turso.url or not turso.token:
+        return jsonify({'error': 'Database connection failed: Missing credentials'}), 500
         
     try:
         # สร้าง SQL สำหรับดึงข้อมูล
@@ -66,7 +67,10 @@ def get_trades():
         query += " ORDER BY document_date DESC LIMIT ?"
         params.append(limit)
         
-        result = turso.client.execute(query, params)
+        result = turso._execute_sql(query, params)
+        
+        if result is None:
+             return jsonify({'success': False, 'error': 'Query execution failed (DB error)'}), 500
         
         # แปลงผลลัพธ์เป็น list of dicts
         trades = []
@@ -100,7 +104,10 @@ def get_stats():
             FROM trades 
             GROUP BY zone_name
         """
-        result = turso.client.execute(query)
+        result = turso._execute_sql(query)
+        
+        if result is None:
+             return jsonify({'success': False, 'error': 'Stats query failed (DB error)'}), 500
         
         stats = []
         columns = [col for col in result.columns]
