@@ -31,9 +31,10 @@ def require_api_key(f):
 def get_trades():
     """
     API สำหรับดึงข้อมูล Trade จาก Turso 
-    รองรับการ Filter ตาม Zone และวันที่
+    รองรับการ Filter ตาม Zone, สาขา และวันที่
     """
     zone_name = request.args.get('zone')
+    branch = request.args.get('branch')
     start_date = request.args.get('start_date') # YYYY-MM-DD
     end_date = request.args.get('end_date')     # YYYY-MM-DD
     limit = request.args.get('limit', 100, type=int)
@@ -52,6 +53,14 @@ def get_trades():
         if zone_name:
             conditions.append("zone_name = ?")
             params.append(zone_name)
+            
+        if branch:
+            branch_list = [b.strip() for b in branch.split(',') if b.strip()]
+            if branch_list:
+                placeholders = ', '.join(['?'] * len(branch_list))
+                conditions.append(f"(real_branch_id IN ({placeholders}) OR branch_id IN ({placeholders}))")
+                params.extend(branch_list)
+                params.extend(branch_list)
         
         if start_date:
             conditions.append("substr(document_date, 1, 10) >= ?")

@@ -1,0 +1,503 @@
+Fetching data from API...
+Total rows fetched: 50000
+
+--- Branch 645 Total Evaluated: 1712 ---
+EMP ID:33753|NAME:6917: Evaluated=9, Agreed=4
+   -> รอผู้ขายยืนยันราคา: 1
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 4
+EMP ID:33722|NAME:23510: Evaluated=12, Agreed=7
+   -> ยกเลิกรายการ: 5
+   -> สิ้นสุดการประเมินราคา: 7
+EMP ID:33722|NAME:18674: Evaluated=45, Agreed=27
+   -> สิ้นสุดการประเมินราคา: 27
+   -> ยกเลิกรายการ: 18
+EMP ID:12448|NAME:ณัฐทิณี เนตรจันทร์: Evaluated=10, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+   -> ยกเลิกรายการ: 4
+EMP ID:33722|NAME:32863: Evaluated=52, Agreed=31
+   -> สิ้นสุดการประเมินราคา: 31
+   -> ยกเลิกรายการ: 21
+EMP ID:33722|NAME:11384: Evaluated=38, Agreed=24
+   -> ยกเลิกรายการ: 13
+   -> รอผู้ขายยืนยันราคา: 1
+   -> สิ้นสุดการประเมินราคา: 24
+EMP ID:34763|NAME:นางสาวสรัญญา มีสารภี: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:33753|NAME:29594: Evaluated=12, Agreed=5
+   -> รอผู้ขายยืนยันราคา: 1
+   -> สิ้นสุดการประเมินราคา: 5
+   -> ยกเลิกรายการ: 6
+EMP ID:33722|NAME:32867: Evaluated=1, Agreed=0
+   -> รอผู้ขายยืนยันราคา: 1
+EMP ID:33722|NAME:33422: Evaluated=56, Agreed=29
+   -> รอผู้ขายยืนยันราคา: 1
+   -> ยกเลิกรายการ: 26
+   -> สิ้นสุดการประเมินราคา: 29
+EMP ID:13549|NAME:บรรเจิด ทองเกิด: Evaluated=2, Agreed=0
+   -> รอผู้ขายยืนยันราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:29350: Evaluated=86, Agreed=40
+   -> ยกเลิกรายการ: 45
+   -> เอกสารอยู่ระหว่างแก้ไข: 1
+   -> สิ้นสุดการประเมินราคา: 40
+EMP ID:33722|NAME:3728: Evaluated=45, Agreed=32
+   -> สิ้นสุดการประเมินราคา: 32
+   -> ยกเลิกรายการ: 13
+EMP ID:33722|NAME:25029: Evaluated=39, Agreed=25
+   -> สิ้นสุดการประเมินราคา: 25
+   -> ยกเลิกรายการ: 14
+EMP ID:33753|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=28, Agreed=16
+   -> สิ้นสุดการประเมินราคา: 16
+   -> ยกเลิกรายการ: 12
+EMP ID:33753|NAME:32863: Evaluated=16, Agreed=9
+   -> สิ้นสุดการประเมินราคา: 9
+   -> ยกเลิกรายการ: 7
+EMP ID:34377|NAME:เมธาพร กลิ่นกลัด: Evaluated=3, Agreed=2
+   -> ยกเลิกรายการ: 1
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33722|NAME:29594: Evaluated=49, Agreed=29
+   -> สิ้นสุดการประเมินราคา: 29
+   -> ยกเลิกรายการ: 20
+EMP ID:20618|NAME:32863: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:6917: Evaluated=49, Agreed=26
+   -> ยกเลิกรายการ: 23
+   -> สิ้นสุดการประเมินราคา: 26
+EMP ID:33722|NAME:18042: Evaluated=65, Agreed=39
+   -> สิ้นสุดการประเมินราคา: 39
+   -> ยกเลิกรายการ: 26
+EMP ID:33722|NAME:23590: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33753|NAME:11384: Evaluated=17, Agreed=9
+   -> สิ้นสุดการประเมินราคา: 9
+   -> ยกเลิกรายการ: 8
+EMP ID:20618|NAME:29350: Evaluated=6, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+EMP ID:20618|NAME:6917: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:38422: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:11380: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:23648|NAME:ปรารถนา อิสรานุวงษา: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33722|NAME:33666: Evaluated=49, Agreed=35
+   -> สิ้นสุดการประเมินราคา: 35
+   -> ยกเลิกรายการ: 14
+EMP ID:33753|NAME:29350: Evaluated=28, Agreed=17
+   -> สิ้นสุดการประเมินราคา: 17
+   -> ยกเลิกรายการ: 11
+EMP ID:33722|NAME:19867: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:20618|NAME:มินตรา ศรีทองคำ: Evaluated=15, Agreed=8
+   -> สิ้นสุดการประเมินราคา: 8
+   -> ยกเลิกรายการ: 7
+EMP ID:33722|NAME:ศิริทิพย์ บุญลำไพ: Evaluated=13, Agreed=11
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 11
+EMP ID:33753|NAME:18042: Evaluated=19, Agreed=12
+   -> ยกเลิกรายการ: 7
+   -> สิ้นสุดการประเมินราคา: 12
+EMP ID:33722|NAME:33183: Evaluated=54, Agreed=28
+   -> ยกเลิกรายการ: 26
+   -> สิ้นสุดการประเมินราคา: 28
+EMP ID:33753|NAME:33183: Evaluated=15, Agreed=9
+   -> ยกเลิกรายการ: 6
+   -> สิ้นสุดการประเมินราคา: 9
+EMP ID:3653|NAME:ฐปนรรฆ์ ศิรสิทธิวงศ์: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33753|NAME:25029: Evaluated=19, Agreed=14
+   -> สิ้นสุดการประเมินราคา: 14
+   -> ยกเลิกรายการ: 5
+EMP ID:33722|NAME:25350: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:เจ็ท: Evaluated=9, Agreed=5
+   -> สิ้นสุดการประเมินราคา: 5
+   -> ยกเลิกรายการ: 4
+EMP ID:33753|NAME:33666: Evaluated=12, Agreed=7
+   -> สิ้นสุดการประเมินราคา: 7
+   -> ยกเลิกรายการ: 5
+EMP ID:33753|NAME:33422: Evaluated=17, Agreed=8
+   -> ยกเลิกรายการ: 9
+   -> สิ้นสุดการประเมินราคา: 8
+EMP ID:33753|NAME:13549: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33753|NAME:3728: Evaluated=13, Agreed=12
+   -> สิ้นสุดการประเมินราคา: 12
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:12448: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33753|NAME:18674: Evaluated=12, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+   -> ยกเลิกรายการ: 6
+EMP ID:33753|NAME:nat: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33183|NAME:nat: Evaluated=4, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 2
+EMP ID:33722|NAME:33168: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33753|NAME:กิตติ นิพิทชยานันต์: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:25622|NAME:กิตติ นิพิทชยานันต์: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:33753|NAME:32869: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33722|NAME:35183: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33732|NAME:3728: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:3372|NAME:29594: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33722|NAME:18675: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:3828: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:29494|NAME:nat: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:6917|NAME:18042: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33722|NAME:3422: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:3728|NAME:นัท: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:18674|NAME:nat: Evaluated=3, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+EMP ID:32863|NAME:nat: Evaluated=4, Agreed=2
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:3728|NAME:nat: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:29350|NAME:nat: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:25029|NAME:nat: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33722|NAME:29593: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33753|NAME:พี่ภู: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:นิน: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:ตีพิณ คงทอง: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:ตีพิน: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33753|NAME:วรนุช: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33753|NAME:ภัทร: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:12448|NAME:นัท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:12448|NAME:18674: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:ธีระพงษ์: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33722|NAME:วรนุต: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:11384|NAME:nat: Evaluated=4, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+   -> ยกเลิกรายการ: 1
+EMP ID:33722|NAME:33244: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33723|NAME:18042: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:33723|NAME:11384: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:29594|NAME:มินตรา: Evaluated=18, Agreed=11
+   -> สิ้นสุดการประเมินราคา: 11
+   -> ยกเลิกรายการ: 7
+EMP ID:33722|NAME:ปรารถนา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:29350|NAME:มินตรา: Evaluated=25, Agreed=13
+   -> ยกเลิกรายการ: 12
+   -> สิ้นสุดการประเมินราคา: 13
+EMP ID:33183|NAME:มินตรา: Evaluated=14, Agreed=5
+   -> ยกเลิกรายการ: 9
+   -> สิ้นสุดการประเมินราคา: 5
+EMP ID:18042|NAME:มินตรา: Evaluated=14, Agreed=4
+   -> สิ้นสุดการประเมินราคา: 4
+   -> ยกเลิกรายการ: 10
+EMP ID:32863|NAME:ปรารถนา: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:11384|NAME:มินตรา: Evaluated=25, Agreed=13
+   -> ยกเลิกรายการ: 12
+   -> สิ้นสุดการประเมินราคา: 13
+EMP ID:29594|NAME:กิตติ นิพิทชยานันต์: Evaluated=22, Agreed=12
+   -> สิ้นสุดการประเมินราคา: 12
+   -> ยกเลิกรายการ: 10
+EMP ID:18042|NAME:nat: Evaluated=5, Agreed=3
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 3
+EMP ID:18674|NAME:มินตรา: Evaluated=12, Agreed=11
+   -> สิ้นสุดการประเมินราคา: 11
+   -> ยกเลิกรายการ: 1
+EMP ID:3728|NAME:มินตรา: Evaluated=19, Agreed=16
+   -> สิ้นสุดการประเมินราคา: 16
+   -> ยกเลิกรายการ: 3
+EMP ID:33183|NAME:ปรารถนา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33666|NAME:กิตติ นิพิทชยานันต์: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:11384|NAME:กิตติ นิพิทชยานันต์: Evaluated=19, Agreed=13
+   -> สิ้นสุดการประเมินราคา: 13
+   -> ยกเลิกรายการ: 6
+EMP ID:32863|NAME:กิตติ นิพิทชยานันต์: Evaluated=13, Agreed=9
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 9
+EMP ID:18042|NAME:บรรเจิด: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:18042|NAME:กิตติ นิพิทชยานันต์: Evaluated=18, Agreed=10
+   -> สิ้นสุดการประเมินราคา: 10
+   -> ยกเลิกรายการ: 8
+EMP ID:3728|NAME:กิตติ นิพิทชยานันต์: Evaluated=13, Agreed=8
+   -> สิ้นสุดการประเมินราคา: 8
+   -> ยกเลิกรายการ: 4
+   -> ยืนยันราคาแล้ว: 1
+EMP ID:29350|NAME:กิตติ นิพิทชยานันต์: Evaluated=45, Agreed=23
+   -> ยกเลิกรายการ: 22
+   -> สิ้นสุดการประเมินราคา: 23
+EMP ID:18674|NAME:บรรเจิด: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:3728|NAME:บรรเจิด: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33183|NAME:กิตติ นิพิทชยานันต์: Evaluated=8, Agreed=4
+   -> สิ้นสุดการประเมินราคา: 4
+   -> ยกเลิกรายการ: 4
+EMP ID:33422|NAME:กิตติ นิพิทชยานันต์: Evaluated=17, Agreed=11
+   -> สิ้นสุดการประเมินราคา: 11
+   -> ยกเลิกรายการ: 6
+EMP ID:11384|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=13, Agreed=7
+   -> ยกเลิกรายการ: 6
+   -> สิ้นสุดการประเมินราคา: 7
+EMP ID:25029|NAME:มินตรา: Evaluated=10, Agreed=7
+   -> สิ้นสุดการประเมินราคา: 7
+   -> ยกเลิกรายการ: 3
+EMP ID:3728|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=12, Agreed=10
+   -> สิ้นสุดการประเมินราคา: 10
+   -> ยกเลิกรายการ: 2
+EMP ID:33183|NAME:ตีพิณ คงทอง: Evaluated=9, Agreed=7
+   -> สิ้นสุดการประเมินราคา: 7
+   -> ยกเลิกรายการ: 2
+EMP ID:32863|NAME:มินตรา: Evaluated=15, Agreed=10
+   -> ยกเลิกรายการ: 5
+   -> สิ้นสุดการประเมินราคา: 10
+EMP ID:18042|NAME:เจ้ท: Evaluated=9, Agreed=5
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 5
+EMP ID:29350|NAME:เจ้ท: Evaluated=21, Agreed=8
+   -> ยกเลิกรายการ: 13
+   -> สิ้นสุดการประเมินราคา: 8
+EMP ID:33422|NAME:มินตรา: Evaluated=12, Agreed=8
+   -> สิ้นสุดการประเมินราคา: 8
+   -> ยกเลิกรายการ: 4
+EMP ID:29350|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=24, Agreed=9
+   -> ยกเลิกรายการ: 15
+   -> สิ้นสุดการประเมินราคา: 9
+EMP ID:25029|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=10, Agreed=5
+   -> สิ้นสุดการประเมินราคา: 5
+   -> ยกเลิกรายการ: 5
+EMP ID:3728|NAME:เจ้ท: Evaluated=8, Agreed=6
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 6
+EMP ID:33666|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:18042|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=8, Agreed=4
+   -> สิ้นสุดการประเมินราคา: 4
+   -> ยกเลิกรายการ: 4
+EMP ID:29594|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=3, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+EMP ID:32863|NAME:เจ้ท: Evaluated=10, Agreed=10
+   -> สิ้นสุดการประเมินราคา: 10
+EMP ID:25029|NAME:บรรเจิด: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:29350|NAME:บรรเจิด: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:33422|NAME:เจ้ท: Evaluated=15, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+   -> ยกเลิกรายการ: 9
+EMP ID:33183|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=5, Agreed=2
+   -> ยกเลิกรายการ: 3
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33422|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=12, Agreed=6
+   -> ยกเลิกรายการ: 6
+   -> สิ้นสุดการประเมินราคา: 6
+EMP ID:32863|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=9, Agreed=6
+   -> ยกเลิกรายการ: 3
+   -> สิ้นสุดการประเมินราคา: 6
+EMP ID:33183|NAME:บรรเจิด: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33863|NAME:มินตรา: Evaluated=3, Agreed=2
+   -> ยกเลิกรายการ: 1
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:33183|NAME:เจ้ท: Evaluated=8, Agreed=4
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 4
+EMP ID:33666|NAME:มินตรา: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33183|NAME:เจ็ท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:29594|NAME:เจ้ท: Evaluated=9, Agreed=7
+   -> สิ้นสุดการประเมินราคา: 7
+   -> ยกเลิกรายการ: 2
+EMP ID:29594|NAME:nat: Evaluated=3, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+EMP ID:25029|NAME:กิตติ นิพิทชยานันต์: Evaluated=22, Agreed=13
+   -> สิ้นสุดการประเมินราคา: 13
+   -> ยกเลิกรายการ: 9
+EMP ID:18674|NAME:นัท: Evaluated=2, Agreed=1
+   -> ยกเลิกรายการ: 1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:18674|NAME:กิตติ นิพิทชยานันต์: Evaluated=18, Agreed=12
+   -> ยกเลิกรายการ: 6
+   -> สิ้นสุดการประเมินราคา: 12
+EMP ID:11384|NAME:เจ้ท: Evaluated=9, Agreed=5
+   -> สิ้นสุดการประเมินราคา: 5
+   -> ยกเลิกรายการ: 4
+EMP ID:33183|NAME:นัท: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:32863|NAME:นัท: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:18674|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=9, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+   -> ยกเลิกรายการ: 3
+EMP ID:12448|NAME:ปรารถนา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:18042|NAME:ปรารถนา: Evaluated=3, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 1
+EMP ID:11384|NAME:บรรเจิด: Evaluated=3, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+EMP ID:29594|NAME:ปรารถนา: Evaluated=4, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 3
+EMP ID:25029|NAME:เจ้ท: Evaluated=3, Agreed=1
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33163|NAME:มินตรา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:17182|NAME:มินตรา: Evaluated=9, Agreed=4
+   -> ยกเลิกรายการ: 5
+   -> สิ้นสุดการประเมินราคา: 4
+EMP ID:11384|NAME:นิน: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:29594|NAME:นัท: Evaluated=9, Agreed=5
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 5
+EMP ID:17182|NAME:นัท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:3728|NAME:กาย: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:17182|NAME:กิตติ นิพิทชยานันต์: Evaluated=15, Agreed=6
+   -> สิ้นสุดการประเมินราคา: 6
+   -> ยกเลิกรายการ: 9
+EMP ID:18674|NAME:เจ้ท: Evaluated=5, Agreed=1
+   -> ยกเลิกรายการ: 4
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33244|NAME:มินตรา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33244|NAME:เจ้ท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:18674|NAME:ปรารถนา: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:28359|NAME:กิตติ นิพิทชยานันต์: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:17182|NAME:nat: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:29350|NAME:กาย: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:13549|NAME:กิตติ นิพิทชยานันต์: Evaluated=3, Agreed=2
+   -> ยกเลิกรายการ: 1
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:12448|NAME:มินตรา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:17182|NAME:บรรเจิด: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:25029|NAME:ปรารถนา: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33422|NAME:ปรารถนา: Evaluated=2, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:13549|NAME:บรรเจิด: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:3728|NAME:ปรารถนา: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:17182|NAME:เจ้ท: Evaluated=4, Agreed=2
+   -> ยกเลิกรายการ: 2
+   -> สิ้นสุดการประเมินราคา: 2
+EMP ID:2863|NAME:เจ้ท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:18042|NAME:นัท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:17182|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=4, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 2
+EMP ID:29350|NAME:นัท: Evaluated=4, Agreed=2
+   -> สิ้นสุดการประเมินราคา: 2
+   -> ยกเลิกรายการ: 2
+EMP ID:11384|NAME:ปรารถนา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:29350|NAME:ปรารถนา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33423|NAME:กิตติ นิพิทชยานันต์: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:11384|NAME:นัท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:6917|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:18041|NAME:กิตติ นิพิทชยานันต์: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33422|NAME:nat: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:53422|NAME:กิตติ นิพิทชยานันต์: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:17128|NAME:กิตติ นิพิทชยานันต์: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:18672|NAME:มินตรา: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:6917|NAME:มินตรา: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:13549|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=2, Agreed=0
+   -> ยกเลิกรายการ: 2
+EMP ID:13549|NAME:เจ้ท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:1384|NAME:เจ้ท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:33184|NAME:รุจวิชญ์ สอนนีติรัชต์: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:33183|NAME:เจท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:32863|NAME:แมน: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:32863|NAME:เจท: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:13549|NAME:เจท: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:11384|NAME:ตีพิณ คงทอง: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:18674|NAME:ตีพิณ คงทอง: Evaluated=2, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 1
+EMP ID:25029|NAME:แมน: Evaluated=3, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+   -> ยกเลิกรายการ: 2
+EMP ID:3728|NAME:ตีพิณ คงทอง: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:32863|NAME:ตีพิณ คงทอง: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:13549|NAME:มินตรา: Evaluated=1, Agreed=0
+   -> ยกเลิกรายการ: 1
+EMP ID:29594|NAME:แมน: Evaluated=1, Agreed=1
+   -> สิ้นสุดการประเมินราคา: 1
+EMP ID:6917|NAME:กิตติ นิพิทชยานันต์: Evaluated=4, Agreed=3
+   -> สิ้นสุดการประเมินราคา: 3
+   -> ยกเลิกรายการ: 1
