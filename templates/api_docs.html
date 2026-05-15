@@ -267,6 +267,11 @@
                         <td>ชื่อโซนที่ต้องการกรอง (เช่น "BKK-1")</td>
                     </tr>
                     <tr>
+                        <td>branch</td>
+                        <td>string</td>
+                        <td>รหัสสาขาที่ต้องการกรอง รองรับแบบหลายสาขาโดยคั่นด้วย comma (เช่น "645,646")</td>
+                    </tr>
+                    <tr>
                         <td>start_date</td>
                         <td>string</td>
                         <td>วันที่เริ่มต้น รูปแบบ YYYY-MM-DD (เช่น "2026-01-01")</td>
@@ -337,6 +342,7 @@
 url = <span style="color: #98c379;">"https://your-domain.com/api/v2/trades"</span>
 params = {
     <span style="color: #98c379;">"zone"</span>: <span style="color: #98c379;">"BKK-1"</span>,
+    <span style="color: #98c379;">"branch"</span>: <span style="color: #98c379;">"645,646"</span>,
     <span style="color: #98c379;">"start_date"</span>: <span style="color: #98c379;">"2026-01-01"</span>,
     <span style="color: #98c379;">"end_date"</span>: <span style="color: #98c379;">"2026-01-31"</span>,
     <span style="color: #98c379;">"limit"</span>: <span style="color: #d19a66;">50</span>
