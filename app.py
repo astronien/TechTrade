@@ -2650,10 +2650,6 @@ def get_annual_report_data():
                 'daily_data': daily_data
             })
         else:
-            # รายงานรายเดือน - นับรายวัน (Logic เดิม)
-            pass # (This block is not being edited, just context)
-
-        if not month:
             # รายงานรายปี - นับรายเดือน (พร้อม agreed/not_agreed)
             monthly_counts_all = defaultdict(int)
             monthly_counts_agreed = defaultdict(int)
@@ -2977,7 +2973,7 @@ def get_annual_report_excel_v2():
                 
                 start = 0
                 length = 1000
-                max_items = 50000
+                max_items = 200000
                 
                 while len(all_data) < max_items:
                     data = fetch_data_with_retry(start=start, length=length, **filters)
@@ -3024,7 +3020,7 @@ def get_annual_report_excel_v2():
             
             start = 0
             length = 1000
-            max_items = 50000
+            max_items = 200000
             
             while len(all_data) < max_items:
                 data = fetch_data_with_retry(start=start, length=length, **filters)
@@ -3073,12 +3069,27 @@ def get_annual_report_excel_v2():
                 branch = find_branch_by_sequential_id(str(bid))
                 branch_name = branch['branch_name'] if branch else f"สาขา {bid}"
                 
+                # แปลง sequential_id -> real_id เพื่อเทียบกับ item.branch_id (ที่เป็น real_id)
+                branch_real_id = None
+                if branch:
+                    try:
+                        rid = get_real_branch_id(branch)
+                        if rid:
+                            branch_real_id = str(rid)
+                    except Exception:
+                        branch_real_id = None
+                
+                # ถ้าแปลงไม่ได้ fallback ใช้ sequential id
+                branch_match_ids = {str(bid)}
+                if branch_real_id:
+                    branch_match_ids.add(branch_real_id)
+                
                 # นับเทรดแต่ละเดือนของสาขานี้
                 monthly_counts = defaultdict(int)
                 for item in all_data:
                     # ตรวจสอบว่า item นี้เป็นของสาขาไหน (ถ้ามี branch_id ใน item)
                     item_branch = item.get('branch_id') or item.get('BRANCH_ID')
-                    if str(item_branch) == str(bid):
+                    if str(item_branch) in branch_match_ids:
                         doc_date = item.get('document_date', '')
                         if doc_date and doc_date.startswith('/Date('):
                             timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
