@@ -2602,21 +2602,30 @@ def get_annual_report_data():
             
             # นับตามวัน
             for item in all_items:
-                # Count Agreed (Status 3)
-                is_agreed = (item.get('status') == 3)
+                # Count Agreed (Status 3) - รองรับทั้ง int และ string (Turso cache อาจเก็บเป็น string)
+                item_status = item.get('status')
+                is_agreed = (item_status == 3 or item_status == '3')
                 if is_agreed:
                     total_agreed += 1
 
                 doc_date = item.get('document_date', '')
-                if doc_date and doc_date.startswith('/Date('):
-                    timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
-                    if timestamp_match:
-                        timestamp = int(timestamp_match.group(1)) / 1000
-                        date_obj = datetime.fromtimestamp(timestamp)
-                        if date_obj.year == year and date_obj.month == month:
-                            daily_counts[date_obj.day]['assessed'] += 1
-                            if is_agreed:
-                                daily_counts[date_obj.day]['agreed'] += 1
+                date_obj = None
+                if doc_date:
+                    # รองรับทั้ง 2 format: /Date(timestamp)/ (จาก Eve API) และ "YYYY-MM-DD" (จาก Turso cache)
+                    if isinstance(doc_date, str) and doc_date.startswith('/Date('):
+                        timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
+                        if timestamp_match:
+                            timestamp = int(timestamp_match.group(1)) / 1000
+                            date_obj = datetime.fromtimestamp(timestamp)
+                    elif isinstance(doc_date, str) and len(doc_date) >= 10 and doc_date[4] == '-' and doc_date[7] == '-':
+                        try:
+                            date_obj = datetime.strptime(doc_date[:10], '%Y-%m-%d')
+                        except ValueError:
+                            date_obj = None
+                if date_obj and date_obj.year == year and date_obj.month == month:
+                    daily_counts[date_obj.day]['assessed'] += 1
+                    if is_agreed:
+                        daily_counts[date_obj.day]['agreed'] += 1
             
             # สร้าง array ข้อมูลรายวัน
             daily_data = []
@@ -2683,10 +2692,10 @@ def get_annual_report_data():
                 month_agreed = 0
                 
                 for item in all_items:
-                    # ตรวจสอบว่าตกลงเทรดหรือไม่
+                    # ตรวจสอบว่าตกลงเทรดหรือไม่ (รองรับทั้ง int และ string จาก Turso cache)
                     status = item.get('status')
                     status_name = item.get('BIDDING_STATUS_NAME', '')
-                    is_agreed = (status == 3 or status_name in AGREED_STATUSES)
+                    is_agreed = (status == 3 or status == '3' or status_name in AGREED_STATUSES)
                     if is_agreed:
                         month_agreed += 1
                 
@@ -3091,17 +3100,24 @@ def get_annual_report_excel_v2():
                     item_branch = item.get('branch_id') or item.get('BRANCH_ID')
                     if str(item_branch) in branch_match_ids:
                         doc_date = item.get('document_date', '')
-                        if doc_date and doc_date.startswith('/Date('):
-                            timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
-                            if timestamp_match:
-                                timestamp = int(timestamp_match.group(1)) / 1000
-                                date_obj = datetime.fromtimestamp(timestamp)
-                                if date_obj.year == year:
-                                    if month:
-                                        if date_obj.month == month:
-                                            monthly_counts[date_obj.day] += 1
-                                    else:
-                                        monthly_counts[date_obj.month] += 1
+                        date_obj = None
+                        if doc_date:
+                            if isinstance(doc_date, str) and doc_date.startswith('/Date('):
+                                timestamp_match = re.search(r'/Date\((\d+)\)/', doc_date)
+                                if timestamp_match:
+                                    timestamp = int(timestamp_match.group(1)) / 1000
+                                    date_obj = datetime.fromtimestamp(timestamp)
+                            elif isinstance(doc_date, str) and len(doc_date) >= 10 and doc_date[4] == '-' and doc_date[7] == '-':
+                                try:
+                                    date_obj = datetime.strptime(doc_date[:10], '%Y-%m-%d')
+                                except ValueError:
+                                    date_obj = None
+                        if date_obj and date_obj.year == year:
+                            if month:
+                                if date_obj.month == month:
+                                    monthly_counts[date_obj.day] += 1
+                            else:
+                                monthly_counts[date_obj.month] += 1
                 
                 branches_data.append({
                     'branch_id': str(bid),
