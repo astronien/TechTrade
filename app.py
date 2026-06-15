@@ -3650,13 +3650,47 @@ def run_auto_cancel(force=False):
     reason_cancel = config.get('reason_cancel', '1')
     description = config.get('description', '-')
     
-    # Eve session
-    session_id = get_eve_session()
+    # Eve session - force_refresh=True เพื่อ login ใหม่เสมอ ป้องกัน session เก่าหมดอายุ
+    session_id = get_eve_session(force_refresh=True)
     if not session_id:
         print("❌ Cannot get Eve session, aborting")
         return
     
     eve_cookies = {'ASP.NET_SessionId': session_id}
+    
+    # Helper: เรียก Eve API พร้อม auto-retry login เมื่อ session หมดอายุ
+    def call_eve_api_with_retry(url, payload, max_retries=2):
+        """เรียก Eve API พร้อม retry login ใหม่อัตโนมัติเมื่อ session หมดอายุ"""
+        nonlocal session_id
+        for attempt in range(max_retries):
+            try:
+                resp = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    cookies=eve_cookies,
+                    timeout=30
+                )
+                # ถ้า session หมดอายุ Eve จะ redirect หรือตอบ 401/302
+                if resp.status_code in (401, 302) or 'login' in resp.url.lower() or '"Session"' in resp.text:
+                    print(f"  ⚠️ Session expired (attempt {attempt+1}/{max_retries}), re-login...")
+                    new_session_id, _ = perform_eve_login()
+                    if new_session_id:
+                        session_id = new_session_id
+                        EVE_SESSION_CACHE['session_id'] = new_session_id
+                        EVE_SESSION_CACHE['timestamp'] = time.time()
+                        eve_cookies['ASP.NET_SessionId'] = new_session_id
+                        continue  # ลองใหม่
+                return resp
+            except requests.exceptions.RequestException as e:
+                print(f"  ⚠️ Network error (attempt {attempt+1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                raise
+        return resp  # คืน response ล่าสุด (อาจจะ fail)
+    
+    import time  # ใช้สำหรับ delay ใน retry
     headers = {
         'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Content-Type': 'application/json; charset=utf-8',
@@ -3719,12 +3753,10 @@ def run_auto_cancel(force=False):
                 print(f"  🔄 Processing: trade_in_id={trade_in_id}, doc_no={doc_no}")
                 
                 try:
-                    # Pre-check
-                    check_resp = requests.post(
+                    # Pre-check (with auto-retry login)
+                    check_resp = call_eve_api_with_retry(
                         'https://eve.techswop.com/ti/index.aspx/CheckAllowCancel',
-                        headers=headers,
-                        json={"trade_in_id": int(trade_in_id)},
-                        cookies=eve_cookies
+                        {"trade_in_id": int(trade_in_id)}
                     )
                     
                     if check_resp.status_code == 200:
@@ -3759,11 +3791,9 @@ def run_auto_cancel(force=False):
                         }
                     }
                     
-                    cancel_resp = requests.post(
+                    cancel_resp = call_eve_api_with_retry(
                         'https://eve.techswop.com/ti/index.aspx/CancelData',
-                        headers=headers,
-                        json=cancel_payload,
-                        cookies=eve_cookies
+                        cancel_payload
                     )
                     
                     if cancel_resp.status_code == 200:
