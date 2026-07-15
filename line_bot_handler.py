@@ -550,7 +550,7 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     id_match = re.search(r'ID(\d+)', branch['branch_name'])
     id_display = f"ID{id_match.group(1)}" if id_match else branch_id
     
-    message = f"📊 รายงานรายเดือน\n"
+    message = f"📊 รายงานรายเดือน (Trade-in)\n"
     message += f"🏪 สาขา: {branch_name} ({id_display})\n"
     message += f"📅 เดือน: {month_name} {year}\n"
     message += f"━━━━━━━━━━━━\n\n"
