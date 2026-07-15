@@ -332,7 +332,7 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     id_match = re.search(r'ID(\d+)', branch['branch_name'])
     id_display = f"ID{id_match.group(1)}" if id_match else branch_id_input
     
-    message = f"📊 รายงานรายวัน\n"
+    message = f"📊 รายงานรายวัน (trade-in)\n"
     message += f"🏪 สาขา: {branch_name} ({id_display})\n"
     message += f"📅 วันที่: {thai_date}\n"
     message += f"━━━━━━━━━━━━\n\n"

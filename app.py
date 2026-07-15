@@ -2323,9 +2323,51 @@ def cancel_orders():
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15'
     }
     
-    # ใช้ auto-login session
-    session_id = get_eve_session()
+    # ใช้ auto-login session - force_refresh=True เพื่อ login ใหม่เสมอ ป้องกัน session เก่าหมดอายุ
+    session_id = get_eve_session(force_refresh=True)
     eve_cookies = {'ASP.NET_SessionId': session_id} if session_id else {}
+    
+    # Helper: เรียก Eve API พร้อม auto-retry login เมื่อ session หมดอายุ
+    def call_eve_api_with_retry(url, payload, max_retries=2):
+        """เรียก Eve API พร้อม retry login ใหม่อัตโนมัติเมื่อ session หมดอายุ"""
+        nonlocal session_id
+        resp = None
+        for attempt in range(max_retries):
+            try:
+                resp = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    cookies=eve_cookies,
+                    timeout=30
+                )
+                # ตรวจสอบว่า session หมดอายุหรือไม่
+                expired = (
+                    resp.status_code in (401, 302) or
+                    'login' in resp.url.lower() or
+                    '"Session"' in resp.text or
+                    'หมดเวลา' in resp.text or
+                    'timeout' in resp.text.lower()
+                )
+                if expired:
+                    print(f"  ⚠️ Session expired (attempt {attempt+1}/{max_retries}), re-login...")
+                    new_session_id, _ = perform_eve_login()
+                    if new_session_id:
+                        session_id = new_session_id
+                        EVE_SESSION_CACHE['session_id'] = new_session_id
+                        EVE_SESSION_CACHE['timestamp'] = time.time()
+                        eve_cookies['ASP.NET_SessionId'] = new_session_id
+                        continue
+                return resp
+            except requests.exceptions.RequestException as e:
+                print(f"  ⚠️ Network error (attempt {attempt+1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                raise
+        return resp
+    
+    import time
     
     success_count = 0
     failed_count = 0
@@ -2333,13 +2375,11 @@ def cancel_orders():
     
     for trade_in_id in trade_in_ids:
         try:
-            # เรียก API CheckAllowCancel ก่อน
+            # เรียก API CheckAllowCancel ก่อน (with auto-retry login)
             check_payload = {"trade_in_id": int(trade_in_id)}
-            check_response = requests.post(
+            check_response = call_eve_api_with_retry(
                 'https://eve.techswop.com/ti/index.aspx/CheckAllowCancel',
-                headers=headers,
-                json=check_payload,
-                cookies=eve_cookies
+                check_payload
             )
             
             if check_response.status_code == 200:
@@ -2387,11 +2427,9 @@ def cancel_orders():
                     
                     print(f"Cancel payload: {cancel_payload}")
                     
-                    cancel_response = requests.post(
+                    cancel_response = call_eve_api_with_retry(
                         'https://eve.techswop.com/ti/index.aspx/CancelData',
-                        headers=headers,
-                        json=cancel_payload,
-                        cookies=eve_cookies
+                        cancel_payload
                     )
                     
                     print(f"Cancel response status: {cancel_response.status_code}")
