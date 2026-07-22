@@ -323,6 +323,10 @@
                     <label>คอลัมน์วันที่ขาย</label>
                     <select id="colDate"></select>
                 </div>
+                <div class="form-group">
+                    <label>คอลัมน์สาขา (ถ้ามี — ดึงเฉพาะสาขานั้น เร็วกว่าดึงทุกสาขามาก)</label>
+                    <select id="colBranch"></select>
+                </div>
             </div>
 
             <div class="preview-wrap">
@@ -351,6 +355,7 @@
         const colEmployee = document.getElementById('colEmployee');
         const colModel = document.getElementById('colModel');
         const colDate = document.getElementById('colDate');
+        const colBranch = document.getElementById('colBranch');
         const previewTable = document.getElementById('previewTable');
         const resultTable = document.getElementById('resultTable');
         const summaryGrid = document.getElementById('summaryGrid');
@@ -406,16 +411,23 @@
             [colEmployee, colModel, colDate].forEach(sel => {
                 sel.innerHTML = headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
             });
-            // เดาคอลัมน์เบื้องต้นจากชื่อ header (ผู้ใช้ปรับเองได้)
-            guessColumn(colEmployee, ['sale', 'employee', 'พนักงาน', 'ผู้ขาย', 'รหัส', 'code', 'name']);
-            guessColumn(colModel, ['model', 'product', 'สินค้า', 'รุ่น', 'item']);
-            guessColumn(colDate, ['date', 'วันที่']);
+            colBranch.innerHTML = '<option value="">-- ไม่ระบุ (ดึงทุกสาขา ช้ากว่า) --</option>' +
+                headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
+
+            // เดาคอลัมน์เบื้องต้นจากชื่อ header (ผู้ใช้ปรับเองได้) — เรียงตาม keyword ที่เจาะจงสุดก่อน
+            // กันไม่ให้ keyword กว้างๆ อย่าง "code"/"name" ไปจับคอลัมน์ผิด (เช่น Product (Code))
+            guessColumn(colEmployee, ['officer (name)', 'officer (id)', 'officer', 'sale', 'employee', 'พนักงาน', 'ผู้ขาย']);
+            guessColumn(colModel, ['model', 'รุ่น', 'product (name)', 'product', 'สินค้า', 'item']);
+            guessColumn(colDate, ['doc date', 'วันที่', 'date']);
+            guessColumn(colBranch, ['branch (id)', 'branch (name)', 'branch', 'สาขา', 'store']);
             checkReady();
         }
 
-        function guessColumn(selectEl, keywords) {
-            const match = headers.find(h => keywords.some(k => h.toLowerCase().includes(k)));
-            if (match) selectEl.value = match;
+        function guessColumn(selectEl, keywordsInPriorityOrder) {
+            for (const kw of keywordsInPriorityOrder) {
+                const match = headers.find(h => h.toLowerCase().includes(kw));
+                if (match) { selectEl.value = match; return; }
+            }
         }
 
         function renderPreview() {
@@ -437,7 +449,7 @@
             return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        [colEmployee, colModel, colDate].forEach(sel => sel.addEventListener('change', checkReady));
+        [colEmployee, colModel, colDate, colBranch].forEach(sel => sel.addEventListener('change', checkReady));
 
         function checkReady() {
             calcBtn.disabled = !(colEmployee.value && colModel.value && colDate.value);
@@ -511,6 +523,16 @@
             return String(s || '').trim().toUpperCase();
         }
 
+        function extractBranchId(v) {
+            const s = String(v ?? '').trim();
+            if (!s) return null;
+            // รองรับทั้งค่าดิบ (เช่น "645") และชื่อสาขาที่มี ID นำหน้า (เช่น "ID645 : Studio 7-Central-Westgate")
+            const m = s.match(/ID\s*(\d+)/i);
+            if (m) return m[1];
+            if (/^\d+$/.test(s)) return s;
+            return null;
+        }
+
         calcBtn.addEventListener('click', async () => {
             calcBtn.disabled = true;
             hideStatus();
@@ -553,10 +575,25 @@
             const dateStart = formatDDMMYYYY(minDate);
             const dateEnd = formatDDMMYYYY(maxDate);
 
-            showStatus(`กำลังดึงยอดประเมินช่วง ${dateStart} - ${dateEnd} จากทุกสาขา...`, 'info');
+            // 4. ถ้าเลือกคอลัมน์สาขาไว้ ให้ดึงเฉพาะสาขาที่เจอในไฟล์ (เร็วกว่าดึงทุกสาขามาก)
+            const branchCol = colBranch.value;
+            let branchIds = [];
+            if (branchCol) {
+                const branchSet = new Set();
+                parsedRows.forEach(r => {
+                    const bid = extractBranchId(r[branchCol]);
+                    if (bid) branchSet.add(bid);
+                });
+                branchIds = [...branchSet];
+            }
+
+            const scopeLabel = branchIds.length ? `${branchIds.length} สาขา (ตามไฟล์)` : 'ทุกสาขา';
+            showStatus(`กำลังดึงยอดประเมินช่วง ${dateStart} - ${dateEnd} จาก${scopeLabel}...`, 'info');
 
             try {
-                const resp = await fetch(`/api/public/trade-count-by-employee?date_start=${encodeURIComponent(dateStart)}&date_end=${encodeURIComponent(dateEnd)}`);
+                let url = `/api/public/trade-count-by-employee?date_start=${encodeURIComponent(dateStart)}&date_end=${encodeURIComponent(dateEnd)}`;
+                if (branchIds.length) url += `&branch_ids=${encodeURIComponent(branchIds.join(','))}`;
+                const resp = await fetch(url);
                 const json = await resp.json();
 
                 if (!json.success) {

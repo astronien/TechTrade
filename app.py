@@ -1264,12 +1264,14 @@ def attach_rate_page():
 @app.route('/api/public/trade-count-by-employee')
 def public_trade_count_by_employee():
     """คืนจำนวนยอดประเมิน (เทรด) แยกตามพนักงาน สำหรับช่วงวันที่ที่ระบุ
-    ใช้คู่กับหน้า /attach-rate (ไม่ต้อง login) — รวมข้อมูลจากทุกสาขาในระบบ
+    ใช้คู่กับหน้า /attach-rate (ไม่ต้อง login) — ถ้าระบุ branch_ids (comma-separated)
+    จะดึงเฉพาะสาขานั้น (เร็วกว่าดึงทุกสาขามาก) ไม่ระบุจะดึงทุกสาขาในระบบเหมือนเดิม
     """
     from collections import defaultdict
 
     date_start = request.args.get('date_start', '').strip()
     date_end = request.args.get('date_end', '').strip()
+    branch_ids_param = request.args.get('branch_ids', '').strip()
 
     if not date_start or not date_end:
         return jsonify({'success': False, 'error': 'ต้องระบุ date_start และ date_end รูปแบบ dd/mm/yyyy'}), 400
@@ -1286,8 +1288,16 @@ def public_trade_count_by_employee():
     if (end_dt - start_dt).days > 62:
         return jsonify({'success': False, 'error': 'ช่วงวันที่ต้องไม่เกิน 62 วัน'}), 400
 
-    branches = get_branches_from_db()
-    branch_ids = [b.get('branch_id') for b in branches if b.get('branch_id')]
+    all_branches = get_branches_from_db()
+
+    if branch_ids_param:
+        requested_ids = {x.strip() for x in branch_ids_param.split(',') if x.strip()}
+        branch_ids = [b.get('branch_id') for b in all_branches
+                      if b.get('branch_id') and str(b.get('branch_id')) in requested_ids]
+        if not branch_ids:
+            return jsonify({'success': False, 'error': 'ไม่พบสาขาตาม branch_ids ที่ระบุในระบบ'}), 400
+    else:
+        branch_ids = [b.get('branch_id') for b in all_branches if b.get('branch_id')]
 
     batch_data = fetch_all_branches_trade_data(branch_ids, date_start, date_end) or {}
 
