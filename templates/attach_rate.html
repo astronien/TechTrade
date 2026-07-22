@@ -625,26 +625,17 @@
             });
 
             // สำคัญ: ห้ามวนตาม normalized key ทุกตัวใน tradeNorm ตรงๆ เพราะ 1 พนักงานฝั่งเทรด
-            // อาจมีหลาย normalized key ชี้ไปที่ entry เดียวกัน (key หลัก + alias) ถ้าวนตรงๆ
-            // จะได้แถวซ้ำของคนเดียวกัน และ "ยอดประเมินรวม" จะถูกนับซ้ำ (บวกซ้อนเกินจริง)
-            // จึงต้องวนฝั่งยอดขายก่อน จับคู่ผ่าน key หรือ alias ใดก็ได้ แล้วค่อยเติมคนที่มีแต่ยอดเทรด
-            // (ยังไม่ถูกจับคู่) โดยใช้ key หลักของฝั่งเทรดแค่ครั้งเดียวต่อคน
+            // แสดงเฉพาะพนักงานที่ขาย iPhone ได้จริง (มาจาก salesByEmployee ซึ่งสร้างจาก
+            // iphoneRows ที่กรองแล้วเท่านั้น — count จึงมากกว่า 0 เสมอทุกแถว) ไม่โชว์คนที่มีแต่
+            // ยอดประเมินแต่ไม่มียอดขาย iPhone เลย เพราะไม่ใช่กลุ่มที่ต้องการดู attach rate
             const rows = [];
-            const usedTradeKeys = new Set();
-
             Object.entries(salesByEmployee).forEach(([nk, salesEntry]) => {
                 const tradeEntry = tradeNorm[nk];
-                if (tradeEntry) usedTradeKeys.add(tradeEntry.key);
                 const displayName = tradeEntry ? tradeEntry.key : salesEntry.rawName;
                 const iphoneSold = salesEntry.count;
                 const tradeCount = tradeEntry ? tradeEntry.count : 0;
                 const attachRate = iphoneSold > 0 ? (tradeCount / iphoneSold * 100) : null;
                 rows.push({ name: displayName, iphoneSold, tradeCount, attachRate });
-            });
-
-            Object.entries(tradeByEmployee).forEach(([k, v]) => {
-                if (usedTradeKeys.has(k)) return;
-                rows.push({ name: k, iphoneSold: 0, tradeCount: v.count, attachRate: null });
             });
 
             // วินิจฉัยกรณียอดประเมินขึ้น 0 หมด: แยกให้ชัดว่าปัญหาคือ "ไม่มีข้อมูลจากระบบเลย"
