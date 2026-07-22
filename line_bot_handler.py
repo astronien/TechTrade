@@ -374,6 +374,33 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     return message
 
 
+def calculate_forecast(total_so_far, month_number, year=None):
+    """คำนวณ Forecast ยอดประเมินเมื่อครบเดือน (ประมาณการแบบเส้นตรงตามสัดส่วนวันที่ผ่านมา)
+    คืนค่า None ถ้าไม่ใช่เดือนปัจจุบัน หรือเดือนนั้นจบไปแล้ว (ไม่มีอะไรต้องคาดการณ์เพิ่ม)
+    """
+    import calendar
+    now = datetime.now()
+    if year is None:
+        year = now.year
+
+    if month_number != now.month or year != now.year:
+        return None
+
+    days_in_month = calendar.monthrange(year, month_number)[1]
+    days_elapsed = now.day
+
+    if days_elapsed <= 0 or days_elapsed >= days_in_month:
+        return None
+
+    forecast_total = total_so_far / days_elapsed * days_in_month
+
+    return {
+        'forecast_total': forecast_total,
+        'days_elapsed': days_elapsed,
+        'days_in_month': days_in_month
+    }
+
+
 def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_data_func, parse_month_func, get_date_range_func, fetch_batch_func=None):
     """สร้างรายงานทั้งเดือนของ Zone (แยกตามสาขา)"""
     zone = find_zone_func(zone_name)
@@ -469,11 +496,16 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
     else:
         message += f"• ลูกค้าตกลง: {confirmed_all} รายการ\n"
         message += f"• ลูกค้าไม่ตกลง: {total_all - confirmed_all} รายการ"
-    
+
+    forecast = calculate_forecast(total_all, month_number, year - 543)
+    if forecast:
+        message += f"\n\n🔮 คาดการณ์เมื่อครบเดือน: ~{forecast['forecast_total']:,.0f} รายการ"
+        message += f"\n   (อิงจากข้อมูล {forecast['days_elapsed']}/{forecast['days_in_month']} วันที่ผ่านมา)"
+
     # เพิ่มแหล่งที่มา
     source_display = "📦 Turso" if last_source == 'turso' else "🌐 Real-time"
     message += f"\n\n(Source: {source_display})"
-    
+
     return message
 
 
@@ -578,12 +610,17 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     message += f"━━━━━━━━━━━━\n"
     message += f"📈 สรุปรวมสาขา ({month_name[:3]}.)\n"
     message += f"• รายการทั้งหมด: {total_count} รายการ\n"
-    
+
     if total_count > 0:
         confirm_percent = (total_confirmed / total_count) * 100
         message += f"• ลูกค้าตกลง: {total_confirmed} รายการ ({confirm_percent:.0f}%)\n"
         message += f"• ลูกค้าไม่ตกลง: {total_count - total_confirmed} รายการ ({100-confirm_percent:.0f}%)"
-    
+
+    forecast = calculate_forecast(total_count, month_number, year - 543)
+    if forecast:
+        message += f"\n\n🔮 คาดการณ์เมื่อครบเดือน: ~{forecast['forecast_total']:,.0f} รายการ"
+        message += f"\n   (อิงจากข้อมูล {forecast['days_elapsed']}/{forecast['days_in_month']} วันที่ผ่านมา)"
+
     # เพิ่มแหล่งที่มา
     source = data.get('source', 'unknown')
     source_display = "📦 Turso" if source == 'turso' else "🌐 Real-time"
