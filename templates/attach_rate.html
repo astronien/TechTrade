@@ -278,6 +278,14 @@
             margin-top: 4px;
         }
 
+        .cell-sub {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 500;
+            margin-top: 2px;
+        }
+
         .hidden { display: none; }
 
         .attach-high { color: #16a34a; font-weight: 700; }
@@ -525,6 +533,15 @@
             return String(s || '').trim().toUpperCase();
         }
 
+        function rateClass(rate) {
+            if (rate === null || rate === undefined) return 'attach-na';
+            return rate >= 80 ? 'attach-high' : (rate >= 40 ? 'attach-mid' : 'attach-low');
+        }
+
+        function rateText(rate) {
+            return (rate === null || rate === undefined) ? '-' : rate.toFixed(1) + '%';
+        }
+
         function extractBranchId(v) {
             const s = String(v ?? '').trim();
             if (!s) return null;
@@ -634,8 +651,10 @@
                 const displayName = tradeEntry ? tradeEntry.key : salesEntry.rawName;
                 const iphoneSold = salesEntry.count;
                 const tradeCount = tradeEntry ? tradeEntry.count : 0;
+                const confirmedCount = tradeEntry ? (tradeEntry.confirmed || 0) : 0;
                 const attachRate = iphoneSold > 0 ? (tradeCount / iphoneSold * 100) : null;
-                rows.push({ name: displayName, iphoneSold, tradeCount, attachRate });
+                const confirmedRate = iphoneSold > 0 ? (confirmedCount / iphoneSold * 100) : null;
+                rows.push({ name: displayName, iphoneSold, tradeCount, confirmedCount, attachRate, confirmedRate });
             });
 
             // วินิจฉัยกรณียอดประเมินขึ้น 0 หมด: แยกให้ชัดว่าปัญหาคือ "ไม่มีข้อมูลจากระบบเลย"
@@ -664,26 +683,27 @@
 
             const totalIphone = rows.reduce((s, r) => s + r.iphoneSold, 0);
             const totalTrade = rows.reduce((s, r) => s + r.tradeCount, 0);
+            const totalConfirmed = rows.reduce((s, r) => s + r.confirmedCount, 0);
             const overallRate = totalIphone > 0 ? (totalTrade / totalIphone * 100) : null;
+            const overallConfirmedRate = totalIphone > 0 ? (totalConfirmed / totalIphone * 100) : null;
 
             summaryGrid.innerHTML = `
                 <div class="summary-tile"><div class="value">${dateStart} - ${dateEnd}</div><div class="label">ช่วงวันที่ (จากไฟล์)</div></div>
                 <div class="summary-tile"><div class="value">${branchesChecked}</div><div class="label">สาขาที่ตรวจสอบ</div></div>
                 <div class="summary-tile"><div class="value">${totalIphone.toLocaleString()}</div><div class="label">iPhone ขายได้รวม</div></div>
-                <div class="summary-tile"><div class="value">${totalTrade.toLocaleString()}</div><div class="label">ยอดประเมินรวม</div></div>
-                <div class="summary-tile"><div class="value">${overallRate !== null ? overallRate.toFixed(1) + '%' : '-'}</div><div class="label">Attach Rate รวม</div></div>
+                <div class="summary-tile"><div class="value">${totalTrade.toLocaleString()}<span class="cell-sub">ตกลง ${totalConfirmed.toLocaleString()}</span></div><div class="label">ยอดประเมินรวม</div></div>
+                <div class="summary-tile"><div class="value ${rateClass(overallRate)}">${rateText(overallRate)}</div><div class="label">Attach Rate รวม</div></div>
+                <div class="summary-tile"><div class="value ${rateClass(overallConfirmedRate)}">${rateText(overallConfirmedRate)}</div><div class="label">ยอดตกลง / iPhone ขาย รวม</div></div>
             `;
 
-            let html = '<thead><tr><th>พนักงาน</th><th>iPhone ขายได้</th><th>ยอดประเมิน (เทรด)</th><th>Attach Rate</th></tr></thead><tbody>';
+            let html = '<thead><tr><th>พนักงาน</th><th>iPhone ขายได้</th><th>ยอดประเมิน (เทรด)</th><th>Attach Rate</th><th>ยอดตกลง / iPhone ขาย</th></tr></thead><tbody>';
             rows.forEach(r => {
-                let cls = 'attach-na', text = '-';
-                if (r.attachRate !== null) {
-                    text = r.attachRate.toFixed(1) + '%';
-                    cls = r.attachRate >= 80 ? 'attach-high' : (r.attachRate >= 40 ? 'attach-mid' : 'attach-low');
-                } else if (r.tradeCount > 0) {
-                    text = 'ไม่มียอดขาย iPhone';
-                }
-                html += `<tr><td>${escapeHtml(r.name)}</td><td>${r.iphoneSold}</td><td>${r.tradeCount}</td><td class="${cls}">${text}</td></tr>`;
+                const tradeCell = r.tradeCount > 0
+                    ? `${r.tradeCount}<span class="cell-sub">ตกลง ${r.confirmedCount}</span>`
+                    : `${r.tradeCount}`;
+                const attachText = r.attachRate !== null ? rateText(r.attachRate) : 'ไม่มียอดประเมิน';
+                const confirmedText = r.confirmedRate !== null ? rateText(r.confirmedRate) : '-';
+                html += `<tr><td>${escapeHtml(r.name)}</td><td>${r.iphoneSold}</td><td>${tradeCell}</td><td class="${rateClass(r.attachRate)}">${attachText}</td><td class="${rateClass(r.confirmedRate)}">${confirmedText}</td></tr>`;
             });
             html += '</tbody>';
             resultTable.innerHTML = html;
