@@ -141,32 +141,6 @@
             color: var(--primary-dark);
         }
 
-        .mapping-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-top: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #475569;
-            font-size: 13px;
-            font-weight: 700;
-        }
-
-        .form-group select, .form-group input[type="date"] {
-            width: 100%;
-            min-height: 46px;
-            padding: 11px 13px;
-            color: var(--text-main);
-            background: rgba(255, 255, 255, 0.95);
-            border: 1px solid var(--line);
-            border-radius: 13px;
-            font-size: 14px;
-        }
-
         .preview-wrap {
             margin-top: 20px;
             overflow-x: auto;
@@ -317,31 +291,13 @@
         </div>
 
         <div class="card hidden" id="mappingCard">
-            <div class="step-title"><span class="step-badge">2</span> เลือกคอลัมน์ให้ตรงกับไฟล์</div>
-            <div class="mapping-grid">
-                <div class="form-group">
-                    <label>คอลัมน์รหัส/ชื่อพนักงาน</label>
-                    <select id="colEmployee"></select>
-                </div>
-                <div class="form-group">
-                    <label>คอลัมน์รุ่น/สินค้า (ใช้กรอง iPhone)</label>
-                    <select id="colModel"></select>
-                </div>
-                <div class="form-group">
-                    <label>คอลัมน์วันที่ขาย</label>
-                    <select id="colDate"></select>
-                </div>
-                <div class="form-group">
-                    <label>คอลัมน์สาขา (ถ้ามี — ดึงเฉพาะสาขานั้น เร็วกว่าดึงทุกสาขามาก)</label>
-                    <select id="colBranch"></select>
-                </div>
-            </div>
+            <div class="step-title"><span class="step-badge">2</span> ตรวจสอบข้อมูล</div>
 
             <div class="preview-wrap">
                 <table id="previewTable"></table>
             </div>
 
-            <button class="primary-btn" id="calcBtn" disabled>🚀 คำนวณ Attach Rate</button>
+            <button class="primary-btn" id="calcBtn">🚀 คำนวณ Attach Rate</button>
             <div class="status-msg" id="statusMsg"></div>
         </div>
 
@@ -356,16 +312,18 @@
     </div>
 
     <script>
+        // ชื่อคอลัมน์ตายตัวตามรูปแบบไฟล์ POS ที่ใช้งานจริง ไม่ให้ผู้ใช้เลือกเอง
+        const COL_EMPLOYEE = 'Officer (ID)';
+        const COL_MODEL = 'Model';
+        const COL_DATE = 'Doc Date';
+        const COL_BRANCH = 'Branch (ID)';
+
         const fileInput = document.getElementById('fileInput');
         const fileDrop = document.getElementById('fileDrop');
         const fileNameEl = document.getElementById('fileName');
         const mappingCard = document.getElementById('mappingCard');
         const resultCard = document.getElementById('resultCard');
         const diagnosticBox = document.getElementById('diagnosticBox');
-        const colEmployee = document.getElementById('colEmployee');
-        const colModel = document.getElementById('colModel');
-        const colDate = document.getElementById('colDate');
-        const colBranch = document.getElementById('colBranch');
         const previewTable = document.getElementById('previewTable');
         const resultTable = document.getElementById('resultTable');
         const summaryGrid = document.getElementById('summaryGrid');
@@ -405,7 +363,14 @@
                     }
 
                     headers = Object.keys(parsedRows[0]);
-                    populateMappingSelects();
+
+                    const missingCols = [COL_EMPLOYEE, COL_MODEL, COL_DATE].filter(c => !headers.includes(c));
+                    if (missingCols.length) {
+                        showStatus(`ไม่พบคอลัมน์ที่ต้องใช้ในไฟล์นี้: ${missingCols.join(', ')} — ตรวจสอบว่าอัปโหลดไฟล์รูปแบบที่ถูกต้องหรือเปล่า`, 'error');
+                        mappingCard.classList.add('hidden');
+                        return;
+                    }
+
                     renderPreview();
                     mappingCard.classList.remove('hidden');
                     resultCard.classList.add('hidden');
@@ -415,29 +380,6 @@
                 }
             };
             reader.readAsArrayBuffer(file);
-        }
-
-        function populateMappingSelects() {
-            [colEmployee, colModel, colDate].forEach(sel => {
-                sel.innerHTML = headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
-            });
-            colBranch.innerHTML = '<option value="">-- ไม่ระบุ (ดึงทุกสาขา ช้ากว่า) --</option>' +
-                headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
-
-            // เดาคอลัมน์เบื้องต้นจากชื่อ header (ผู้ใช้ปรับเองได้) — เรียงตาม keyword ที่เจาะจงสุดก่อน
-            // กันไม่ให้ keyword กว้างๆ อย่าง "code"/"name" ไปจับคอลัมน์ผิด (เช่น Product (Code))
-            guessColumn(colEmployee, ['officer (name)', 'officer (id)', 'officer', 'sale', 'employee', 'พนักงาน', 'ผู้ขาย']);
-            guessColumn(colModel, ['model', 'รุ่น', 'product (name)', 'product', 'สินค้า', 'item']);
-            guessColumn(colDate, ['doc date', 'วันที่', 'date']);
-            guessColumn(colBranch, ['branch (id)', 'branch (name)', 'branch', 'สาขา', 'store']);
-            checkReady();
-        }
-
-        function guessColumn(selectEl, keywordsInPriorityOrder) {
-            for (const kw of keywordsInPriorityOrder) {
-                const match = headers.find(h => h.toLowerCase().includes(kw));
-                if (match) { selectEl.value = match; return; }
-            }
         }
 
         function renderPreview() {
@@ -459,11 +401,6 @@
             return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        [colEmployee, colModel, colDate, colBranch].forEach(sel => sel.addEventListener('change', checkReady));
-
-        function checkReady() {
-            calcBtn.disabled = !(colEmployee.value && colModel.value && colDate.value);
-        }
 
         function showStatus(msg, type) {
             statusMsg.textContent = msg;
@@ -556,15 +493,15 @@
             calcBtn.disabled = true;
             hideStatus();
 
-            const empCol = colEmployee.value;
-            const modelCol = colModel.value;
-            const dateCol = colDate.value;
+            const empCol = COL_EMPLOYEE;
+            const modelCol = COL_MODEL;
+            const dateCol = COL_DATE;
 
             // 1. กรองเฉพาะแถวที่เป็น iPhone
             const iphoneRows = parsedRows.filter(r => String(r[modelCol] || '').toLowerCase().includes('iphone'));
 
             if (!iphoneRows.length) {
-                showStatus('ไม่พบรายการ iPhone ในคอลัมน์ที่เลือก ลองเลือกคอลัมน์รุ่น/สินค้าใหม่', 'error');
+                showStatus(`ไม่พบรายการ iPhone ในคอลัมน์ "${modelCol}" ของไฟล์นี้`, 'error');
                 calcBtn.disabled = false;
                 return;
             }
@@ -585,7 +522,7 @@
             // 3. หาช่วงวันที่จากทั้งไฟล์ (ใช้กำหนดช่วงดึงยอดเทรด)
             const dates = parsedRows.map(r => parseDateValue(r[dateCol])).filter(Boolean);
             if (!dates.length) {
-                showStatus('อ่านคอลัมน์วันที่ไม่ได้ ลองเลือกคอลัมน์วันที่ใหม่ หรือตรวจรูปแบบวันที่ในไฟล์', 'error');
+                showStatus(`อ่านคอลัมน์วันที่ "${dateCol}" ไม่ได้ ตรวจรูปแบบวันที่ในไฟล์`, 'error');
                 calcBtn.disabled = false;
                 return;
             }
@@ -594,13 +531,12 @@
             const dateStart = formatDDMMYYYY(minDate);
             const dateEnd = formatDDMMYYYY(maxDate);
 
-            // 4. ถ้าเลือกคอลัมน์สาขาไว้ ให้ดึงเฉพาะสาขาที่เจอในไฟล์ (เร็วกว่าดึงทุกสาขามาก)
-            const branchCol = colBranch.value;
+            // 4. ถ้าไฟล์มีคอลัมน์สาขา ให้ดึงเฉพาะสาขาที่เจอในไฟล์ (เร็วกว่าดึงทุกสาขามาก)
             let branchIds = [];
-            if (branchCol) {
+            if (headers.includes(COL_BRANCH)) {
                 const branchSet = new Set();
                 parsedRows.forEach(r => {
-                    const bid = extractBranchId(r[branchCol]);
+                    const bid = extractBranchId(r[COL_BRANCH]);
                     if (bid) branchSet.add(bid);
                 });
                 branchIds = [...branchSet];
