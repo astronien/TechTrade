@@ -691,11 +691,11 @@
                 <div class="summary-tile"><div class="value">${branchesChecked}</div><div class="label">สาขาที่ตรวจสอบ</div></div>
                 <div class="summary-tile"><div class="value">${totalIphone.toLocaleString()}</div><div class="label">iPhone ขายได้รวม</div></div>
                 <div class="summary-tile"><div class="value">${totalTrade.toLocaleString()}<span class="cell-sub">ตกลง ${totalConfirmed.toLocaleString()}</span></div><div class="label">ยอดประเมินรวม</div></div>
-                <div class="summary-tile"><div class="value ${rateClass(overallRate)}">${rateText(overallRate)}</div><div class="label">Attach Rate รวม</div></div>
+                <div class="summary-tile"><div class="value ${rateClass(overallRate)}">${rateText(overallRate)}</div><div class="label">ยอดประเมิน/iPhone รวม</div></div>
                 <div class="summary-tile"><div class="value ${rateClass(overallConfirmedRate)}">${rateText(overallConfirmedRate)}</div><div class="label">ยอดตกลง / iPhone ขาย รวม</div></div>
             `;
 
-            let html = '<thead><tr><th>พนักงาน</th><th>iPhone ขายได้</th><th>ยอดประเมิน (เทรด)</th><th>Attach Rate</th><th>ยอดตกลง / iPhone ขาย</th></tr></thead><tbody>';
+            let html = '<thead><tr><th>พนักงาน</th><th>iPhone ขายได้</th><th>ยอดประเมิน (เทรด)</th><th>ยอดประเมิน/iPhone</th><th>ยอดตกลง / iPhone ขาย</th></tr></thead><tbody>';
             rows.forEach(r => {
                 const tradeCell = r.tradeCount > 0
                     ? `${r.tradeCount}<span class="cell-sub">ตกลง ${r.confirmedCount}</span>`
@@ -709,7 +709,7 @@
 
             // สร้างข้อความสรุปแบบเดียวกับรายงานที่ LINE bot ส่งอยู่แล้ว (emoji/รูปแบบเดิม) ให้คัดลอกส่งต่อได้เลย
             const lines = [];
-            lines.push('📊 รายงาน Attach Rate (iPhone)');
+            lines.push('📊 รายงาน Attach Rate Trade-in/(iPhone)');
             lines.push(`📅 ช่วงวันที่: ${dateStart} - ${dateEnd}`);
             lines.push(`🏢 สาขาที่ตรวจสอบ: ${branchesChecked} สาขา`);
             lines.push('━━━━━━━━━━━━');
@@ -718,7 +718,7 @@
                 lines.push(`👤 ${r.name}`);
                 lines.push(`• iPhone ขายได้: ${r.iphoneSold} เครื่อง`);
                 lines.push(`• ยอดประเมิน: ${r.tradeCount} รายการ (ตกลง ${r.confirmedCount})`);
-                lines.push(`• Attach Rate: ${rateText(r.attachRate)}`);
+                lines.push(`• ยอดประเมิน/iPhone: ${rateText(r.attachRate)}`);
                 lines.push(`• ยอดตกลง/iPhone: ${rateText(r.confirmedRate)}`);
                 lines.push('');
             });
@@ -726,7 +726,7 @@
             lines.push('📈 สรุปรวม');
             lines.push(`• iPhone ขายได้รวม: ${totalIphone.toLocaleString()} เครื่อง`);
             lines.push(`• ยอดประเมินรวม: ${totalTrade.toLocaleString()} รายการ (ตกลง ${totalConfirmed.toLocaleString()})`);
-            lines.push(`• Attach Rate รวม: ${rateText(overallRate)}`);
+            lines.push(`• ยอดประเมิน/iPhone รวม: ${rateText(overallRate)}`);
             lines.push(`• ยอดตกลง/iPhone รวม: ${rateText(overallConfirmedRate)}`);
             reportText.value = lines.join('\n');
 
