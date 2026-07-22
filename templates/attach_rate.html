@@ -615,16 +615,13 @@
 
         function renderResults(salesByEmployee, tradeByEmployee, dateStart, dateEnd, branchesChecked, totalRecords, recordsWithoutKey) {
             // จับคู่ชื่อพนักงานแบบไม่สนตัวพิมพ์เล็ก-ใหญ่/ช่องว่างหัวท้าย
-            // สาขา supersale ระบบเทรดจะใช้ SALE_NAME เป็น key หลัก (ไม่ใช่ SALE_CODE เหมือนสาขาทั่วไป)
-            // เพื่อไม่ให้ผู้ใช้ต้องรู้เรื่องนี้ ฝั่ง server แนบ aliases (SALE_CODE และ SALE_NAME ที่เจอจริง)
-            // มาด้วย ตรงนี้จับคู่กับทั้ง key หลักและทุก alias เผื่อไฟล์ใช้คอลัมน์คนละแบบกับที่ระบบใช้เป็น key
+            // key ของฝั่งเทรดมาจาก get_sale_key อยู่แล้ว (SALE_CODE ปกติ / SALE_NAME ถ้าเป็นสาขา supersale
+            // เพราะรหัสจริงถูกพิมพ์ไว้ในช่องนั้น) จับคู่กับ key นี้ตรงๆ เท่านั้น ไม่ผสมกับฟิลด์ดิบอื่น
+            // เพราะสาขา supersale มักมี SALE_CODE เป็นรหัส placeholder ที่ใช้ร่วมกันหลายคน
+            // ถ้าเอามาจับคู่ด้วยจะเสี่ยงจับผิดคน (เจอบั๊กนี้มาแล้วตอนลองแบบ alias)
             const tradeNorm = {};
             Object.entries(tradeByEmployee).forEach(([k, v]) => {
                 tradeNorm[norm(k)] = { key: k, ...v };
-                (v.aliases || []).forEach(alias => {
-                    const na = norm(alias);
-                    if (!tradeNorm[na]) tradeNorm[na] = { key: k, ...v };
-                });
             });
 
             // สำคัญ: ห้ามวนตาม normalized key ทุกตัวใน tradeNorm ตรงๆ เพราะ 1 พนักงานฝั่งเทรด
@@ -660,16 +657,14 @@
                 diagnosticBox.className = 'status-msg show error';
                 diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ แต่ดึงรหัสพนักงานจากทุกแถวไม่ได้เลย (records_without_key: ${recordsWithoutKey}) — อาจเป็นปัญหาฝั่งข้อมูลระบบเทรด ไม่เกี่ยวกับไฟล์ที่อัปโหลด`;
             } else if (matchedCount === 0) {
-                // แสดงทั้ง key หลักและ alias (SALE_CODE/SALE_NAME ที่เจอจริง) เพื่อให้เห็นตัวเลือกทั้งหมดที่พอจะ match ได้
+                // แสดง key ที่ใช้จับคู่จริง (SALE_CODE ปกติ / SALE_NAME ถ้า supersale) พร้อมค่าดิบทั้ง 2 ฟิลด์
+                // ไว้ให้ดูเทียบ (เพื่อ debug เฉยๆ ไม่ได้เอามาจับคู่) ว่ารูปแบบต่างกับไฟล์ตรงไหน
                 const tradeSample = Object.entries(tradeByEmployee).slice(0, 5)
-                    .map(([k, v]) => {
-                        const otherAliases = (v.aliases || []).filter(a => a !== k);
-                        return otherAliases.length ? `${k} (หรือ ${otherAliases.join('/')})` : k;
-                    })
-                    .join(', ');
+                    .map(([k, v]) => `${k}${v.is_supersale ? ' [supersale]' : ''} (SALE_CODE ดิบ: ${v.sample_sale_code || '-'}, SALE_NAME ดิบ: ${v.sample_sale_name || '-'})`)
+                    .join(' | ');
                 const salesSample = Object.values(salesByEmployee).map(v => v.rawName).slice(0, 8).join(', ');
                 diagnosticBox.className = 'status-msg show error';
-                diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ (${Object.keys(tradeByEmployee).length} พนักงาน) แต่จับคู่กับพนักงานในไฟล์ไม่ได้เลยสักคน — ตัวอย่างรหัส/ชื่อจากระบบเทรด: [${tradeSample}] เทียบกับจากไฟล์: [${salesSample}] ลองเปลี่ยนคอลัมน์พนักงานที่เลือก (เช่น สลับ Officer (ID) กับ Officer (Name)) ให้ตรงรูปแบบกับฝั่งระบบเทรด`;
+                diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ (${Object.keys(tradeByEmployee).length} พนักงาน) แต่จับคู่กับพนักงานในไฟล์ไม่ได้เลยสักคน — ตัวอย่างจากระบบเทรด: ${tradeSample} | จากไฟล์: [${salesSample}] — เทียบรูปแบบดูว่าต่างกันตรงไหน (เช่น มีคำ/เว้นวรรคเกิน) แล้วลองแก้ไฟล์หรือคอลัมน์ที่แม็พให้ตรง`;
             } else {
                 diagnosticBox.className = 'status-msg';
             }

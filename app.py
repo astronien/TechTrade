@@ -1302,37 +1302,41 @@ def public_trade_count_by_employee():
     batch_data = fetch_all_branches_trade_data(branch_ids, date_start, date_end) or {}
 
     supersale_ids = load_supersale_config()
-    employee_summary = defaultdict(lambda: {'count': 0, 'confirmed': 0, 'aliases': set()})
+    employee_summary = defaultdict(lambda: {
+        'count': 0, 'confirmed': 0, 'is_supersale': False,
+        'sample_sale_code': '', 'sample_sale_name': ''
+    })
     total_records = 0
     records_without_key = 0
 
     for branch_id in branch_ids:
+        try:
+            is_supersale_branch = int(branch_id) in supersale_ids
+        except (ValueError, TypeError):
+            is_supersale_branch = False
+
         data = batch_data.get(str(branch_id))
         if not data or 'error' in data:
             continue
         for item in data.get('data', []):
             total_records += 1
-            # get_sale_key เลือก SALE_CODE หรือ SALE_NAME ให้เองตามว่าสาขานี้เป็น supersale หรือไม่
-            # (สาขา supersale รหัสจริงจะอยู่ใน SALE_NAME แทน) การจัดกลุ่มด้วย key นี้ถูกต้องแน่นอนแล้ว
+            # get_sale_key เลือก SALE_CODE (สาขาปกติ) หรือ SALE_NAME (สาขา supersale) ให้เอง
+            # ตามหลักการเดิมของระบบ — นี่คือ key ที่ถูกต้องหนึ่งเดียว ไม่ผสมกับฟิลด์อื่น
             key = get_sale_key(item, branch_id, supersale_ids)
             if not key:
                 records_without_key += 1
                 continue
             entry = employee_summary[key]
             entry['count'] += 1
-            # เก็บทั้ง SALE_CODE และ SALE_NAME ที่เจอจริงไว้เป็น alias เพิ่มเติม (ไม่ใช่ตัวจัดกลุ่ม)
-            # เพื่อให้ฝั่ง client จับคู่กับไฟล์ยอดขายได้ไม่ว่าไฟล์จะใช้คอลัมน์รหัสหรือชื่อพนักงาน
-            sale_code = str(item.get('SALE_CODE', '') or '').strip()
-            sale_name = str(item.get('SALE_NAME', '') or '').strip()
-            if sale_code:
-                entry['aliases'].add(sale_code)
-            if sale_name:
-                entry['aliases'].add(sale_name)
+            entry['is_supersale'] = entry['is_supersale'] or is_supersale_branch
+            # เก็บตัวอย่างค่าดิบไว้แค่เพื่อ debug/แสดงผล ไม่ได้ใช้จับคู่ (กันจับคู่ผิดคนจากรหัส
+            # placeholder ที่สาขา supersale มักใช้ร่วมกันหลายคนในช่อง SALE_CODE)
+            if not entry['sample_sale_code']:
+                entry['sample_sale_code'] = str(item.get('SALE_CODE', '') or '').strip()
+            if not entry['sample_sale_name']:
+                entry['sample_sale_name'] = str(item.get('SALE_NAME', '') or '').strip()
             if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES:
                 entry['confirmed'] += 1
-
-    for entry in employee_summary.values():
-        entry['aliases'] = list(entry['aliases'])
 
     # ใส่ debug info ไว้ช่วยวินิจฉัยตอนพนักงานจับคู่กับไฟล์ไม่ได้เลย (ยอดประเมินขึ้น 0 หมด)
     # เช่น เอาไว้เช็คว่าปัญหาคือไม่มีข้อมูลเลย, หรือมีแต่ดึงรหัสพนักงานไม่ได้, หรือรหัสไม่ตรงกับไฟล์
