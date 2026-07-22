@@ -339,6 +339,7 @@
 
         <div class="card hidden" id="resultCard">
             <div class="step-title"><span class="step-badge">3</span> ผลลัพธ์</div>
+            <div class="status-msg" id="diagnosticBox"></div>
             <div class="summary-grid" id="summaryGrid"></div>
             <div class="preview-wrap">
                 <table id="resultTable"></table>
@@ -352,6 +353,7 @@
         const fileNameEl = document.getElementById('fileName');
         const mappingCard = document.getElementById('mappingCard');
         const resultCard = document.getElementById('resultCard');
+        const diagnosticBox = document.getElementById('diagnosticBox');
         const colEmployee = document.getElementById('colEmployee');
         const colModel = document.getElementById('colModel');
         const colDate = document.getElementById('colDate');
@@ -602,7 +604,7 @@
                     return;
                 }
 
-                renderResults(salesByEmployee, json.employees, dateStart, dateEnd, json.branches_checked);
+                renderResults(salesByEmployee, json.employees, dateStart, dateEnd, json.branches_checked, json.total_records, json.records_without_key);
                 hideStatus();
             } catch (err) {
                 showStatus('เกิดข้อผิดพลาด: ' + err.message, 'error');
@@ -611,7 +613,7 @@
             calcBtn.disabled = false;
         });
 
-        function renderResults(salesByEmployee, tradeByEmployee, dateStart, dateEnd, branchesChecked) {
+        function renderResults(salesByEmployee, tradeByEmployee, dateStart, dateEnd, branchesChecked, totalRecords, recordsWithoutKey) {
             // จับคู่ชื่อพนักงานแบบไม่สนตัวพิมพ์เล็ก-ใหญ่/ช่องว่างหัวท้าย
             const tradeNorm = {};
             Object.entries(tradeByEmployee).forEach(([k, v]) => {
@@ -630,6 +632,24 @@
                 const attachRate = iphoneSold > 0 ? (tradeCount / iphoneSold * 100) : null;
                 rows.push({ name: displayName, iphoneSold, tradeCount, attachRate });
             });
+
+            // วินิจฉัยกรณียอดประเมินขึ้น 0 หมด: แยกให้ชัดว่าปัญหาคือ "ไม่มีข้อมูลจากระบบเลย"
+            // "ดึงรหัสพนักงานจากข้อมูลไม่ได้" หรือ "รหัส/ชื่อพนักงานจากไฟล์ไม่ตรงกับระบบ"
+            const matchedCount = rows.filter(r => r.iphoneSold > 0 && r.tradeCount > 0).length;
+            if ((totalRecords || 0) === 0) {
+                diagnosticBox.className = 'status-msg show error';
+                diagnosticBox.textContent = `⚠️ ไม่พบรายการยอดเทรดจากระบบเลยในช่วง ${dateStart} - ${dateEnd} (ตรวจสอบ ${branchesChecked} สาขา) ลองเช็คว่าคอลัมน์สาขาที่เลือกตรงกับสาขาจริง หรือช่วงวันที่จากไฟล์ตรงกับที่คาดไว้ไหม`;
+            } else if (Object.keys(tradeByEmployee).length === 0) {
+                diagnosticBox.className = 'status-msg show error';
+                diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ แต่ดึงรหัสพนักงานจากทุกแถวไม่ได้เลย (records_without_key: ${recordsWithoutKey}) — อาจเป็นปัญหาฝั่งข้อมูลระบบเทรด ไม่เกี่ยวกับไฟล์ที่อัปโหลด`;
+            } else if (matchedCount === 0) {
+                const tradeSample = Object.keys(tradeByEmployee).slice(0, 8).join(', ');
+                const salesSample = Object.values(salesByEmployee).map(v => v.rawName).slice(0, 8).join(', ');
+                diagnosticBox.className = 'status-msg show error';
+                diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ (${Object.keys(tradeByEmployee).length} พนักงาน) แต่จับคู่กับพนักงานในไฟล์ไม่ได้เลยสักคน — ตัวอย่างรหัส/ชื่อจากระบบเทรด: [${tradeSample}] เทียบกับจากไฟล์: [${salesSample}] ลองเปลี่ยนคอลัมน์พนักงานที่เลือก (เช่น สลับ Officer (ID) กับ Officer (Name)) ให้ตรงรูปแบบกับฝั่งระบบเทรด`;
+            } else {
+                diagnosticBox.className = 'status-msg';
+            }
 
             rows.sort((a, b) => b.tradeCount - a.tradeCount);
 

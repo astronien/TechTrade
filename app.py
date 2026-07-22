@@ -1303,24 +1303,32 @@ def public_trade_count_by_employee():
 
     supersale_ids = load_supersale_config()
     employee_summary = defaultdict(lambda: {'count': 0, 'confirmed': 0})
+    total_records = 0
+    records_without_key = 0
 
     for branch_id in branch_ids:
         data = batch_data.get(str(branch_id))
         if not data or 'error' in data:
             continue
         for item in data.get('data', []):
+            total_records += 1
             key = get_sale_key(item, branch_id, supersale_ids)
             if not key:
+                records_without_key += 1
                 continue
             employee_summary[key]['count'] += 1
             if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES:
                 employee_summary[key]['confirmed'] += 1
 
+    # ใส่ debug info ไว้ช่วยวินิจฉัยตอนพนักงานจับคู่กับไฟล์ไม่ได้เลย (ยอดประเมินขึ้น 0 หมด)
+    # เช่น เอาไว้เช็คว่าปัญหาคือไม่มีข้อมูลเลย, หรือมีแต่ดึงรหัสพนักงานไม่ได้, หรือรหัสไม่ตรงกับไฟล์
     return jsonify({
         'success': True,
         'date_start': date_start,
         'date_end': date_end,
         'branches_checked': len(branch_ids),
+        'total_records': total_records,
+        'records_without_key': records_without_key,
         'employees': employee_summary
     })
 
