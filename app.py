@@ -9,7 +9,7 @@ import secrets
 import hashlib
 import atexit
 import os as _os  # Moved to top for safety
-from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply, fetch_all_pages
+from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply, fetch_all_pages, get_sale_key, load_supersale_config
 from constants import CONFIRMED_STATUSES
 from turso_handler import TursoHandler
 import pandas as pd
@@ -1179,13 +1179,48 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
 
         turso.close()
         return results
-            
+
     except Exception as e:
         print(f"⚠️ [Batch Error] {e}")
         import traceback
         traceback.print_exc()
         return None
-        
+
+
+def fetch_all_branches_trade_data(branch_ids, date_start, date_end):
+    """ดึงข้อมูลเทรดของทุกสาขาที่ระบุ (ใช้กับหน้า Attach Rate ที่ไม่ต้อง login)
+    ลองใช้ batch fetch (Turso) ก่อนเพราะเร็วกว่า ถ้าใช้ไม่ได้ (เช่น ช่วงวันที่รวมวันนี้ หรือ Turso ล่ม)
+    จะดึงทีละสาขาแบบขนานแทน
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not branch_ids:
+        return {}
+
+    batch_data = fetch_zone_data_batch(branch_ids, date_start, date_end)
+    if batch_data is not None:
+        return batch_data
+
+    print(f"↩️ [Attach Rate] Batch fetch unavailable, falling back to parallel per-branch fetch for {len(branch_ids)} branches")
+
+    def fetch_single(branch_id):
+        filters = {
+            'date_start': date_start, 'date_end': date_end,
+            'sale_code': '', 'customer_sign': '',
+            'session_id': '', 'branch_id': str(branch_id)
+        }
+        try:
+            return str(branch_id), fetch_all_pages(fetch_data_from_api, filters, page_size=5000)
+        except Exception as e:
+            print(f"   ❌ [Attach Rate Fallback] Branch {branch_id}: {e}")
+            return str(branch_id), {'data': [], 'source': 'error'}
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        for bid, res in executor.map(fetch_single, branch_ids):
+            results[bid] = res
+    return results
+
 
 
 
@@ -1216,6 +1251,69 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+@app.route('/attach-rate')
+def attach_rate_page():
+    """หน้าคำนวณ Attach Rate: iPhone ที่ขายได้ vs ยอดประเมิน (เทรด) ต่อพนักงาน
+    ไม่ต้อง login — ไฟล์ยอดขายที่อัปโหลดถูกอ่านที่ฝั่ง browser เท่านั้น ไม่ส่งขึ้นเซิร์ฟเวอร์และไม่บันทึกลง database
+    """
+    return render_template('attach_rate.html')
+
+
+@app.route('/api/public/trade-count-by-employee')
+def public_trade_count_by_employee():
+    """คืนจำนวนยอดประเมิน (เทรด) แยกตามพนักงาน สำหรับช่วงวันที่ที่ระบุ
+    ใช้คู่กับหน้า /attach-rate (ไม่ต้อง login) — รวมข้อมูลจากทุกสาขาในระบบ
+    """
+    from collections import defaultdict
+
+    date_start = request.args.get('date_start', '').strip()
+    date_end = request.args.get('date_end', '').strip()
+
+    if not date_start or not date_end:
+        return jsonify({'success': False, 'error': 'ต้องระบุ date_start และ date_end รูปแบบ dd/mm/yyyy'}), 400
+
+    try:
+        start_dt = datetime.strptime(date_start, '%d/%m/%Y')
+        end_dt = datetime.strptime(date_end, '%d/%m/%Y')
+    except ValueError:
+        return jsonify({'success': False, 'error': 'รูปแบบวันที่ต้องเป็น dd/mm/yyyy'}), 400
+
+    if end_dt < start_dt:
+        return jsonify({'success': False, 'error': 'date_end ต้องไม่มาก่อน date_start'}), 400
+
+    if (end_dt - start_dt).days > 62:
+        return jsonify({'success': False, 'error': 'ช่วงวันที่ต้องไม่เกิน 62 วัน'}), 400
+
+    branches = get_branches_from_db()
+    branch_ids = [b.get('branch_id') for b in branches if b.get('branch_id')]
+
+    batch_data = fetch_all_branches_trade_data(branch_ids, date_start, date_end) or {}
+
+    supersale_ids = load_supersale_config()
+    employee_summary = defaultdict(lambda: {'count': 0, 'confirmed': 0})
+
+    for branch_id in branch_ids:
+        data = batch_data.get(str(branch_id))
+        if not data or 'error' in data:
+            continue
+        for item in data.get('data', []):
+            key = get_sale_key(item, branch_id, supersale_ids)
+            if not key:
+                continue
+            employee_summary[key]['count'] += 1
+            if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES:
+                employee_summary[key]['confirmed'] += 1
+
+    return jsonify({
+        'success': True,
+        'date_start': date_start,
+        'date_end': date_end,
+        'branches_checked': len(branch_ids),
+        'employees': employee_summary
+    })
+
 
 @app.route('/')
 @login_required
