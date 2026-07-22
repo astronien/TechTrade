@@ -1291,9 +1291,24 @@ def public_trade_count_by_employee():
     all_branches = get_branches_from_db()
 
     if branch_ids_param:
+        import re
         requested_ids = {x.strip() for x in branch_ids_param.split(',') if x.strip()}
-        branch_ids = [b.get('branch_id') for b in all_branches
-                      if b.get('branch_id') and str(b.get('branch_id')) in requested_ids]
+
+        # ไฟล์ POS ภายนอกใช้ "real ID" ที่ฝังอยู่ในชื่อสาขา (เช่น "ID645" ใน "ID645 : Studio 7-...")
+        # ซึ่งเป็นคนละชุดตัวเลขกับ branch_id (sequential) ที่ระบบใช้ภายใน — บางครั้งเลขบังเอิญชนกัน
+        # (เช่น real ID 645 ของสาขาหนึ่ง ตรงกับ branch_id sequential ของอีกสาขาไปเลย) ต้องแปลงผ่าน
+        # ชื่อสาขาก่อนเสมอ ไม่เทียบกับ branch_id ตรงๆ
+        real_id_to_branch_id = {}
+        for b in all_branches:
+            m = re.search(r'ID(\d+)\b', b.get('branch_name', '') or '')
+            if m:
+                real_id_to_branch_id[m.group(1)] = b.get('branch_id')
+
+        branch_ids = []
+        for rid in requested_ids:
+            resolved = real_id_to_branch_id.get(rid)
+            if resolved:
+                branch_ids.append(resolved)
         if not branch_ids:
             return jsonify({'success': False, 'error': 'ไม่พบสาขาตาม branch_ids ที่ระบุในระบบ'}), 400
     else:
