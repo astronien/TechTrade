@@ -10,10 +10,9 @@ import hashlib
 import base64
 import requests
 
-BKK_TZ = pytz.timezone('Asia/Bangkok')
+from constants import CONFIRMED_STATUSES
 
-# สถานะที่ถือว่า "ลูกค้าตกลงราคา" (รวมไว้ที่เดียวกันเพื่อไม่ให้แต่ละรายงานเช็คไม่ตรงกัน)
-CONFIRMED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+BKK_TZ = pytz.timezone('Asia/Bangkok')
 
 
 def now_bkk():
@@ -259,10 +258,10 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func, fetch
         if 'error' not in data:
             items = data.get('data', [])
             total_count = len(items)
-            confirmed_count = sum(1 for item in items 
-                                 if item.get('BIDDING_STATUS_NAME', '') in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'])
+            confirmed_count = sum(1 for item in items
+                                 if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES)
             not_confirmed_count = total_count - confirmed_count
-            
+
             total_all += total_count
             confirmed_all += confirmed_count
         else:

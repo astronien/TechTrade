@@ -9,6 +9,8 @@ import os
 import tempfile
 import re
 
+from constants import CONFIRMED_STATUSES
+
 def generate_monthly_excel_report(trade_data, year, month, branch_id=None, branch_name=None):
     """สร้างรายงานรายเดือน (แยกตามวัน)"""
     import calendar
@@ -375,7 +377,7 @@ def generate_annual_excel_report(trade_data, year, branch_id=None, branch_name=N
     import re
     
     # สถานะที่ถือว่า "ตกลงเทรด"
-    AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+    AGREED_STATUSES = CONFIRMED_STATUSES
     
     for item in trade_data:
         doc_date = item.get('document_date', '')

@@ -4,6 +4,11 @@ import requests
 import re
 from datetime import datetime
 
+from constants import CONFIRMED_STATUSES
+
+# ใช้สร้างเงื่อนไข SQL IN (...) จากค่าคงที่ชุดเดียวกับที่รายงานอื่นใช้ (ไม่ใช่ user input ไม่มีความเสี่ยง SQL injection)
+CONFIRMED_STATUSES_SQL = ', '.join(f"'{s}'" for s in CONFIRMED_STATUSES)
+
 # Safe import for libsql_client to prevent crashes on incompatible environments (like Vercel)
 try:
     import libsql_client
@@ -904,8 +909,8 @@ class TursoHandler:
                     document_date, 
                     COUNT(*) as count, 
                     SUM(amount) as totalAmount,
-                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN 1 ELSE 0 END) as confirmedCount,
-                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN amount ELSE 0 END) as confirmedAmount
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ({CONFIRMED_STATUSES_SQL}) THEN 1 ELSE 0 END) as confirmedCount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ({CONFIRMED_STATUSES_SQL}) THEN amount ELSE 0 END) as confirmedAmount
                 FROM trades {where_clause}
                 GROUP BY document_date
                 ORDER BY document_date ASC
@@ -919,8 +924,8 @@ class TursoHandler:
                     SALE_NAME, 
                     COUNT(*) as count, 
                     SUM(amount) as totalAmount,
-                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN 1 ELSE 0 END) as confirmedCount,
-                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ('ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา') THEN amount ELSE 0 END) as confirmedAmount
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ({CONFIRMED_STATUSES_SQL}) THEN 1 ELSE 0 END) as confirmedCount,
+                    SUM(CASE WHEN BIDDING_STATUS_NAME IN ({CONFIRMED_STATUSES_SQL}) THEN amount ELSE 0 END) as confirmedAmount
                 FROM trades {where_clause}
                 GROUP BY SALE_CODE, SALE_NAME
             """

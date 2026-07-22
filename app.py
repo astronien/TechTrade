@@ -10,6 +10,7 @@ import hashlib
 import atexit
 import os as _os  # Moved to top for safety
 from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply, fetch_all_pages
+from constants import CONFIRMED_STATUSES
 from turso_handler import TursoHandler
 import pandas as pd
 import io
@@ -1734,7 +1735,7 @@ def fetch_and_process_report(filters):
         brand_summary[brand]['amount'] += amount
         
         # ตรวจสอบว่าเป็นสถานะที่ลูกค้าตกลงหรือไม่
-        is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+        is_confirmed = status in CONFIRMED_STATUSES
         
         # สรุปตามวัน
         doc_date = item.get('document_date', '')
@@ -2714,7 +2715,7 @@ def get_annual_report_data():
                            'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
             
             # สถานะที่ถือว่า "ตกลงเทรด"
-            AGREED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+            AGREED_STATUSES = CONFIRMED_STATUSES
             
             # ดึงข้อมูลทีละเดือน
             for month_num in range(1, 13):
