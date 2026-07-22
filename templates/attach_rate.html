@@ -202,6 +202,41 @@
             box-shadow: none;
         }
 
+        .secondary-btn {
+            width: 100%;
+            min-height: 46px;
+            margin-top: 12px;
+            padding: 12px;
+            color: var(--primary-dark);
+            background: rgba(91, 92, 246, 0.08);
+            border: 1px solid rgba(91, 92, 246, 0.28);
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+        }
+
+        .secondary-btn:hover {
+            background: rgba(91, 92, 246, 0.16);
+            transform: translateY(-1px);
+        }
+
+        .report-textarea {
+            width: 100%;
+            min-height: 220px;
+            margin-top: 16px;
+            padding: 16px;
+            color: var(--text-main);
+            background: rgba(248, 250, 252, 0.85);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            font-size: 13.5px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            resize: vertical;
+        }
+
         .status-msg {
             display: none;
             margin-top: 16px;
@@ -308,6 +343,10 @@
             <div class="preview-wrap">
                 <table id="resultTable"></table>
             </div>
+
+            <div class="step-title" style="font-size: 15px; margin-top: 26px;">📋 ข้อความสรุป (คัดลอกส่งไลน์ได้เลย)</div>
+            <textarea id="reportText" class="report-textarea" readonly></textarea>
+            <button class="secondary-btn" id="copyBtn">📋 คัดลอกข้อความ</button>
         </div>
     </div>
 
@@ -329,6 +368,30 @@
         const summaryGrid = document.getElementById('summaryGrid');
         const calcBtn = document.getElementById('calcBtn');
         const statusMsg = document.getElementById('statusMsg');
+        const reportText = document.getElementById('reportText');
+        const copyBtn = document.getElementById('copyBtn');
+
+        copyBtn.addEventListener('click', async () => {
+            const text = reportText.value;
+            let copied = false;
+            try {
+                await navigator.clipboard.writeText(text);
+                copied = true;
+            } catch (err) {
+                // เบราว์เซอร์เก่า/หน้าที่ไม่ใช่ HTTPS อาจไม่มี navigator.clipboard ให้ fallback ด้วยวิธี select + execCommand
+                try {
+                    reportText.removeAttribute('readonly');
+                    reportText.select();
+                    copied = document.execCommand('copy');
+                    reportText.setAttribute('readonly', 'true');
+                } catch (err2) {
+                    copied = false;
+                }
+            }
+            const originalLabel = copyBtn.textContent;
+            copyBtn.textContent = copied ? '✅ คัดลอกแล้ว' : '❌ คัดลอกไม่สำเร็จ ลองเลือกข้อความเองแล้วกด Ctrl/Cmd+C';
+            setTimeout(() => { copyBtn.textContent = originalLabel; }, 2000);
+        });
 
         let parsedRows = [];
         let headers = [];
@@ -643,6 +706,29 @@
             });
             html += '</tbody>';
             resultTable.innerHTML = html;
+
+            // สร้างข้อความสรุปแบบเดียวกับรายงานที่ LINE bot ส่งอยู่แล้ว (emoji/รูปแบบเดิม) ให้คัดลอกส่งต่อได้เลย
+            const lines = [];
+            lines.push('📊 รายงาน Attach Rate (iPhone)');
+            lines.push(`📅 ช่วงวันที่: ${dateStart} - ${dateEnd}`);
+            lines.push(`🏢 สาขาที่ตรวจสอบ: ${branchesChecked} สาขา`);
+            lines.push('━━━━━━━━━━━━');
+            lines.push('');
+            rows.forEach(r => {
+                lines.push(`👤 ${r.name}`);
+                lines.push(`• iPhone ขายได้: ${r.iphoneSold} เครื่อง`);
+                lines.push(`• ยอดประเมิน: ${r.tradeCount} รายการ (ตกลง ${r.confirmedCount})`);
+                lines.push(`• Attach Rate: ${rateText(r.attachRate)}`);
+                lines.push(`• ยอดตกลง/iPhone: ${rateText(r.confirmedRate)}`);
+                lines.push('');
+            });
+            lines.push('━━━━━━━━━━━━');
+            lines.push('📈 สรุปรวม');
+            lines.push(`• iPhone ขายได้รวม: ${totalIphone.toLocaleString()} เครื่อง`);
+            lines.push(`• ยอดประเมินรวม: ${totalTrade.toLocaleString()} รายการ (ตกลง ${totalConfirmed.toLocaleString()})`);
+            lines.push(`• Attach Rate รวม: ${rateText(overallRate)}`);
+            lines.push(`• ยอดตกลง/iPhone รวม: ${rateText(overallConfirmedRate)}`);
+            reportText.value = lines.join('\n');
 
             resultCard.classList.remove('hidden');
             resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
