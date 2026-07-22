@@ -9,7 +9,7 @@ import secrets
 import hashlib
 import atexit
 import os as _os  # Moved to top for safety
-from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply
+from line_bot_handler import handle_line_message, verify_line_signature, send_line_reply, fetch_all_pages
 from turso_handler import TursoHandler
 import pandas as pd
 import io
@@ -1161,7 +1161,7 @@ def fetch_zone_data_batch(branch_ids, date_start, date_end):
                         'sale_code': '', 'customer_sign': '',
                         'session_id': '', 'branch_id': str(eid)
                     }
-                    res = fetch_data_from_api(start=0, length=5000, **f)
+                    res = fetch_all_pages(fetch_data_from_api, f, page_size=5000)
                     return str(eid), res
                 except Exception as e:
                     print(f"   ❌ [Parallel Fetch Error] Branch {eid}: {e}")
@@ -2224,20 +2224,27 @@ def parse_thai_month(month_name):
     return months.get(month_name.strip(), None)
 
 def get_month_date_range(month_number, year=None):
-    """คำนวณวันแรกและวันสุดท้ายของเดือน"""
+    """คำนวณวันแรกและวันสุดท้ายของเดือน (อิงเวลาไทย)
+    ถ้าไม่ระบุปี และเดือนที่ขอ 'ยังมาไม่ถึง' ในปีปัจจุบัน จะถือว่าหมายถึงเดือนนั้นของปีที่แล้ว
+    (เช่น ถามหาเดือนธันวาคมตอนอยู่เดือนมกราคม ควรได้ธันวาคมปีก่อน ไม่ใช่ปีเดียวกันที่ยังไม่ถึง)
+    """
     from datetime import datetime
     import calendar
-    
+
+    now = datetime.now(pytz.timezone('Asia/Bangkok'))
+
     if year is None:
-        year = datetime.now().year
-    
+        year = now.year
+        if month_number > now.month:
+            year -= 1
+
     # วันแรกของเดือน
     first_day = datetime(year, month_number, 1)
-    
+
     # วันสุดท้ายของเดือน
     last_day_num = calendar.monthrange(year, month_number)[1]
     last_day = datetime(year, month_number, last_day_num)
-    
+
     return first_day.strftime('%d/%m/%Y'), last_day.strftime('%d/%m/%Y')
 
 # Import LINE Bot Handler

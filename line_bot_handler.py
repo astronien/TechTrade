@@ -3,11 +3,48 @@ from datetime import datetime
 from collections import defaultdict
 import json
 import os
+import pytz
 
 import hmac
 import hashlib
 import base64
 import requests
+
+BKK_TZ = pytz.timezone('Asia/Bangkok')
+
+# สถานะที่ถือว่า "ลูกค้าตกลงราคา" (รวมไว้ที่เดียวกันเพื่อไม่ให้แต่ละรายงานเช็คไม่ตรงกัน)
+CONFIRMED_STATUSES = ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+
+
+def now_bkk():
+    """เวลาปัจจุบันตามโซนเวลาไทย (เซิร์ฟเวอร์ deploy อาจรันเป็น UTC เช่น Vercel/Render)"""
+    return datetime.now(BKK_TZ)
+
+
+def fetch_all_pages(fetch_data_func, filters, page_size=1000, max_records=20000):
+    """ดึงข้อมูลวนทุกหน้าจนครบ (ป้องกันไม่ให้รายการเกิน 1 หน้าถูกตัดทิ้งแบบเงียบๆ)
+    คืนค่ารูปแบบเดียวกับ fetch_data_func ปกติ แต่ 'data' รวมทุกหน้าแล้ว
+    """
+    data = fetch_data_func(start=0, length=page_size, **filters)
+    if not data or 'error' in data:
+        return data
+
+    items = data.get('data', [])
+    total = data.get('recordsFiltered', len(items))
+
+    while len(items) < total and len(items) < max_records:
+        more = fetch_data_func(start=len(items), length=page_size, **filters)
+        more_items = more.get('data', []) if more else []
+        if not more_items:
+            break
+        items.extend(more_items)
+
+    if len(items) < total:
+        print(f"⚠️ [fetch_all_pages] ดึงได้ {len(items)}/{total} รายการ (ชนขีดจำกัด {max_records})")
+
+    data['data'] = items
+    return data
+
 
 def load_supersale_config():
     """โหลด config สาขา supersale จาก DB (standalone, ไม่ import จาก app.py)"""
@@ -176,12 +213,12 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func, fetch
     if not zone:
         return f"❌ ไม่พบ Zone: {zone_name}"
     
-    today = datetime.now().strftime('%d/%m/%Y')
+    today = now_bkk().strftime('%d/%m/%Y')
     branch_ids = zone['branch_ids']
-    
+
     # โหลดข้อมูลสาขา
     branches_map = load_branches_map()
-    
+
     message = f"📊 รายงานยอดเทรด\n"
     message += f"📅 วันที่: {today}\n"
     message += f"🗺️ Zone: {zone['zone_name']}\n"
@@ -211,8 +248,8 @@ def generate_zone_daily_report(zone_name, find_zone_func, fetch_data_func, fetch
                 'branch_id': str(branch_id)
             }
             
-            data = fetch_data_func(start=0, length=1000, **filters)
-        
+            data = fetch_all_pages(fetch_data_func, filters, page_size=1000)
+
         last_source = data.get('source', 'unknown')
         
         branch_name = branches_map.get(str(branch_id), f"สาขา {branch_id}")
@@ -270,12 +307,12 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
     if not branch:
         return f"❌ ไม่พบสาขา ID: {branch_id_input}\n\nตัวอย่าง: รายงาน 9 รายวัน (สำหรับสาขา ID9)"
     
-    today = datetime.now().strftime('%d/%m/%Y')
-    thai_date = format_thai_date(datetime.now())
-    
+    today = now_bkk().strftime('%d/%m/%Y')
+    thai_date = format_thai_date(now_bkk())
+
     # โหลด supersale config
     supersale_ids = load_supersale_config()
-    
+
     filters = {
         'date_start': today,
         'date_end': today,
@@ -284,14 +321,14 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
         'session_id': '',
         'branch_id': str(branch['branch_id'])
     }
-    
-    data = fetch_data_func(start=0, length=1000, **filters)
-    
-    if 'error' in data:
-        return f"❌ ไม่สามารถดึงข้อมูลได้: {data.get('error')}"
-    
+
+    data = fetch_all_pages(fetch_data_func, filters, page_size=1000)
+
+    if not data or 'error' in data:
+        return f"❌ ไม่สามารถดึงข้อมูลได้: {data.get('error') if data else 'ไม่ทราบสาเหตุ'}"
+
     items = data.get('data', [])
-    
+
     # จัดกลุ่มตามพนักงาน
     sales_summary = defaultdict(lambda: {
         'name': '',
@@ -300,15 +337,15 @@ def generate_branch_daily_report(branch_id_input, find_branch_func, fetch_data_f
         'not_confirmed': 0,
         'amount': 0.0
     })
-    
+
     for item in items:
         sale_key = get_sale_key(item, branch['branch_id'], supersale_ids)
         if not sale_key:
             continue
-        
+
         status = item.get('BIDDING_STATUS_NAME', '')
-        is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
-        
+        is_confirmed = status in CONFIRMED_STATUSES
+
         amount_value = item.get('amount')
         try:
             amount = float(amount_value) if amount_value else 0.0
@@ -379,7 +416,7 @@ def calculate_forecast(total_so_far, month_number, year=None):
     คืนค่า None ถ้าไม่ใช่เดือนปัจจุบัน หรือเดือนนั้นจบไปแล้ว (ไม่มีอะไรต้องคาดการณ์เพิ่ม)
     """
     import calendar
-    now = datetime.now()
+    now = now_bkk()
     if year is None:
         year = now.year
 
@@ -414,7 +451,7 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
     
     date_start, date_end = get_date_range_func(month_number)
     branch_ids = zone['branch_ids']
-    year = datetime.now().year + 543  # แปลงเป็น พ.ศ.
+    year = int(date_start.split('/')[-1]) + 543  # ปีจริงของช่วงวันที่ (เผื่อข้ามปี) แปลงเป็น พ.ศ.
     
     # โหลดข้อมูลสาขา
     branches_map = load_branches_map()
@@ -449,22 +486,22 @@ def generate_zone_monthly_report(zone_name, month_name, find_zone_func, fetch_da
                 'session_id': '',
                 'branch_id': str(branch_id)
             }
-            data = fetch_data_func(start=0, length=5000, **filters)
-        
+            data = fetch_all_pages(fetch_data_func, filters, page_size=5000)
+
         if not data:
             data = {'data': [], 'source': 'unknown'}
-        
+
         last_source = data.get('source', 'unknown')
-        
+
         branch_name = branches_map.get(str(branch_id), f"สาขา {branch_id}")
         if ' : ' in branch_name:
             branch_name = branch_name.split(' : ', 2)[-1]
-        
+
         if 'error' not in data:
             items = data.get('data', [])
             total_count = len(items)
-            confirmed_count = sum(1 for item in items 
-                                 if item.get('BIDDING_STATUS_NAME', '') in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา'])
+            confirmed_count = sum(1 for item in items
+                                 if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES)
             not_confirmed_count = total_count - confirmed_count
             
             total_all += total_count
@@ -534,13 +571,13 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
         'branch_id': str(branch['branch_id'])
     }
     
-    data = fetch_data_func(start=0, length=5000, **filters)
-    
-    if 'error' in data:
-        return f"❌ ไม่สามารถดึงข้อมูลได้: {data.get('error')}"
-    
+    data = fetch_all_pages(fetch_data_func, filters, page_size=5000)
+
+    if not data or 'error' in data:
+        return f"❌ ไม่สามารถดึงข้อมูลได้: {data.get('error') if data else 'ไม่ทราบสาเหตุ'}"
+
     items = data.get('data', [])
-    
+
     # จัดกลุ่มตามพนักงาน (เหมือน daily แต่ข้อมูลเยอะกว่า)
     sales_summary = defaultdict(lambda: {
         'name': '',
@@ -549,14 +586,14 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
         'not_confirmed': 0,
         'amount': 0.0
     })
-    
+
     for item in items:
         sale_key = get_sale_key(item, branch['branch_id'], supersale_ids)
         if not sale_key:
             continue
-        
+
         status = item.get('BIDDING_STATUS_NAME', '')
-        is_confirmed = status in ['ยืนยันราคาแล้ว', 'สิ้นสุดการประเมินราคา']
+        is_confirmed = status in CONFIRMED_STATUSES
         
         amount_value = item.get('amount')
         try:
@@ -576,7 +613,7 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     # สร้างข้อความ
     import re
     branch_name = branch['branch_name'].split(' : ', 2)[-1] if ' : ' in branch['branch_name'] else branch['branch_name']
-    year = datetime.now().year + 543  # แปลงเป็น พ.ศ.
+    year = int(date_start.split('/')[-1]) + 543  # ปีจริงของช่วงวันที่ (เผื่อข้ามปี) แปลงเป็น พ.ศ.
     
     # ดึง ID number จาก branch_name (เช่น ID9 -> 9)
     id_match = re.search(r'ID(\d+)', branch['branch_name'])
