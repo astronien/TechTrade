@@ -615,22 +615,39 @@
 
         function renderResults(salesByEmployee, tradeByEmployee, dateStart, dateEnd, branchesChecked, totalRecords, recordsWithoutKey) {
             // จับคู่ชื่อพนักงานแบบไม่สนตัวพิมพ์เล็ก-ใหญ่/ช่องว่างหัวท้าย
+            // สาขา supersale ระบบเทรดจะใช้ SALE_NAME เป็น key หลัก (ไม่ใช่ SALE_CODE เหมือนสาขาทั่วไป)
+            // เพื่อไม่ให้ผู้ใช้ต้องรู้เรื่องนี้ ฝั่ง server แนบ aliases (SALE_CODE และ SALE_NAME ที่เจอจริง)
+            // มาด้วย ตรงนี้จับคู่กับทั้ง key หลักและทุก alias เผื่อไฟล์ใช้คอลัมน์คนละแบบกับที่ระบบใช้เป็น key
             const tradeNorm = {};
             Object.entries(tradeByEmployee).forEach(([k, v]) => {
                 tradeNorm[norm(k)] = { key: k, ...v };
+                (v.aliases || []).forEach(alias => {
+                    const na = norm(alias);
+                    if (!tradeNorm[na]) tradeNorm[na] = { key: k, ...v };
+                });
             });
 
-            const allNormKeys = new Set([...Object.keys(salesByEmployee), ...Object.keys(tradeNorm)]);
-
+            // สำคัญ: ห้ามวนตาม normalized key ทุกตัวใน tradeNorm ตรงๆ เพราะ 1 พนักงานฝั่งเทรด
+            // อาจมีหลาย normalized key ชี้ไปที่ entry เดียวกัน (key หลัก + alias) ถ้าวนตรงๆ
+            // จะได้แถวซ้ำของคนเดียวกัน และ "ยอดประเมินรวม" จะถูกนับซ้ำ (บวกซ้อนเกินจริง)
+            // จึงต้องวนฝั่งยอดขายก่อน จับคู่ผ่าน key หรือ alias ใดก็ได้ แล้วค่อยเติมคนที่มีแต่ยอดเทรด
+            // (ยังไม่ถูกจับคู่) โดยใช้ key หลักของฝั่งเทรดแค่ครั้งเดียวต่อคน
             const rows = [];
-            allNormKeys.forEach(nk => {
+            const usedTradeKeys = new Set();
+
+            Object.entries(salesByEmployee).forEach(([nk, salesEntry]) => {
                 const tradeEntry = tradeNorm[nk];
-                const salesEntry = salesByEmployee[nk];
-                const displayName = tradeEntry ? tradeEntry.key : (salesEntry ? salesEntry.rawName : nk);
-                const iphoneSold = salesEntry ? salesEntry.count : 0;
+                if (tradeEntry) usedTradeKeys.add(tradeEntry.key);
+                const displayName = tradeEntry ? tradeEntry.key : salesEntry.rawName;
+                const iphoneSold = salesEntry.count;
                 const tradeCount = tradeEntry ? tradeEntry.count : 0;
                 const attachRate = iphoneSold > 0 ? (tradeCount / iphoneSold * 100) : null;
                 rows.push({ name: displayName, iphoneSold, tradeCount, attachRate });
+            });
+
+            Object.entries(tradeByEmployee).forEach(([k, v]) => {
+                if (usedTradeKeys.has(k)) return;
+                rows.push({ name: k, iphoneSold: 0, tradeCount: v.count, attachRate: null });
             });
 
             // วินิจฉัยกรณียอดประเมินขึ้น 0 หมด: แยกให้ชัดว่าปัญหาคือ "ไม่มีข้อมูลจากระบบเลย"
@@ -643,7 +660,13 @@
                 diagnosticBox.className = 'status-msg show error';
                 diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ แต่ดึงรหัสพนักงานจากทุกแถวไม่ได้เลย (records_without_key: ${recordsWithoutKey}) — อาจเป็นปัญหาฝั่งข้อมูลระบบเทรด ไม่เกี่ยวกับไฟล์ที่อัปโหลด`;
             } else if (matchedCount === 0) {
-                const tradeSample = Object.keys(tradeByEmployee).slice(0, 8).join(', ');
+                // แสดงทั้ง key หลักและ alias (SALE_CODE/SALE_NAME ที่เจอจริง) เพื่อให้เห็นตัวเลือกทั้งหมดที่พอจะ match ได้
+                const tradeSample = Object.entries(tradeByEmployee).slice(0, 5)
+                    .map(([k, v]) => {
+                        const otherAliases = (v.aliases || []).filter(a => a !== k);
+                        return otherAliases.length ? `${k} (หรือ ${otherAliases.join('/')})` : k;
+                    })
+                    .join(', ');
                 const salesSample = Object.values(salesByEmployee).map(v => v.rawName).slice(0, 8).join(', ');
                 diagnosticBox.className = 'status-msg show error';
                 diagnosticBox.textContent = `⚠️ พบข้อมูลยอดเทรด ${totalRecords} รายการ (${Object.keys(tradeByEmployee).length} พนักงาน) แต่จับคู่กับพนักงานในไฟล์ไม่ได้เลยสักคน — ตัวอย่างรหัส/ชื่อจากระบบเทรด: [${tradeSample}] เทียบกับจากไฟล์: [${salesSample}] ลองเปลี่ยนคอลัมน์พนักงานที่เลือก (เช่น สลับ Officer (ID) กับ Officer (Name)) ให้ตรงรูปแบบกับฝั่งระบบเทรด`;

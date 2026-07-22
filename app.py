@@ -1302,7 +1302,7 @@ def public_trade_count_by_employee():
     batch_data = fetch_all_branches_trade_data(branch_ids, date_start, date_end) or {}
 
     supersale_ids = load_supersale_config()
-    employee_summary = defaultdict(lambda: {'count': 0, 'confirmed': 0})
+    employee_summary = defaultdict(lambda: {'count': 0, 'confirmed': 0, 'aliases': set()})
     total_records = 0
     records_without_key = 0
 
@@ -1312,13 +1312,27 @@ def public_trade_count_by_employee():
             continue
         for item in data.get('data', []):
             total_records += 1
+            # get_sale_key เลือก SALE_CODE หรือ SALE_NAME ให้เองตามว่าสาขานี้เป็น supersale หรือไม่
+            # (สาขา supersale รหัสจริงจะอยู่ใน SALE_NAME แทน) การจัดกลุ่มด้วย key นี้ถูกต้องแน่นอนแล้ว
             key = get_sale_key(item, branch_id, supersale_ids)
             if not key:
                 records_without_key += 1
                 continue
-            employee_summary[key]['count'] += 1
+            entry = employee_summary[key]
+            entry['count'] += 1
+            # เก็บทั้ง SALE_CODE และ SALE_NAME ที่เจอจริงไว้เป็น alias เพิ่มเติม (ไม่ใช่ตัวจัดกลุ่ม)
+            # เพื่อให้ฝั่ง client จับคู่กับไฟล์ยอดขายได้ไม่ว่าไฟล์จะใช้คอลัมน์รหัสหรือชื่อพนักงาน
+            sale_code = str(item.get('SALE_CODE', '') or '').strip()
+            sale_name = str(item.get('SALE_NAME', '') or '').strip()
+            if sale_code:
+                entry['aliases'].add(sale_code)
+            if sale_name:
+                entry['aliases'].add(sale_name)
             if item.get('BIDDING_STATUS_NAME', '') in CONFIRMED_STATUSES:
-                employee_summary[key]['confirmed'] += 1
+                entry['confirmed'] += 1
+
+    for entry in employee_summary.values():
+        entry['aliases'] = list(entry['aliases'])
 
     # ใส่ debug info ไว้ช่วยวินิจฉัยตอนพนักงานจับคู่กับไฟล์ไม่ได้เลย (ยอดประเมินขึ้น 0 หมด)
     # เช่น เอาไว้เช็คว่าปัญหาคือไม่มีข้อมูลเลย, หรือมีแต่ดึงรหัสพนักงานไม่ได้, หรือรหัสไม่ตรงกับไฟล์
