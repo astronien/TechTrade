@@ -356,6 +356,13 @@
         const COL_MODEL = 'Model';
         const COL_DATE = 'Doc Date';
         const COL_BRANCH = 'Branch (ID)';
+        // นับ "เครื่อง iPhone ที่ขายได้" ต้องดูจาก Category (Name) ว่าเป็น "iPhone" จริงๆ เท่านั้น
+        // ห้ามใช้วิธีเดิมที่กรองจากคอลัมน์ Model ว่ามีคำว่า "iphone" ปนอยู่ เพราะของแถม/อุปกรณ์เสริม
+        // (ฟิล์ม, เคส, สาย ฯลฯ) มักตั้งชื่อรุ่นอ้างอิงรุ่น iPhone ไว้ในชื่อสินค้าด้วย เช่น
+        // "The Pixel Crystal Clear Ring iPhone 17Pro/17Pro Max" หรือ "CASE IPHONE" ทำให้นับเกินจริงมาก
+        // (ทดสอบกับไฟล์จริง: filter จาก Model นับได้ 59 แถว ทั้งที่เครื่อง iPhone จริงมีแค่ 21 เครื่อง)
+        const COL_CATEGORY = 'Category (Name)';
+        const COL_SUBCATEGORY = 'Sub Category';
 
         const fileInput = document.getElementById('fileInput');
         const fileDrop = document.getElementById('fileDrop');
@@ -427,7 +434,7 @@
 
                     headers = Object.keys(parsedRows[0]);
 
-                    const missingCols = [COL_EMPLOYEE, COL_MODEL, COL_DATE].filter(c => !headers.includes(c));
+                    const missingCols = [COL_EMPLOYEE, COL_MODEL, COL_DATE, COL_CATEGORY].filter(c => !headers.includes(c));
                     if (missingCols.length) {
                         showStatus(`ไม่พบคอลัมน์ที่ต้องใช้ในไฟล์นี้: ${missingCols.join(', ')} — ตรวจสอบว่าอัปโหลดไฟล์รูปแบบที่ถูกต้องหรือเปล่า`, 'error');
                         mappingCard.classList.add('hidden');
@@ -557,14 +564,22 @@
             hideStatus();
 
             const empCol = COL_EMPLOYEE;
-            const modelCol = COL_MODEL;
             const dateCol = COL_DATE;
 
-            // 1. กรองเฉพาะแถวที่เป็น iPhone
-            const iphoneRows = parsedRows.filter(r => String(r[modelCol] || '').toLowerCase().includes('iphone'));
+            // 1. กรองเฉพาะแถวที่เป็น "เครื่อง iPhone" จริง — ต้องดูที่ Category (Name) === "iPhone"
+            // ห้ามดูจากคอลัมน์ Model เพราะของแถม/อุปกรณ์เสริมหลายรายการตั้งชื่อรุ่นอ้างอิง iPhone ไว้ด้วย
+            // (เช่น ฟิล์ม, เคส) ทำให้ถ้ากรองจาก Model จะนับเกินจริงไปมาก
+            // และต้องตัดรายการ "IPHONE PROMO CODE" (Sub Category) ออก เพราะเป็นค่าโปรโมชั่น ไม่ใช่ตัวเครื่อง
+            const iphoneRows = parsedRows.filter(r => {
+                const category = String(r[COL_CATEGORY] || '').trim().toLowerCase();
+                if (category !== 'iphone') return false;
+                const subCategory = String(r[COL_SUBCATEGORY] || '').trim().toLowerCase();
+                if (subCategory.includes('promo')) return false;
+                return true;
+            });
 
             if (!iphoneRows.length) {
-                showStatus(`ไม่พบรายการ iPhone ในคอลัมน์ "${modelCol}" ของไฟล์นี้`, 'error');
+                showStatus(`ไม่พบรายการเครื่อง iPhone ในคอลัมน์ "${COL_CATEGORY}" ของไฟล์นี้`, 'error');
                 calcBtn.disabled = false;
                 return;
             }
