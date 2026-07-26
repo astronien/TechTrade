@@ -597,8 +597,11 @@
                 salesByEmployee[key].count += 1;
             });
 
-            // 3. หาช่วงวันที่จากทั้งไฟล์ (ใช้กำหนดช่วงดึงยอดเทรด)
-            const dates = parsedRows.map(r => parseDateValue(r[dateCol])).filter(Boolean);
+            // 3. หาช่วงวันที่จากเฉพาะแถว iPhone ที่ขายได้ (ใช้กำหนดช่วงดึงยอดเทรด)
+            // สำคัญ: ต้องใช้ iphoneRows ไม่ใช่ parsedRows ทั้งไฟล์ — ถ้าไฟล์มีสินค้าอื่น (เคส, สาย,
+            // MacBook ฯลฯ) ที่วันที่กว้าง/แคบกว่าช่วงที่ขาย iPhone จริง จะทำให้ดึงยอดประเมินมาคนละ
+            // ช่วงเวลากับที่ควรเทียบ ตัวเลขยอดประเมินจะไม่ตรงกับที่รายงานทาง LINE bot (ซึ่งระบุวันที่ตรงๆ)
+            const dates = iphoneRows.map(r => parseDateValue(r[dateCol])).filter(Boolean);
             if (!dates.length) {
                 showStatus(`อ่านคอลัมน์วันที่ "${dateCol}" ไม่ได้ ตรวจรูปแบบวันที่ในไฟล์`, 'error');
                 calcBtn.disabled = false;
@@ -609,11 +612,12 @@
             const dateStart = formatDDMMYYYY(minDate);
             const dateEnd = formatDDMMYYYY(maxDate);
 
-            // 4. ถ้าไฟล์มีคอลัมน์สาขา ให้ดึงเฉพาะสาขาที่เจอในไฟล์ (เร็วกว่าดึงทุกสาขามาก)
+            // 4. ถ้าไฟล์มีคอลัมน์สาขา ให้ดึงเฉพาะสาขาที่มีการขาย iPhone จริง (ไม่ใช่ทุกสาขาในไฟล์
+            // เพราะสาขาที่ขายแค่ของแถม/สินค้าอื่นไม่เกี่ยวกับ attach rate — ดึงเพิ่มโดยไม่จำเป็นจะช้าเฉยๆ)
             let branchIds = [];
             if (headers.includes(COL_BRANCH)) {
                 const branchSet = new Set();
-                parsedRows.forEach(r => {
+                iphoneRows.forEach(r => {
                     const bid = extractBranchId(r[COL_BRANCH]);
                     if (bid) branchSet.add(bid);
                 });
