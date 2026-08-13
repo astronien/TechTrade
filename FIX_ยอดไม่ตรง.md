@@ -4,13 +4,36 @@
 
 ยอดรายเดือนของบางสาขาต่ำกว่าที่เห็นใน techswop เพราะสาขาบางแห่ง**ไม่เคยถูกดึงข้อมูลเข้า Turso** โดยระบบไม่แจ้งเตือนอะไรเลย เกิดจาก 2 ช่องโหว่
 
-### ช่องโหว่ที่ 1 — รายชื่อสาขาไม่รีเฟรชอัตโนมัติ
+### ช่องโหว่ที่ 1 — daily sync ไม่เคยจบ (สาเหตุหลัก)
+
+`/api/admin/auto-export-cron` รัน `run_daily_export()` ทั้งหมดใน HTTP request เดียว
+ซึ่งใช้เวลาเกิน 30 วินาทีเสมอ แต่ workflow ตั้ง `curl --max-time 30`
+
+ผลจากการตรวจ GitHub Actions ย้อนหลัง 400 runs (21 ก.ค. – 13 ส.ค. 2026)
+
+- วันปกติ job `auto-export` ล้มเหลว **1 ครั้งทุกวัน** ตอน 00:07–01:26 น. (exit 28 = curl timeout)
+- บางวันล้มเหลวรัวทั้งวัน แปลว่า sync ไม่เคยจบ → ข้อมูลวันนั้นหาย
+  - 13 ส.ค. — 0 สำเร็จ / 12 ล้มเหลว → ข้อมูลของ 12 ส.ค. ไม่มีเลย
+  - 10 ส.ค. — 1 สำเร็จ / 25 ล้มเหลว → ข้อมูลของ 9 ส.ค. ไม่ครบ
+  - 9 ส.ค. (5 fail) และ 7 ส.ค. (3 fail) — น่าสงสัย
+
+ที่แย่กว่านั้นคือ guard "already ran" ซึ่งเช็คจาก `auto_export_log`
+แถวล่าสุดที่ `status='success'` พลาดได้ 2 ทาง
+
+| สถานการณ์ | ผลลัพธ์ |
+|---|---|
+| ถูกฆ่าก่อน zone แรกเสร็จ | ไม่มี success เลย → ping ถัดไปเริ่มใหม่หมด → วนไม่จบทั้งวัน |
+| zone แรกๆ เสร็จแล้วถูกฆ่า | guard ติด → **zone ที่เหลือไม่ได้ sync ทั้งวัน แบบเงียบๆ** |
+
+เคสที่สองคือที่มาของ "ยอดบางสาขาไม่ตรง" โดยตรง — และเกิดซ้ำได้ทุกวัน
+
+### ช่องโหว่ที่ 2 — รายชื่อสาขาไม่รีเฟรชอัตโนมัติ
 
 `/api/admin/auto-export-cron` sync ยอดเข้า Turso ทุกวันอัตโนมัติ แต่รายชื่อสาขาต้อง**กดปุ่มอัปเดตเอง** (`/api/admin/update-branches`)
 
 สาขาที่เปิดใหม่ที่ techswop จะไม่โผล่ในระบบจนกว่าจะมีคนกดอัปเดต และต้องเพิ่มเข้า zone ด้วยมืออีกที ระหว่างนั้น cron จะรัน "สำเร็จ" ทุกวันโดยไม่รู้ว่าสาขานั้นมีอยู่
 
-### ช่องโหว่ที่ 2 — branch ID สองชุดที่ไม่ตรงกัน (ตัวการหลัก)
+### ช่องโหว่ที่ 3 — branch ID สองชุดที่ไม่ตรงกัน
 
 | ชุด | แหล่ง | รูปแบบ ID |
 |---|---|---|
@@ -41,6 +64,14 @@ python3 audit_zones.py --refresh --json report.json
 - **drift** — ID ที่ resolve ได้แต่ชี้ไปคนละสาขากับชุดเก่า = ร่องรอยการบันทึกด้วยชุดสำรอง
 - **unassigned** — สาขาที่มีจริงแต่ไม่อยู่ใน zone ไหนเลย
 - **timeline** — วันที่ยอด record ตกฮวบเทียบกับค่าเฉลี่ย 7 วันก่อนหน้า (จาก `auto_export_log`)
+
+ตรวจว่าวันไหน sync ไม่ครบ (มีข้อมูลตั้งแต่หลัง deploy รอบนี้เป็นต้นไป)
+
+```
+GET /api/admin/sync-progress?date=2026-08-12
+```
+
+บอกว่า zone ไหนเสร็จ zone ไหนค้าง พร้อม error ของแต่ละ zone
 
 ดูประวัติการแก้ zone เพิ่มเติมได้ที่ (มีข้อมูลตั้งแต่หลัง deploy รอบนี้เป็นต้นไป)
 
@@ -140,6 +171,12 @@ python3 audit_zones.py --refresh
 | `auto_daily_export.py` | reconcile แค่ Eve↔Turso | เพิ่ม `verify_zone_branches()` เช็คว่า ID ทุกตัว resolve ได้ ไม่ได้ = warning + แจ้ง Telegram |
 | รายชื่อสาขา | กดอัปเดตเอง | cron `/api/admin/refresh-branches-cron` วันละครั้ง 23:30 น. + แจ้งเตือนสาขาใหม่ที่ยังไม่อยู่ใน zone |
 | Backfill | รันรวดเดียว ชน timeout แล้วไม่รู้ว่าค้างวันไหน | job ที่มี cursor ใน `backfill_jobs` ทำต่อได้ + บันทึก progress ทุกวัน |
+| `run_daily_export()` | รันทุก zone รวดเดียว โดนตัดกลางคันแล้วเริ่มใหม่ | ทำเท่าที่ทันใน budget 240s บันทึก `sync_progress` ราย zone แล้วทำต่อ |
+| guard "already ran" | ดู log แถวล่าสุดที่ `status='success'` | เช็คจาก `sync_progress` ว่าครบทุก zone ของวันนั้นหรือยัง |
+| zone ที่ error | ค้างบล็อกทั้งวัน | ลองใหม่ได้ 3 ครั้ง แล้ว `failed_final` ข้ามไป zone อื่น |
+| Eve คืน 0 รายการ | `delete_zone_records()` ลบข้อมูลเดิมทิ้ง | ถ้า Turso ยังมีข้อมูล → ไม่ลบ + ขึ้น warning |
+| workflow `auto-export` | `--max-time 30` ยิงครั้งเดียว | `--max-time 300` วนจนครบทุก zone |
+| sync ไม่จบ | เงียบสนิท | แจ้ง Telegram เมื่อเลยเวลา schedule เกิน 6 ชั่วโมงแล้วยังไม่ครบ |
 
 ตั้งเวลา cron รีเฟรชสาขาได้ที่ `system_settings` key = `branch_refresh_time` (รูปแบบ `HH:MM`, default `23:30`) ควรตั้งให้เร็วกว่าเวลา auto-export
 
@@ -154,3 +191,15 @@ python3 audit_zones.py --refresh
 - `templates/index.html` — branch list trust guard
 - `.github/workflows/techtrade-cron.yml` — job `refresh-branches`
 - `.github/workflows/backfill.yml` *(ใหม่)* — workflow_dispatch วน backfill จนจบ
+- `test_sync_resume.py`, `test_backfill.py`, `test_zone_fixes.py` *(ใหม่)* — เทสต์ (mock ทั้งหมด ไม่แตะ production)
+
+## วันที่ควร backfill ก่อน
+
+จากผลตรวจ GitHub Actions — ยืนยันอีกครั้งด้วย `/api/admin/sync-progress` หรือ `auto_export_log`
+
+| วันของข้อมูล | เหตุผล |
+|---|---|
+| 12 ส.ค. 2026 | sync ไม่เคยจบเลย |
+| 9 ส.ค. 2026 | ล้มเหลว 25 ครั้ง |
+| 8 ส.ค. 2026 | ล้มเหลว 5 ครั้ง |
+| 6 ส.ค. 2026 | ล้มเหลว 3 ครั้ง |

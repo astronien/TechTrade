@@ -47,7 +47,7 @@ def run_local(start_date, end_date, dry_run):
     except ImportError:
         pass
 
-    from auto_daily_export import run_daily_export
+    from auto_daily_export import run_daily_export, clear_sync_progress
 
     total_days = (end_date - start_date).days + 1
     dates = [start_date + timedelta(days=i) for i in range(total_days)]
@@ -71,16 +71,35 @@ def run_local(start_date, end_date, dry_run):
         day_started = time.time()
         print(f"\n[{idx}/{total_days}] {day_str}")
         try:
-            res = run_daily_export(force=True,
-                                   target_dt=datetime.combine(d, datetime.min.time()))
-            records = res.get('total_records', 0) or 0
-            total_records += records
-            if res.get('sync_completed'):
-                print(f"   ✅ {records:,} records ({time.time() - day_started:.0f}s)")
+            # ล้างสถานะ sync ของวันนั้นก่อน เพื่อบังคับเขียนทับทุก zone
+            clear_sync_progress(d)
+
+            day_records = 0
+            day_ok = True
+            # run_daily_export ทำเท่าที่ทันใน budget แล้วคืน completed=False
+            # ถ้ายังไม่ครบทุก zone -> วนต่อจนครบ
+            for attempt in range(1, 51):
+                res = run_daily_export(
+                    force=True,
+                    target_dt=datetime.combine(d, datetime.min.time()),
+                    resume=True,
+                )
+                day_records += res.get('total_records', 0) or 0
+                if not res.get('sync_completed'):
+                    day_ok = False
+                if res.get('completed'):
+                    break
+                print(f"   ⏳ เหลืออีก {res.get('zones_remaining')} zone — ทำต่อ (รอบ {attempt + 1})")
+            else:
+                day_ok = False
+                print("   ⚠️ วนครบ 50 รอบแล้วยังไม่ครบทุก zone")
+
+            total_records += day_records
+            if day_ok:
+                print(f"   ✅ {day_records:,} records ({time.time() - day_started:.0f}s)")
             else:
                 failed.append(day_str)
-                print(f"   ⚠️ sync ไม่สมบูรณ์: errors={res.get('total_errors')}, "
-                      f"warnings={res.get('total_warnings')}")
+                print(f"   ⚠️ sync ไม่สมบูรณ์ ({day_records:,} records)")
         except Exception as e:
             failed.append(day_str)
             print(f"   ❌ {e}")

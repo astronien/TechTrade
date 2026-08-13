@@ -125,6 +125,32 @@ def init_database():
             )
         """)
         
+        # สร้างตาราง sync_progress (สถานะ sync ราย zone ต่อวัน)
+        # ใช้ 2 อย่าง:
+        #   1. resume — รู้ว่า zone ไหนทำแล้ว จะได้ไม่เริ่มใหม่เมื่อ request ถูกฆ่า
+        #   2. guard  — เช็คว่า "ครบทุก zone ของวันนั้นหรือยัง" แทนการดู log
+        #      แถวล่าสุดที่ status='success' ซึ่งพลาดได้ทั้งสองทาง
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sync_progress (
+                id SERIAL PRIMARY KEY,
+                sync_date DATE NOT NULL,
+                zone_id VARCHAR(255) NOT NULL,
+                zone_name VARCHAR(255) DEFAULT '',
+                status VARCHAR(20) DEFAULT 'pending',
+                records INTEGER DEFAULT 0,
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (sync_date, zone_id)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_sync_progress_date ON sync_progress(sync_date)")
+        # เผื่อ DB ที่สร้าง backfill_jobs ไว้ก่อนมีคอลัมน์นี้
+        try:
+            cur.execute("ALTER TABLE backfill_jobs ADD COLUMN IF NOT EXISTS cleared_date DATE")
+        except Exception:
+            pass
+
         # สร้างตาราง backfill_jobs (งาน re-sync ย้อนหลังแบบทำต่อได้)
         # เก็บ cursor_date ไว้เพื่อให้ทำต่อจากวันที่ค้างได้เมื่อชน timeout ของ Vercel
         cur.execute("""
@@ -134,6 +160,7 @@ def init_database():
                 date_start DATE NOT NULL,
                 date_end DATE NOT NULL,
                 cursor_date DATE,
+                cleared_date DATE,
                 status VARCHAR(20) DEFAULT 'pending',
                 total_days INTEGER DEFAULT 0,
                 days_done INTEGER DEFAULT 0,
@@ -4520,76 +4547,173 @@ def test_auto_export():
 
 @app.route('/api/admin/auto-export-cron', methods=['GET', 'POST'])
 def vercel_cron_auto_export():
-    """Endpoint สำหรับ GitHub Actions Cron ยิงมาทุกๆ 15 นาที สำหรับ auto-export
-    ใช้ background thread เพื่อไม่ให้ Vercel timeout (Hobby plan = 10s)"""
+    """Cron endpoint สำหรับ auto-export (GitHub Actions ยิงมาทุก 15 นาที)
+
+    ทำงานแบบ "ทำต่อได้": แต่ละครั้งจะ sync เท่าที่ทันใน time budget
+    (240 วินาทีบน Vercel) แล้วบันทึกว่า zone ไหนเสร็จแล้วลง sync_progress
+    ครั้งถัดไปทำต่อจาก zone ที่ค้าง — ไม่เริ่มใหม่
+
+    เดิม endpoint นี้รัน run_daily_export() ทั้งหมดใน request เดียว ทำให้
+      - curl --max-time 30 ของ workflow ตัดทิ้งทุกครั้ง (exit 28)
+      - Vercel ฆ่า function ที่ 300s ถ้า sync ไม่จบ
+      - guard "already ran" ดูจาก auto_export_log แถวล่าสุดที่ status='success'
+        ซึ่งพลาดได้ 2 ทาง: ไม่มี success เลย -> วนรันใหม่ทั้งวัน
+        หรือมีบาง zone success -> ข้ามทั้งวัน ทำให้ zone ที่เหลือไม่มีข้อมูล
+    ตอนนี้เช็คความครบจาก sync_progress ราย zone แทน
+
+    Query params:
+        force=1  ข้ามการเช็คเวลา (ยังเช็คว่า sync ครบแล้วหรือยัง)
+    """
     try:
-        # Check authorization
         cron_secret = os.environ.get("CRON_SECRET", "")
         auth_header = request.headers.get('Authorization', '')
         if cron_secret and auth_header != f'Bearer {cron_secret}':
             return jsonify({'success': False, 'message': 'Unauthorized'}), 401
-        
+
         config = get_auto_export_config_from_db()
         if not config or not config.get('enabled'):
             return jsonify({'success': False, 'message': 'Auto-export is disabled'}), 200
-        
+
+        force = request.args.get('force', '') in ('1', 'true', 'True')
+
         schedule_time = config.get('schedule_time', '00:05')
-        target_hour, target_minute = schedule_time.split(':')
-        
+        try:
+            target_hour, target_minute = [int(x) for x in schedule_time.split(':')]
+        except Exception:
+            target_hour, target_minute = 0, 5
+
         bkk_tz = pytz.timezone('Asia/Bangkok')
         now_bkk = datetime.now(bkk_tz)
-        
-        target_dt_today = now_bkk.replace(hour=int(target_hour), minute=int(target_minute), second=0, microsecond=0)
-        if now_bkk < target_dt_today:
-            target_dt_past = target_dt_today - timedelta(days=1)
-        else:
-            target_dt_past = target_dt_today
-        
-        log_msg = f"📤 Export Cron Ping: Now={now_bkk.strftime('%H:%M')}, Target={schedule_time}"
+
+        # รอบ schedule ล่าสุดที่ผ่านมาแล้ว
+        schedule_today = now_bkk.replace(hour=target_hour, minute=target_minute,
+                                         second=0, microsecond=0)
+        last_schedule = schedule_today if now_bkk >= schedule_today else schedule_today - timedelta(days=1)
+
+        # รอบ schedule นั้นมีหน้าที่ sync ข้อมูล "ของเมื่อวาน" เทียบกับตัวมันเอง
+        sync_date = (last_schedule - timedelta(days=1)).date()
+
+        log_msg = (f"📤 Export Cron Ping: Now={now_bkk.strftime('%H:%M')}, "
+                   f"Target={schedule_time}, SyncDate={sync_date}")
         print(log_msg)
         log_debug(log_msg)
-        
-        # Check if already ran for this schedule
-        conn = get_db_connection()
-        already_run = False
-        if conn:
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT run_at FROM auto_export_log WHERE status='success' ORDER BY run_at DESC LIMIT 1")
-                last_log = cur.fetchone()
-                if last_log and last_log.get('run_at'):
-                    last_run_utc = last_log['run_at']
-                    if last_run_utc.tzinfo is None:
-                        last_run_utc = last_run_utc.replace(tzinfo=pytz.UTC)
-                    last_run_bkk = last_run_utc.astimezone(bkk_tz)
-                    if last_run_bkk >= target_dt_past:
-                        already_run = True
-                cur.close()
-            except Exception as db_e:
-                print(f"❌ DB Check Error: {db_e}")
-            finally:
-                conn.close()
-        
-        if not already_run:
-            log_debug(f"✅ Time to run! Executing auto-export synchronously...")
-            print(f"✅ Time to run! Executing auto-export synchronously...")
-            
-            try:
-                from auto_daily_export import run_daily_export
-                result = run_daily_export(force=True)
-                log_debug(f"📤 Export result: sync_completed={result.get('sync_completed')}, records={result.get('total_records')}")
-                return jsonify({'success': True, 'message': 'Export completed successfully', 'result': result}), 200
-            except Exception as e:
-                log_debug(f"❌ Export execution error: {str(e)}")
-                return jsonify({'success': False, 'error': str(e)}), 500
-        else:
-            return jsonify({'success': True, 'message': f'Skipped. Already ran for schedule {schedule_time}'}), 200
-    
+
+        from auto_daily_export import is_sync_complete, run_daily_export
+
+        complete, zones_done, zones_total, pending = is_sync_complete(sync_date)
+
+        if complete and not force:
+            return jsonify({
+                'success': True,
+                'completed': True,
+                'sync_date': str(sync_date),
+                'zones_done': zones_done,
+                'zones_total': zones_total,
+                'message': f'Skipped. sync ของ {sync_date} ครบทุก zone แล้ว ({zones_done}/{zones_total})'
+            }), 200
+
+        print(f"✅ Time to run! sync {sync_date} — เหลือ {len(pending)}/{zones_total} zone")
+        log_debug(f"✅ Running chunk for {sync_date}, pending={len(pending)}")
+
+        try:
+            result = run_daily_export(
+                force=True,
+                target_dt=datetime.combine(sync_date, datetime.min.time()),
+            )
+        except Exception as e:
+            log_debug(f"❌ Export execution error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+        log_debug(f"📤 Export chunk: completed={result.get('completed')}, "
+                  f"remaining={result.get('zones_remaining')}, "
+                  f"records={result.get('total_records')}")
+
+        # แจ้งเตือนถ้าเลยเวลามานานแล้วยังไม่ครบ (กันปัญหาเงียบแบบเดิม)
+        if not result.get('completed'):
+            hours_late = (now_bkk - last_schedule).total_seconds() / 3600
+            if hours_late >= 6:
+                try:
+                    cfg = get_auto_cancel_config() or {}
+                    bt, cid = cfg.get('telegram_bot_token', ''), cfg.get('telegram_chat_id', '')
+                    if bt and cid:
+                        send_telegram_notification(bt, cid, (
+                            f"🚨 <b>Auto Sync ยังไม่เสร็จ</b>\n"
+                            f"📅 ข้อมูลวันที่: {sync_date}\n"
+                            f"⏰ เลยเวลา {schedule_time} มาแล้ว {hours_late:.0f} ชั่วโมง\n"
+                            f"📊 ทำไป {result.get('zones_done')}/{result.get('total_zones')} zone\n"
+                            f"⏳ เหลือ: {', '.join(result.get('zones_pending_names', [])[:5])}"
+                        ))
+                except Exception as tg_err:
+                    print(f"⚠️ Telegram alert error: {tg_err}")
+
+        return jsonify({
+            'success': True,
+            'completed': bool(result.get('completed')),
+            'sync_date': str(sync_date),
+            'zones_done': result.get('zones_done'),
+            'zones_total': result.get('total_zones'),
+            'zones_remaining': result.get('zones_remaining'),
+            'total_records': result.get('total_records'),
+            'message': ('sync ครบทุก zone แล้ว' if result.get('completed')
+                        else f"ทำไป {result.get('zones_done')}/{result.get('total_zones')} zone "
+                             f"— ยิง endpoint นี้ซ้ำเพื่อทำต่อ"),
+            'result': result,
+        }), 200
+
     except Exception as e:
         print(f"❌ Export Cron Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/sync-progress', methods=['GET'])
+def get_sync_progress_api():
+    """ดูสถานะ sync ราย zone ของวันที่ระบุ
+
+    ?date=2026-08-12 (ไม่ระบุ = เมื่อวาน)
+    ใช้ตรวจว่าวันไหน sync ไม่ครบ จะได้รู้ว่าต้อง backfill วันไหนบ้าง
+    """
+    try:
+        raw = request.args.get('date', '').strip()
+        if raw:
+            try:
+                target = _parse_backfill_date(raw)
+            except ValueError as ve:
+                return jsonify({'success': False, 'error': str(ve)}), 400
+        else:
+            bkk_tz = pytz.timezone('Asia/Bangkok')
+            target = (datetime.now(bkk_tz) - timedelta(days=1)).date()
+
+        from auto_daily_export import is_sync_complete, get_sync_progress
+
+        complete, done, total, pending = is_sync_complete(target)
+        progress = get_sync_progress(target)
+
+        return jsonify({
+            'success': True,
+            'date': str(target),
+            'completed': complete,
+            'zones_done': done,
+            'zones_total': total,
+            'zones_pending': pending,
+            'detail': [
+                {
+                    'zone_id': zid,
+                    'zone_name': p.get('zone_name'),
+                    'status': p.get('status'),
+                    'records': p.get('records'),
+                    'attempts': p.get('attempts'),
+                    'last_error': p.get('last_error'),
+                }
+                for zid, p in progress.items()
+            ],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/admin/refresh-branches-cron', methods=['GET', 'POST'])
 def refresh_branches_cron():
@@ -4779,7 +4903,8 @@ def _load_backfill_job(job_id):
 
 
 def _save_backfill_progress(job_id, cursor_date, status, days_done,
-                            days_failed, total_records, last_error, results):
+                            days_failed, total_records, last_error, results,
+                            cleared_date=None):
     conn = get_db_connection()
     if not conn:
         return False
@@ -4789,10 +4914,11 @@ def _save_backfill_progress(job_id, cursor_date, status, days_done,
             UPDATE backfill_jobs
             SET cursor_date = %s, status = %s, days_done = %s, days_failed = %s,
                 total_records = %s, last_error = %s, results = %s,
-                updated_at = CURRENT_TIMESTAMP
+                cleared_date = %s, updated_at = CURRENT_TIMESTAMP
             WHERE job_id = %s
         """, (cursor_date, status, days_done, days_failed, total_records,
-              (last_error or '')[:2000], json.dumps(results, ensure_ascii=False), job_id))
+              (last_error or '')[:2000], json.dumps(results, ensure_ascii=False),
+              cleared_date, job_id))
         conn.commit()
         cur.close()
         conn.close()
@@ -4863,6 +4989,7 @@ def _run_backfill_chunk(job):
     chunk_results = []
     durations = []
     last_error = ''
+    cleared_date = job.get('cleared_date')
 
     print(f"🔁 [Backfill {job_id}] chunk start at {cursor} (budget {budget}s)")
 
@@ -4878,31 +5005,59 @@ def _run_backfill_chunk(job):
         day_str = cursor.strftime('%d/%m/%Y')
         print(f"🔁 [Backfill {job_id}] {day_str} ({days_done + 1}/{job.get('total_days')})")
 
+        day_completed = False
         try:
-            res = run_daily_export(force=True, target_dt=datetime.combine(cursor, datetime.min.time()))
+            # ครั้งแรกที่แตะวันนี้ ต้องล้างสถานะ sync ของวันนั้นก่อน
+            # ไม่งั้น resume จะข้าม zone ที่ daily sync เคยทำไปแล้ว ทำให้เขียนทับไม่ครบ
+            if cleared_date != cursor:
+                from auto_daily_export import clear_sync_progress
+                clear_sync_progress(cursor)
+                cleared_date = cursor
+
+            remaining_budget = max(30, budget - (time.time() - started))
+            res = run_daily_export(
+                force=True,
+                target_dt=datetime.combine(cursor, datetime.min.time()),
+                time_budget=remaining_budget,
+                resume=True,
+            )
+            day_completed = bool(res.get('completed'))
             records = res.get('total_records', 0) or 0
-            ok = bool(res.get('sync_completed'))
             total_records += records
-            if not ok:
-                days_failed += 1
-                last_error = f"{day_str}: sync ไม่สมบูรณ์"
             entry = {
                 'date': day_str,
-                'success': ok,
+                'success': bool(res.get('sync_completed')) and day_completed,
+                'completed': day_completed,
                 'records': records,
-                'zones_synced': res.get('total_synced'),
+                'zones_done': res.get('zones_done'),
+                'zones_remaining': res.get('zones_remaining'),
                 'errors': res.get('total_errors'),
                 'warnings': res.get('total_warnings'),
             }
+            if not res.get('sync_completed'):
+                last_error = f"{day_str}: sync ไม่สมบูรณ์"
         except Exception as day_err:
-            days_failed += 1
             last_error = f"{day_str}: {day_err}"
             print(f"❌ [Backfill {job_id}] {day_str} failed: {day_err}")
-            entry = {'date': day_str, 'success': False, 'records': 0, 'error': str(day_err)}
+            entry = {'date': day_str, 'success': False, 'completed': True,
+                     'records': 0, 'error': str(day_err)}
+            day_completed = True   # ไม่วนซ้ำวันที่ error เอง ปล่อยผ่านไปวันถัดไป
 
-        days_done += 1
         durations.append(time.time() - day_started)
         chunk_results.append(entry)
+
+        if not day_completed:
+            # วันนี้ยังไม่ครบทุก zone — ไม่ขยับ cursor เพื่อให้รอบหน้าทำ zone ที่เหลือต่อ
+            print(f"⏸️ [Backfill {job_id}] {day_str} ยังเหลือ "
+                  f"{entry.get('zones_remaining')} zone — รอบหน้าทำต่อวันเดิม")
+            _save_backfill_progress(job_id, cursor, 'running', days_done,
+                                    days_failed, total_records, last_error,
+                                    (results + chunk_results)[-200:], cleared_date)
+            break
+
+        if not entry.get('success'):
+            days_failed += 1
+        days_done += 1
         results.append(entry)
         cursor = cursor + timedelta(days=1)
 
@@ -4913,7 +5068,7 @@ def _run_backfill_chunk(job):
             None if finished else cursor,
             'completed' if finished else 'running',
             days_done, days_failed, total_records, last_error,
-            results[-200:],
+            results[-200:], cleared_date,
         )
 
     job = _load_backfill_job(job_id) or job

@@ -29,23 +29,40 @@ jobs:
 
   run-auto-export:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - name: Trigger Auto-Export Endpoint
+      # endpoint ทำงานเป็นก้อน (240s ต่อครั้ง) แล้วบันทึกว่า zone ไหนเสร็จแล้ว
+      # ที่นี่จึงวนเรียกจนกว่าจะครบทุก zone ของวันนั้น
+      # เดิมใช้ --max-time 30 ยิงครั้งเดียว -> curl ตัดทิ้งทุกครั้ง (exit 28)
+      # และ sync ไม่เคยจบ ทำให้ข้อมูลบางวันหายไปเงียบๆ
+      - name: Run auto-export until complete
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 30 -X POST "https://report-trade.vercel.app/api/admin/auto-export-cron" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          echo "Status Code: $HTTP_CODE"
-          echo "Response Body: $BODY"
-          
-          # Allow 200 (Ran successfully or skipped because it's not time yet)
-          if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "Failed to trigger auto-export. Exiting with error."
-            exit 1
-          fi
+          set -uo pipefail
+          URL="https://report-trade.vercel.app/api/admin/auto-export-cron"
+
+          for i in $(seq 1 40); do
+            HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 300 \
+              -X POST "$URL" -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+
+            echo "[รอบ $i] HTTP $HTTP_CODE"
+            head -c 600 /tmp/resp.json; echo ""
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "auto-export ตอบกลับผิดปกติ"
+              exit 1
+            fi
+
+            COMPLETED=$(python3 -c 'import json;print(json.load(open("/tmp/resp.json")).get("completed",True))' 2>/dev/null || echo "True")
+            if [ "$COMPLETED" = "True" ]; then
+              echo "sync ครบทุก zone แล้ว"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "ครบ 40 รอบแล้ว sync ยังไม่จบ — ตรวจที่ /api/admin/sync-progress"
+          exit 1
 
   refresh-branches:
     runs-on: ubuntu-latest
