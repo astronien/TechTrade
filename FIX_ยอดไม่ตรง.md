@@ -4,7 +4,39 @@
 
 ยอดรายเดือนของบางสาขาต่ำกว่าที่เห็นใน techswop เพราะสาขาบางแห่ง**ไม่เคยถูกดึงข้อมูลเข้า Turso** โดยระบบไม่แจ้งเตือนอะไรเลย เกิดจาก 2 ช่องโหว่
 
-### ช่องโหว่ที่ 1 — daily sync ไม่เคยจบ (สาเหตุหลัก)
+### ช่องโหว่ที่ 1 — เขียนลง Turso ไม่ลง แต่รายงานว่าสำเร็จ (ร้ายแรงที่สุด)
+
+`_execute_batch_http()` ใน `turso_handler.py` มีปัญหา 3 อย่างพร้อมกัน
+
+```python
+def _execute_batch_http(self, stmts):
+    ...
+    try:
+        requests.post(f"{url}/v2/pipeline", ..., json={"requests": reqs}, timeout=30)
+        return True          # <- ไม่เคยเช็คว่าสำเร็จจริงไหม
+    except: return False
+```
+
+1. ส่งทุก statement ในคำขอเดียว — บางวันเกิน 1,800 รายการ ด้วย `timeout=30`
+   จึง timeout แทบทุกครั้ง แล้วเขียนไม่ลงเลยสักรายการ
+2. ไม่เช็ค `status_code` และไม่เช็ค error รายคำสั่ง — Turso ตอบ error ก็ยังคืน `True`
+   ผู้เรียกรายงานว่าเขียนครบ
+3. `except:` เปล่าๆ กลืน exception ทุกชนิด
+
+หลักฐานจาก production (13 ส.ค. 2026)
+
+```
+GET /api/admin/sync-progress?date=2026-08-12
+
+zone Studio7 | status: done_warning
+Reconcile mismatch: Eve=1885, inserted=0, Turso=1102, missing=681
+```
+
+ดึงจาก Eve ได้ครบ 1,885 รายการ แต่เขียนลง Turso ได้ **0** — ในฐานมีอยู่ 1,102 จากการเขียนสำเร็จบางส่วนครั้งก่อน ขาดไป 681 รายการ
+
+นี่คือเหตุผลที่ยอดขาดแบบไม่มีรูปแบบตายตัว: ขึ้นกับว่าวันไหน batch ใหญ่พอจะ timeout
+
+### ช่องโหว่ที่ 2 — daily sync ไม่เคยจบ
 
 `/api/admin/auto-export-cron` รัน `run_daily_export()` ทั้งหมดใน HTTP request เดียว
 ซึ่งใช้เวลาเกิน 30 วินาทีเสมอ แต่ workflow ตั้ง `curl --max-time 30`
@@ -27,13 +59,13 @@
 
 เคสที่สองคือที่มาของ "ยอดบางสาขาไม่ตรง" โดยตรง — และเกิดซ้ำได้ทุกวัน
 
-### ช่องโหว่ที่ 2 — รายชื่อสาขาไม่รีเฟรชอัตโนมัติ
+### ช่องโหว่ที่ 3 — รายชื่อสาขาไม่รีเฟรชอัตโนมัติ
 
 `/api/admin/auto-export-cron` sync ยอดเข้า Turso ทุกวันอัตโนมัติ แต่รายชื่อสาขาต้อง**กดปุ่มอัปเดตเอง** (`/api/admin/update-branches`)
 
 สาขาที่เปิดใหม่ที่ techswop จะไม่โผล่ในระบบจนกว่าจะมีคนกดอัปเดต และต้องเพิ่มเข้า zone ด้วยมืออีกที ระหว่างนั้น cron จะรัน "สำเร็จ" ทุกวันโดยไม่รู้ว่าสาขานั้นมีอยู่
 
-### ช่องโหว่ที่ 3 — branch ID สองชุดที่ไม่ตรงกัน
+### ช่องโหว่ที่ 4 — branch ID สองชุดที่ไม่ตรงกัน
 
 | ชุด | แหล่ง | รูปแบบ ID |
 |---|---|---|
@@ -171,6 +203,8 @@ python3 audit_zones.py --refresh
 | `auto_daily_export.py` | reconcile แค่ Eve↔Turso | เพิ่ม `verify_zone_branches()` เช็คว่า ID ทุกตัว resolve ได้ ไม่ได้ = warning + แจ้ง Telegram |
 | รายชื่อสาขา | กดอัปเดตเอง | cron `/api/admin/refresh-branches-cron` วันละครั้ง 23:30 น. + แจ้งเตือนสาขาใหม่ที่ยังไม่อยู่ใน zone |
 | Backfill | รันรวดเดียว ชน timeout แล้วไม่รู้ว่าค้างวันไหน | job ที่มี cursor ใน `backfill_jobs` ทำต่อได้ + บันทึก progress ทุกวัน |
+| `_execute_batch_http()` | ส่งทุก statement ในคำขอเดียว timeout 30s แล้ว `return True` เสมอ | แบ่งก้อนละ 200 timeout 60s retry 2 ครั้ง คืนจำนวนที่เขียนสำเร็จจริง |
+| `insert_trades_batch()` | คืน `len(stmts)` โดยไม่ตรวจว่าเขียนลงจริง | คืนจำนวนจริง เพื่อให้ `reconcile_snapshot()` จับ mismatch ได้ |
 | `run_daily_export()` | รันทุก zone รวดเดียว โดนตัดกลางคันแล้วเริ่มใหม่ | ทำเท่าที่ทันใน budget 240s บันทึก `sync_progress` ราย zone แล้วทำต่อ |
 | guard "already ran" | ดู log แถวล่าสุดที่ `status='success'` | เช็คจาก `sync_progress` ว่าครบทุก zone ของวันนั้นหรือยัง |
 | zone ที่ error | ค้างบล็อกทั้งวัน | ลองใหม่ได้ 3 ครั้ง แล้ว `failed_final` ข้ามไป zone อื่น |
@@ -191,7 +225,10 @@ python3 audit_zones.py --refresh
 - `templates/index.html` — branch list trust guard
 - `.github/workflows/techtrade-cron.yml` — job `refresh-branches`
 - `.github/workflows/backfill.yml` *(ใหม่)* — workflow_dispatch วน backfill จนจบ
-- `test_sync_resume.py`, `test_backfill.py`, `test_zone_fixes.py` *(ใหม่)* — เทสต์ (mock ทั้งหมด ไม่แตะ production)
+- `turso_handler.py` — แก้ `_execute_batch_http()` และ `insert_trades_batch()`
+- `test_sync_resume.py`, `test_backfill.py`, `test_zone_fixes.py`, `test_turso_insert.py` *(ใหม่)* — เทสต์ (mock ทั้งหมด ไม่แตะ production)
+
+ปรับพฤติกรรมการเขียนได้ด้วย env: `TURSO_BATCH_SIZE` (200), `TURSO_HTTP_TIMEOUT` (60), `TURSO_MAX_RETRIES` (2)
 
 ## วันที่ควร backfill ก่อน
 

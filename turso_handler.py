@@ -9,6 +9,13 @@ from constants import CONFIRMED_STATUSES
 # ใช้สร้างเงื่อนไข SQL IN (...) จากค่าคงที่ชุดเดียวกับที่รายงานอื่นใช้ (ไม่ใช่ user input ไม่มีความเสี่ยง SQL injection)
 CONFIRMED_STATUSES_SQL = ', '.join(f"'{s}'" for s in CONFIRMED_STATUSES)
 
+# ขนาดก้อนของการเขียนแบบ batch
+# เดิมส่งทุก statement (บางวันเกิน 1,800 รายการ) ไปใน HTTP request เดียว
+# ด้วย timeout 30 วินาที ทำให้ timeout ทุกครั้งแล้วเขียนไม่ลงเลย
+TURSO_BATCH_SIZE = int(os.getenv('TURSO_BATCH_SIZE', '200'))
+TURSO_HTTP_TIMEOUT = int(os.getenv('TURSO_HTTP_TIMEOUT', '60'))
+TURSO_MAX_RETRIES = int(os.getenv('TURSO_MAX_RETRIES', '2'))
+
 # Safe import for libsql_client to prevent crashes on incompatible environments (like Vercel)
 try:
     import libsql_client
@@ -792,32 +799,110 @@ class TursoHandler:
 
             if stmts:
                 # ลองแบบ Batch ก่อน ถ้ามี client และไม่พัง
+                # ⚠️ ต้องคืน "จำนวนที่เขียนสำเร็จจริง" เท่านั้น
+                # ถ้าคืน len(stmts) ทั้งที่เขียนไม่ลง reconcile จะไม่จับได้
                 try:
                     if self.client and HAS_LIBSQL:
-                        self.client.batch(stmts)
-                        return len(stmts)
-                    else:
-                        return len(stmts) if self._execute_batch_http(stmts) else 0
+                        written = 0
+                        for start in range(0, len(stmts), TURSO_BATCH_SIZE):
+                            chunk = stmts[start:start + TURSO_BATCH_SIZE]
+                            res = self.client.batch(chunk)
+                            written += len(res) if isinstance(res, (list, tuple)) else len(chunk)
+                        if written < len(stmts):
+                            print(f"⚠️ [Turso] client.batch เขียนได้ {written}/{len(stmts)} รายการ")
+                        return written
+                    return self._execute_batch_http(stmts)
                 except Exception as e:
-                    if "505" in str(e) or "Invalid response status" in str(e) or "not defined" in str(e):
-                        print("🔄 [Turso] Batch Error or 505. Using HTTP Fallback...")
-                        return len(stmts) if self._execute_batch_http(stmts) else 0
-                    print(f"❌ [Turso] Insert batch error: {e}")
-                    return 0
+                    print(f"🔄 [Turso] Batch error ({type(e).__name__}: {e}) — ใช้ HTTP fallback")
+                    return self._execute_batch_http(stmts)
             return 0
         except Exception as e:
             print(f"❌ [Turso] insert_trades_batch outer error: {e}")
             return 0
 
     def _execute_batch_http(self, stmts):
+        """ส่งคำสั่งเป็นก้อนผ่าน HTTP pipeline และ **ตรวจผลจริง**
+
+        เวอร์ชันเดิมมีปัญหาร้ายแรง 3 อย่าง ทำให้ข้อมูลหายแบบเงียบๆ:
+          1. ส่งทุก statement ในคำขอเดียว (บางวันเกิน 1,800 รายการ)
+             ด้วย timeout 30 วินาที -> timeout แล้วเขียนไม่ลงเลย
+          2. ไม่เช็ค status_code และไม่เช็ค error รายคำสั่ง
+             -> Turso ตอบ error ก็ยัง return True ผู้เรียกนึกว่าสำเร็จ
+          3. except เปล่าๆ กลืน exception ทุกชนิด
+
+        Returns:
+            int: จำนวน statement ที่เขียนสำเร็จจริง
+        """
+        if not stmts:
+            return 0
+
         url = self.url
-        if url.startswith("libsql://"): url = url.replace("libsql://", "https://")
-        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
-        reqs = [{"type": "execute", "stmt": {"sql": s.sql, "args": self._format_args(s.args)}} for s in stmts]
-        try:
-            requests.post(f"{url}/v2/pipeline", headers=headers, json={"requests": reqs}, timeout=30)
-            return True
-        except: return False
+        if not url:
+            return 0
+        if url.startswith("libsql://"):
+            url = url.replace("libsql://", "https://")
+
+        headers = {"Authorization": f"Bearer {self.token}",
+                   "Content-Type": "application/json"}
+
+        total_ok = 0
+        total_failed = 0
+
+        for start in range(0, len(stmts), TURSO_BATCH_SIZE):
+            chunk = stmts[start:start + TURSO_BATCH_SIZE]
+            reqs = [{"type": "execute",
+                     "stmt": {"sql": s.sql, "args": self._format_args(s.args)}}
+                    for s in chunk]
+
+            chunk_ok = 0
+            last_err = ''
+
+            for attempt in range(TURSO_MAX_RETRIES + 1):
+                try:
+                    resp = requests.post(f"{url}/v2/pipeline", headers=headers,
+                                         json={"requests": reqs},
+                                         timeout=TURSO_HTTP_TIMEOUT)
+
+                    if resp.status_code != 200:
+                        last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        continue
+
+                    try:
+                        results = resp.json().get('results', [])
+                    except Exception as pe:
+                        last_err = f"parse error: {pe}"
+                        continue
+
+                    errors = [r for r in results if r.get('type') == 'error']
+                    chunk_ok = sum(1 for r in results if r.get('type') == 'ok')
+
+                    if errors:
+                        msg = errors[0].get('error', {}).get('message', 'unknown')
+                        last_err = f"{len(errors)} statement ผิดพลาด เช่น: {msg[:200]}"
+                        # error ระดับคำสั่งมักไม่หายเองจากการ retry -> ไม่ลองซ้ำ
+                        break
+
+                    if chunk_ok < len(chunk):
+                        last_err = (f"Turso ตอบกลับ {chunk_ok}/{len(chunk)} คำสั่ง "
+                                    f"(ไม่ครบ)")
+                    break
+
+                except Exception as e:
+                    last_err = f"{type(e).__name__}: {e}"
+                    if attempt < TURSO_MAX_RETRIES:
+                        print(f"⚠️ [Turso] batch chunk {start // TURSO_BATCH_SIZE + 1} "
+                              f"ล้มเหลว ({last_err}) — ลองใหม่ครั้งที่ {attempt + 2}")
+
+            total_ok += chunk_ok
+            failed_here = len(chunk) - chunk_ok
+            if failed_here:
+                total_failed += failed_here
+                print(f"❌ [Turso] เขียนไม่สำเร็จ {failed_here}/{len(chunk)} รายการ "
+                      f"(ก้อนที่ {start // TURSO_BATCH_SIZE + 1}) — {last_err}")
+
+        if total_failed:
+            print(f"❌ [Turso] รวมเขียนไม่สำเร็จ {total_failed}/{len(stmts)} รายการ")
+        return total_ok
 
     def get_trades(self, date_start, date_end, branch_id=None):
         """ดึงข้อมูลรายการเทรดสาขาเดียว"""
