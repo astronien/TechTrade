@@ -59,6 +59,99 @@ def save_auto_sync_log(log_data):
         print(f"❌ Error saving sync log: {e}")
 
 
+def _extract_real_id(branch_name):
+    """ดึง real ID จากชื่อสาขา เช่น 249 จาก '00249 : ID249 : ...'"""
+    import re
+    if not branch_name:
+        return None
+    m = re.search(r'ID(\d+)', branch_name)
+    if m:
+        return m.group(1)
+    m = re.search(r'FC[BP](\d+)', branch_name)
+    if m:
+        return m.group(1)
+    return None
+
+
+def verify_zone_branches(zone, reference_branches=None):
+    """ตรวจว่า branch_id ทุกตัวใน zone ยัง resolve เจอในรายชื่อสาขาจริงหรือไม่
+
+    ถ้า resolve ไม่เจอ = สาขานั้นจะถูกดึงข้อมูลไม่ได้ และหายจากยอดแบบเงียบๆ
+    ซึ่งเป็นสาเหตุที่ยอดใน Turso ไม่ตรงกับ techswop
+
+    Returns:
+        dict: {'total', 'resolved', 'unresolved': [{'branch_id', 'reason'}], 'real_ids': set}
+    """
+    from app import get_branches_from_db, find_branch_by_sequential_id
+
+    branch_ids = zone.get('branch_ids') or []
+    if isinstance(branch_ids, str):
+        try:
+            branch_ids = json.loads(branch_ids)
+        except Exception:
+            branch_ids = [x.strip() for x in branch_ids.split(',') if x.strip()]
+
+    if reference_branches is None:
+        reference_branches = get_branches_from_db()
+
+    by_id = {str(b.get('branch_id', '')).strip(): b for b in (reference_branches or [])}
+
+    unresolved = []
+    resolved = 0
+    real_ids = set()
+
+    for bid in branch_ids:
+        s = str(bid).strip()
+        hit = by_id.get(s)
+        if not hit:
+            # เผื่อ DB ว่าง ให้ลอง fallback ผ่าน cache ของ app
+            try:
+                hit = find_branch_by_sequential_id(s)
+            except Exception:
+                hit = None
+        if hit:
+            resolved += 1
+            rid = _extract_real_id(hit.get('branch_name'))
+            if rid:
+                real_ids.add(rid)
+        else:
+            unresolved.append({
+                'branch_id': s,
+                'reason': 'ไม่พบ branch_id นี้ในรายชื่อสาขาปัจจุบัน'
+            })
+
+    return {
+        'total': len(branch_ids),
+        'resolved': resolved,
+        'unresolved': unresolved,
+        'real_ids': real_ids,
+    }
+
+
+def find_unassigned_branches(zones, reference_branches=None):
+    """หาสาขาที่มีอยู่จริงแต่ไม่ได้อยู่ใน zone ไหนเลย (= ยอดสาขานี้จะไม่เคยถูก sync)"""
+    from app import get_branches_from_db
+
+    if reference_branches is None:
+        reference_branches = get_branches_from_db()
+    if not reference_branches:
+        return []
+
+    assigned = set()
+    for z in zones or []:
+        assigned |= verify_zone_branches(z, reference_branches)['real_ids']
+
+    unassigned = []
+    for b in reference_branches:
+        rid = _extract_real_id(b.get('branch_name'))
+        if rid and rid not in assigned:
+            unassigned.append({
+                'branch_id': str(b.get('branch_id')),
+                'branch_name': b.get('branch_name'),
+            })
+    return unassigned
+
+
 def fetch_zone_daily_data(zone, target_date):
     """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve (แบบ Parallel)"""
     from app import fetch_all_for_branch
@@ -178,7 +271,27 @@ def run_daily_export(force=False, target_dt=None):
         return {'success': False, 'message': 'ไม่มี zone ที่ต้องการ sync'}
     
     print(f"📋 Zones to sync: {len(zones_to_sync)}")
-    
+
+    # 4.5 ตรวจความครบถ้วนของสาขาใน zone ก่อนเริ่ม sync
+    # จุดนี้คือกันปัญหา "สาขาหลุดจาก zone แล้วยอดหายเงียบๆ"
+    reference_branches = []
+    branch_audit = {'zones': {}, 'unassigned': []}
+    try:
+        from app import get_branches_from_db
+        reference_branches = get_branches_from_db()
+        if reference_branches:
+            branch_audit['unassigned'] = find_unassigned_branches(zones_to_sync, reference_branches)
+            if branch_audit['unassigned']:
+                print(f"⚠️ [Branch Audit] พบ {len(branch_audit['unassigned'])} สาขาที่ไม่อยู่ใน zone ไหนเลย:")
+                for b in branch_audit['unassigned'][:15]:
+                    print(f"      • {b['branch_id']} : {b['branch_name']}")
+                if len(branch_audit['unassigned']) > 15:
+                    print(f"      ... และอีก {len(branch_audit['unassigned']) - 15} สาขา")
+        else:
+            print("⚠️ [Branch Audit] ไม่มีรายชื่อสาขาใน DB — ข้ามการตรวจสอบ")
+    except Exception as audit_err:
+        print(f"⚠️ [Branch Audit] ตรวจสอบไม่สำเร็จ: {audit_err}")
+
     # 5. Sync แต่ละ Zone
     results = []
     total_records = 0
@@ -195,6 +308,24 @@ def run_daily_export(force=False, target_dt=None):
         print(f"\n📦 [{zone_idx+1}/{len(zones_to_sync)}] Syncing Zone: {zone_name}")
         
         try:
+            # 0. ตรวจว่า branch_id ทุกตัวใน zone ยังใช้ได้จริง
+            zone_branch_check = {'total': 0, 'resolved': 0, 'unresolved': []}
+            if reference_branches:
+                try:
+                    zone_branch_check = verify_zone_branches(zone, reference_branches)
+                    branch_audit['zones'][zone_name] = {
+                        'total': zone_branch_check['total'],
+                        'resolved': zone_branch_check['resolved'],
+                        'unresolved': zone_branch_check['unresolved'],
+                    }
+                    if zone_branch_check['unresolved']:
+                        bad = [u['branch_id'] for u in zone_branch_check['unresolved']]
+                        print(f"   ⚠️ [Branch Audit] Zone '{zone_name}' มี ID ที่ resolve ไม่ได้ "
+                              f"{len(bad)}/{zone_branch_check['total']} ตัว: {bad[:20]}")
+                        print(f"      -> สาขาเหล่านี้จะไม่ถูกดึงข้อมูล ทำให้ยอดไม่ตรงกับ techswop")
+                except Exception as ze:
+                    print(f"   ⚠️ [Branch Audit] ตรวจ zone '{zone_name}' ไม่สำเร็จ: {ze}")
+
             # 1. ดึงข้อมูลวันนี้จาก Eve
             trade_data, all_success = fetch_zone_daily_data(zone, target_date_dt)
             
@@ -216,7 +347,10 @@ def run_daily_export(force=False, target_dt=None):
 
             # 3. Reconcile: Eve snapshot vs Turso snapshot after write
             reconcile = turso.reconcile_snapshot(trade_data, zone_name, target_date.strftime("%Y-%m-%d"))
-            is_consistent = bool(reconcile.get('success')) and inserted == eve_count
+            unresolved_branches = zone_branch_check.get('unresolved', [])
+            is_consistent = (bool(reconcile.get('success'))
+                             and inserted == eve_count
+                             and not unresolved_branches)
             if is_consistent:
                 print(f"   ✅ Reconcile OK: Eve={eve_count} / Turso={reconcile.get('turso_count')}")
                 status = 'success'
@@ -229,6 +363,12 @@ def run_daily_export(force=False, target_dt=None):
                     f"Turso={reconcile.get('turso_count')}, "
                     f"missing={reconcile.get('missing_count')}, extra={reconcile.get('extra_count')}"
                 )
+                if unresolved_branches:
+                    bad_ids = [u['branch_id'] for u in unresolved_branches]
+                    error_message += (
+                        f" | branch_id ที่ resolve ไม่ได้ "
+                        f"{len(bad_ids)}/{zone_branch_check.get('total', 0)}: {bad_ids[:20]}"
+                    )
                 warnings.append({
                     'zone_name': zone_name,
                     'date': target_date.strftime("%Y-%m-%d"),
@@ -239,7 +379,10 @@ def run_daily_export(force=False, target_dt=None):
                     'extra_count': reconcile.get('extra_count'),
                     'missing_ids_sample': reconcile.get('missing_ids_sample', []),
                     'extra_ids_sample': reconcile.get('extra_ids_sample', []),
-                    'checksum_match': reconcile.get('checksum_match')
+                    'checksum_match': reconcile.get('checksum_match'),
+                    'unresolved_branch_ids': [u['branch_id'] for u in unresolved_branches],
+                    'branches_total': zone_branch_check.get('total', 0),
+                    'branches_resolved': zone_branch_check.get('resolved', 0),
                 })
                 print(f"   ⚠️ {error_message}")
 
@@ -328,7 +471,28 @@ def run_daily_export(force=False, target_dt=None):
                         msg += f"\n⚠️ {r['zone_name']}: Eve {r.get('eve_records', 0):,} / Turso {rec.get('turso_count', 0):,}"
                     else:
                         msg += f"\n❌ {r['zone_name']}: {r.get('error', 'error')}"
-                
+
+                # แจ้งเตือนปัญหาสาขาหลุด (สาเหตุที่ยอดไม่ตรงแบบเงียบๆ)
+                bad_zones = {
+                    zn: info for zn, info in branch_audit.get('zones', {}).items()
+                    if info.get('unresolved')
+                }
+                if bad_zones:
+                    msg += "\n\n🚨 <b>สาขาใน Zone ที่ใช้ไม่ได้:</b>"
+                    for zn, info in list(bad_zones.items())[:10]:
+                        ids = [u['branch_id'] for u in info['unresolved']]
+                        msg += (f"\n• {zn}: {len(ids)}/{info['total']} ID resolve ไม่ได้"
+                                f" → {', '.join(ids[:10])}")
+                    msg += "\n<i>สาขาเหล่านี้ไม่ถูกดึงข้อมูล ยอดจะต่ำกว่าความจริง</i>"
+
+                unassigned = branch_audit.get('unassigned') or []
+                if unassigned:
+                    msg += f"\n\n🏪 <b>สาขาที่ยังไม่อยู่ใน Zone ไหนเลย: {len(unassigned)} สาขา</b>"
+                    for b in unassigned[:10]:
+                        msg += f"\n• {b['branch_name']}"
+                    if len(unassigned) > 10:
+                        msg += f"\n<i>... และอีก {len(unassigned) - 10} สาขา</i>"
+
                 send_telegram_notification(bot_token, chat_id, msg)
     except Exception as tg_err:
         print(f"⚠️ Telegram notification error: {tg_err}")
@@ -340,6 +504,7 @@ def run_daily_export(force=False, target_dt=None):
     
     return {
         'success': total_errors == 0 and total_warnings == 0,
+        'branch_audit': branch_audit,
         'sync_completed': total_errors == 0,
         'data_consistent': total_warnings == 0,
         'total_zones': len(zones_to_sync),

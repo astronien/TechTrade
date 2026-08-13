@@ -124,6 +124,24 @@ def init_database():
             )
         """)
         
+        # สร้างตาราง zone_audit_log (ประวัติการแก้ไข zone)
+        # มีไว้เพื่อตอบคำถาม "สาขาหลุดจาก zone ตอนไหน / ใครแก้"
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS zone_audit_log (
+                id SERIAL PRIMARY KEY,
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                zone_id VARCHAR(255) DEFAULT '',
+                zone_name VARCHAR(255) DEFAULT '',
+                action VARCHAR(20) DEFAULT '',
+                branches_before INTEGER DEFAULT 0,
+                branches_after INTEGER DEFAULT 0,
+                added_branch_ids JSONB DEFAULT '[]',
+                removed_branch_ids JSONB DEFAULT '[]',
+                suspicious BOOLEAN DEFAULT FALSE,
+                source VARCHAR(50) DEFAULT ''
+            )
+        """)
+
         # สร้างตาราง cached_branches (เก็บรายชื่อสาขา)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS cached_branches (
@@ -2155,38 +2173,162 @@ def load_custom_zones_from_file():
         return []
 
 # บันทึก custom zones ลง Supabase
-def save_custom_zones_to_file(custom_zones):
-    """บันทึก custom zones ลง Supabase PostgreSQL"""
+def _normalize_branch_ids(raw):
+    """แปลง branch_ids ให้เป็น list ของ string เพื่อเทียบกันได้"""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = [x.strip() for x in raw.split(',') if x.strip()]
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if str(x).strip()]
+
+
+def log_zone_change(entry):
+    """บันทึกประวัติการเปลี่ยนแปลง zone (best-effort ไม่ให้ล้มการบันทึกหลัก)"""
+    conn = get_db_connection()
+    if not conn:
+        return
     try:
-        conn = get_db_connection()
-        if not conn:
-            print("❌ No database connection, cannot save zones")
-            return False
-        
         cur = conn.cursor()
-        
-        # ลบ zones เดิมทั้งหมด
-        cur.execute("DELETE FROM custom_zones")
-        print(f"🗑️ Deleted old zones")
-        
-        # เพิ่ม zones ใหม่
-        for zone in custom_zones:
-            cur.execute("""
-                INSERT INTO custom_zones (zone_id, zone_name, branch_ids)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (zone_id) 
-                DO UPDATE SET 
-                    zone_name = EXCLUDED.zone_name,
-                    branch_ids = EXCLUDED.branch_ids,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (zone['zone_id'], zone['zone_name'], json.dumps(zone['branch_ids'])))
-            print(f"💾 Saved zone: {zone['zone_name']}")
-        
+        cur.execute("""
+            INSERT INTO zone_audit_log
+            (zone_id, zone_name, action, branches_before, branches_after,
+             added_branch_ids, removed_branch_ids, suspicious, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            str(entry.get('zone_id', '')),
+            str(entry.get('zone_name', '')),
+            str(entry.get('action', '')),
+            int(entry.get('branches_before', 0)),
+            int(entry.get('branches_after', 0)),
+            json.dumps(entry.get('added', []), ensure_ascii=False),
+            json.dumps(entry.get('removed', []), ensure_ascii=False),
+            bool(entry.get('suspicious', False)),
+            str(entry.get('source', '')),
+        ))
         conn.commit()
         cur.close()
         conn.close()
-        
-        print(f"✅ บันทึก {len(custom_zones)} custom zones ลง database สำเร็จ")
+    except Exception as e:
+        print(f"⚠️ Zone audit log error: {e}")
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+
+
+def save_custom_zones_to_file(custom_zones, source='api'):
+    """บันทึก custom zones ลง Supabase PostgreSQL แบบ upsert + audit log
+
+    เดิมใช้ DELETE ทั้งตารางแล้ว insert ใหม่ ทำให้:
+      - ถ้าคำขอมาไม่ครบ (frontend โหลดสาขาพลาด) zone อื่นหายทั้งหมด
+      - timestamp ของทุก zone ถูกรีเซ็ตพร้อมกัน สืบย้อนไม่ได้ว่าสาขาหลุดตอนไหน
+    เวอร์ชันนี้อัปเดตเฉพาะที่เปลี่ยนจริง และบันทึกส่วนต่างไว้ใน zone_audit_log
+    """
+    if custom_zones is None:
+        print("❌ save_custom_zones: payload is None")
+        return False
+
+    conn = get_db_connection()
+    if not conn:
+        print("❌ No database connection, cannot save zones")
+        return False
+
+    try:
+        existing = {}
+        cur = conn.cursor()
+        cur.execute("SELECT zone_id, zone_name, branch_ids FROM custom_zones")
+        for row in cur.fetchall():
+            existing[str(row['zone_id'])] = {
+                'zone_name': row['zone_name'],
+                'branch_ids': _normalize_branch_ids(row['branch_ids']),
+            }
+
+        incoming_ids = {str(z.get('zone_id')) for z in custom_zones if z.get('zone_id')}
+
+        # 🛡️ Safety: ห้ามลบ zone ทั้งหมดด้วยคำขอว่าง
+        if existing and not incoming_ids:
+            cur.close()
+            conn.close()
+            print("⛔ ปฏิเสธการบันทึก: payload ว่างแต่ DB มี zone อยู่ "
+                  f"{len(existing)} รายการ (กันข้อมูลหายจาก request ที่ผิดพลาด)")
+            return False
+
+        audit_entries = []
+
+        for zone in custom_zones:
+            zid = str(zone.get('zone_id', '')).strip()
+            if not zid:
+                continue
+            zname = zone.get('zone_name', '')
+            new_ids = _normalize_branch_ids(zone.get('branch_ids'))
+            prev = existing.get(zid)
+            old_ids = prev['branch_ids'] if prev else []
+
+            added = sorted(set(new_ids) - set(old_ids))
+            removed = sorted(set(old_ids) - set(new_ids))
+
+            cur.execute("""
+                INSERT INTO custom_zones (zone_id, zone_name, branch_ids)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (zone_id)
+                DO UPDATE SET
+                    zone_name = EXCLUDED.zone_name,
+                    branch_ids = EXCLUDED.branch_ids,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (zid, zname, json.dumps(zone.get('branch_ids'))))
+
+            if prev is None:
+                action = 'created'
+            elif added or removed or prev['zone_name'] != zname:
+                action = 'updated'
+            else:
+                action = 'unchanged'
+
+            # ธงเตือน: สาขาหายเกิน 20% ในครั้งเดียว = น่าสงสัย
+            suspicious = bool(old_ids) and len(removed) > max(1, len(old_ids) * 0.2)
+
+            if action != 'unchanged':
+                audit_entries.append({
+                    'zone_id': zid, 'zone_name': zname, 'action': action,
+                    'branches_before': len(old_ids), 'branches_after': len(new_ids),
+                    'added': added, 'removed': removed,
+                    'suspicious': suspicious, 'source': source,
+                })
+                icon = '🚨' if suspicious else '💾'
+                print(f"{icon} Zone {action}: {zname} "
+                      f"({len(old_ids)} -> {len(new_ids)} สาขา"
+                      f"{f', +{len(added)}' if added else ''}"
+                      f"{f', -{len(removed)}' if removed else ''})")
+                if removed:
+                    print(f"   ลบสาขา: {removed[:20]}")
+
+        # ลบ zone ที่ไม่ได้ส่งมาด้วย (ผู้ใช้ลบจริง)
+        for zid, prev in existing.items():
+            if zid not in incoming_ids:
+                cur.execute("DELETE FROM custom_zones WHERE zone_id = %s", (zid,))
+                audit_entries.append({
+                    'zone_id': zid, 'zone_name': prev['zone_name'], 'action': 'deleted',
+                    'branches_before': len(prev['branch_ids']), 'branches_after': 0,
+                    'added': [], 'removed': prev['branch_ids'],
+                    'suspicious': True, 'source': source,
+                })
+                print(f"🗑️ Zone deleted: {prev['zone_name']} ({len(prev['branch_ids'])} สาขา)")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        for entry in audit_entries:
+            log_zone_change(entry)
+
+        print(f"✅ บันทึก {len(custom_zones)} custom zones ลง database สำเร็จ "
+              f"({len(audit_entries)} รายการเปลี่ยนแปลง)")
         return True
     except Exception as e:
         print(f"❌ Error saving custom zones: {e}")
@@ -2686,6 +2828,52 @@ def save_zones():
             'success': False,
             'error': f'เกิดข้อผิดพลาด: {str(e)}'
         }), 500
+
+@app.route('/api/admin/zone-audit-log', methods=['GET'])
+def get_zone_audit_log():
+    """ดูประวัติการเปลี่ยนแปลง Zone — ใช้ตอบว่า 'สาขาหลุดไปตอนไหน'
+
+    Query params:
+        limit:      จำนวนรายการ (default 100)
+        zone_name:  กรองเฉพาะ zone (บางส่วนของชื่อก็ได้)
+        only_suspicious: 1 = แสดงเฉพาะรายการที่สาขาหายเยอะผิดปกติ
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+
+        limit = min(int(request.args.get('limit', 100)), 500)
+        zone_name = request.args.get('zone_name', '').strip()
+        only_suspicious = request.args.get('only_suspicious', '') in ('1', 'true', 'True')
+
+        sql = "SELECT * FROM zone_audit_log WHERE 1=1"
+        params = []
+        if zone_name:
+            sql += " AND zone_name ILIKE %s"
+            params.append(f'%{zone_name}%')
+        if only_suspicious:
+            sql += " AND suspicious = TRUE"
+        sql += " ORDER BY changed_at DESC LIMIT %s"
+        params.append(limit)
+
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        logs = []
+        for row in rows:
+            log = dict(row)
+            if log.get('changed_at'):
+                log['changed_at'] = log['changed_at'].strftime('%Y-%m-%d %H:%M:%S')
+            logs.append(log)
+
+        return jsonify({'success': True, 'count': len(logs), 'logs': logs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/supersale-config', methods=['GET'])
 @login_required
@@ -4380,6 +4568,265 @@ def vercel_cron_auto_export():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/refresh-branches-cron', methods=['GET', 'POST'])
+def refresh_branches_cron():
+    """Cron: รีเฟรชรายชื่อสาขาอัตโนมัติวันละครั้ง + แจ้งเตือนสาขาใหม่ที่ยังไม่อยู่ใน Zone
+
+    เดิมรายชื่อสาขาอัปเดตด้วยการกดปุ่มเท่านั้น ทำให้สาขาที่เปิดใหม่
+    ไม่เคยถูกเพิ่มเข้า zone และยอดของสาขานั้นหายจาก Turso แบบเงียบๆ
+
+    ควรรันก่อนเวลา auto-export (default 23:30 น. ตามเวลาไทย)
+    ตั้งเวลาได้ผ่าน system_settings key = 'branch_refresh_time' (รูปแบบ HH:MM)
+
+    Query params:
+        force=1  ข้ามการเช็คเวลา/เช็คว่ารันไปแล้ว
+    """
+    try:
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
+        if cron_secret and auth_header != f'Bearer {cron_secret}':
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+        force = request.args.get('force', '') in ('1', 'true', 'True')
+
+        bkk_tz = pytz.timezone('Asia/Bangkok')
+        now_bkk = datetime.now(bkk_tz)
+        today_str = now_bkk.strftime('%Y-%m-%d')
+
+        if not force:
+            schedule_time = get_system_setting('branch_refresh_time') or '23:30'
+            try:
+                target_hour, target_minute = [int(x) for x in schedule_time.split(':')]
+            except Exception:
+                target_hour, target_minute = 23, 30
+
+            target_dt = now_bkk.replace(hour=target_hour, minute=target_minute,
+                                        second=0, microsecond=0)
+            if now_bkk < target_dt:
+                return jsonify({
+                    'success': True,
+                    'skipped': True,
+                    'message': f'ยังไม่ถึงเวลา {schedule_time} (ตอนนี้ {now_bkk.strftime("%H:%M")})'
+                }), 200
+
+            last_run = get_system_setting('last_branch_refresh_date')
+            if last_run == today_str:
+                return jsonify({
+                    'success': True,
+                    'skipped': True,
+                    'message': f'รันไปแล้ววันนี้ ({today_str})'
+                }), 200
+
+        # --- 1. เก็บรายชื่อเดิมไว้เทียบ ---
+        before = get_branches_from_db()
+        before_ids = {str(b.get('branch_id')) for b in (before or [])}
+
+        # --- 2. รีเฟรชจาก Eve ---
+        session_id = get_eve_session(force_refresh=True)
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'error': 'Auto-Login Eve ล้มเหลว — ยังไม่ได้อัปเดตรายชื่อสาขา'
+            }), 500
+
+        ok, count = trigger_branch_update(session_id)
+        if not ok:
+            return jsonify({
+                'success': False,
+                'error': 'ดึงรายชื่อสาขาจาก Eve ไม่สำเร็จ'
+            }), 500
+
+        after = get_branches_from_db()
+        after_ids = {str(b.get('branch_id')) for b in (after or [])}
+
+        new_branches = [b for b in (after or []) if str(b.get('branch_id')) not in before_ids]
+        gone_branches = [b for b in (before or []) if str(b.get('branch_id')) not in after_ids]
+
+        # --- 3. หาสาขาที่ยังไม่อยู่ใน zone ไหนเลย ---
+        unassigned = []
+        try:
+            from auto_daily_export import find_unassigned_branches
+            zones = load_custom_zones_from_file()
+            unassigned = find_unassigned_branches(zones, after)
+        except Exception as ue:
+            print(f"⚠️ ตรวจสาขาที่ไม่อยู่ใน zone ไม่สำเร็จ: {ue}")
+
+        save_system_setting('last_branch_refresh_date', today_str)
+
+        print(f"🔄 [Branch Refresh] {count} สาขา | ใหม่ {len(new_branches)} | "
+              f"หายไป {len(gone_branches)} | ไม่อยู่ใน zone {len(unassigned)}")
+
+        # --- 4. แจ้งเตือนถ้ามีอะไรต้องทำ ---
+        if new_branches or gone_branches or unassigned:
+            try:
+                cfg = get_auto_cancel_config() or {}
+                bot_token = cfg.get('telegram_bot_token', '')
+                chat_id = cfg.get('telegram_chat_id', '')
+                if bot_token and chat_id:
+                    msg = (f"🏪 <b>อัปเดตรายชื่อสาขา</b>\n"
+                           f"⏰ {now_bkk.strftime('%d/%m/%Y %H:%M')}\n"
+                           f"📋 สาขาทั้งหมด: {count:,}")
+                    if new_branches:
+                        msg += f"\n\n🆕 <b>สาขาใหม่ {len(new_branches)} สาขา:</b>"
+                        for b in new_branches[:15]:
+                            msg += f"\n• {b.get('branch_name')}"
+                        if len(new_branches) > 15:
+                            msg += f"\n<i>... อีก {len(new_branches) - 15} สาขา</i>"
+                    if gone_branches:
+                        msg += f"\n\n➖ <b>สาขาที่หายจากระบบ {len(gone_branches)} สาขา:</b>"
+                        for b in gone_branches[:10]:
+                            msg += f"\n• {b.get('branch_name')}"
+                    if unassigned:
+                        msg += (f"\n\n⚠️ <b>ยังไม่อยู่ใน Zone ไหนเลย: {len(unassigned)} สาขา</b>"
+                                f"\n<i>ยอดของสาขาเหล่านี้จะไม่ถูก sync เข้า Turso</i>")
+                        for b in unassigned[:15]:
+                            msg += f"\n• {b['branch_name']}"
+                        if len(unassigned) > 15:
+                            msg += f"\n<i>... อีก {len(unassigned) - 15} สาขา</i>"
+                    send_telegram_notification(bot_token, chat_id, msg)
+            except Exception as tg_err:
+                print(f"⚠️ Telegram notify error: {tg_err}")
+
+        return jsonify({
+            'success': True,
+            'total_branches': count,
+            'new_branches': new_branches,
+            'gone_branches': gone_branches,
+            'unassigned_count': len(unassigned),
+            'unassigned_branches': unassigned[:50],
+            'message': f'อัปเดตสาขาแล้ว {count} สาขา'
+        })
+
+    except Exception as e:
+        print(f"❌ refresh-branches-cron error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/backfill-range', methods=['POST'])
+def backfill_range():
+    """Re-sync ข้อมูลเข้า Turso ย้อนหลังตามช่วงวันที่ที่ระบุ
+
+    ใช้ซ่อมข้อมูลหลังจากแก้ branch_ids ใน zone ให้ถูกต้องแล้ว
+    ปลอดภัยต่อการรันซ้ำ เพราะ run_daily_export จะ delete_zone_records
+    ของ zone+วันนั้นก่อน insert ใหม่เสมอ (idempotent)
+
+    Body (JSON):
+        date_start: "01/07/2026" หรือ "2026-07-01"  (จำเป็น)
+        date_end:   "31/07/2026" หรือ "2026-07-31"  (จำเป็น)
+        dry_run:    true = แค่แสดงว่าจะรันวันไหนบ้าง ไม่ sync จริง
+
+    Auth: ต้องส่ง Authorization: Bearer <CRON_SECRET> ถ้าตั้งค่า CRON_SECRET ไว้
+    """
+    try:
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
+        if cron_secret and auth_header != f'Bearer {cron_secret}':
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+        data = request.get_json(silent=True) or {}
+        raw_start = str(data.get('date_start', '')).strip()
+        raw_end = str(data.get('date_end', '')).strip()
+        dry_run = bool(data.get('dry_run', False))
+
+        if not raw_start or not raw_end:
+            return jsonify({
+                'success': False,
+                'error': 'กรุณาระบุ date_start และ date_end'
+            }), 400
+
+        def parse_date(s):
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
+                    continue
+            raise ValueError(f'รูปแบบวันที่ไม่ถูกต้อง: {s} (ใช้ DD/MM/YYYY หรือ YYYY-MM-DD)')
+
+        try:
+            start_dt = parse_date(raw_start)
+            end_dt = parse_date(raw_end)
+        except ValueError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
+
+        if start_dt > end_dt:
+            return jsonify({'success': False, 'error': 'date_start ต้องไม่เกิน date_end'}), 400
+
+        total_days = (end_dt - start_dt).days + 1
+        MAX_DAYS = 62
+        if total_days > MAX_DAYS:
+            return jsonify({
+                'success': False,
+                'error': f'ช่วงวันที่ยาวเกินไป ({total_days} วัน) สูงสุด {MAX_DAYS} วันต่อครั้ง'
+            }), 400
+
+        dates = [start_dt + timedelta(days=i) for i in range(total_days)]
+
+        if dry_run:
+            return jsonify({
+                'success': True,
+                'dry_run': True,
+                'total_days': total_days,
+                'dates': [d.strftime('%d/%m/%Y') for d in dates],
+                'message': f'จะ re-sync ทั้งหมด {total_days} วัน'
+            })
+
+        from auto_daily_export import run_daily_export
+
+        print(f"🔁 [Backfill] Starting: {raw_start} -> {raw_end} ({total_days} days)")
+
+        results = []
+        total_records = 0
+        failed_days = 0
+
+        for idx, d in enumerate(dates):
+            day_str = d.strftime('%d/%m/%Y')
+            print(f"🔁 [Backfill] [{idx + 1}/{total_days}] {day_str}")
+            try:
+                res = run_daily_export(force=True, target_dt=d)
+                records = res.get('total_records', 0) or 0
+                total_records += records
+                ok = bool(res.get('sync_completed'))
+                if not ok:
+                    failed_days += 1
+                results.append({
+                    'date': day_str,
+                    'success': ok,
+                    'records': records,
+                    'zones_synced': res.get('total_synced'),
+                    'errors': res.get('total_errors'),
+                    'warnings': res.get('total_warnings'),
+                })
+            except Exception as day_err:
+                failed_days += 1
+                print(f"❌ [Backfill] {day_str} failed: {day_err}")
+                results.append({
+                    'date': day_str,
+                    'success': False,
+                    'records': 0,
+                    'error': str(day_err),
+                })
+
+        print(f"🔁 [Backfill] Done. {total_records:,} records, {failed_days} failed days")
+
+        return jsonify({
+            'success': failed_days == 0,
+            'total_days': total_days,
+            'failed_days': failed_days,
+            'total_records': total_records,
+            'results': results,
+            'message': f'Backfill เสร็จ: {total_days} วัน, {total_records:,} records'
+                       + (f', ล้มเหลว {failed_days} วัน' if failed_days else '')
+        })
+
+    except Exception as e:
+        print(f"❌ Backfill error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/admin/auto-export-logs', methods=['GET'])
 def get_auto_export_logs():

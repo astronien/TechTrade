@@ -930,6 +930,37 @@
                 console.log(`✅ โหลดสาขาสำเร็จ: ${branches.length} สาขา, เลือก: ${branchSelect.value}`);
             }
 
+            // ============================================================
+            // Branch list trust guard
+            // ------------------------------------------------------------
+            // รายชื่อสาขามี 2 ชุดที่ ID ไม่ตรงกัน:
+            //   - ชุดจริงจาก DB (cached_branches) = ID ที่ backend ใช้ยิง Eve ได้
+            //   - ชุดสำรองใน branches-data.js  = snapshot เก่า ใช้ index เรียงลำดับ
+            // ถ้าเผลอบันทึก Zone ด้วยชุดสำรอง จะได้ ID ผิด ทำให้ sync เข้า Turso
+            // ไม่ครบแบบเงียบๆ ทุกวัน -> ต้องล็อกไม่ให้บันทึกเด็ดขาด
+            // ============================================================
+            window.BRANCH_LIST_TRUSTED = false;
+            window.BRANCH_LIST_UNTRUSTED_REASON = '';
+
+            function setBranchListTrusted(trusted, reason) {
+                window.BRANCH_LIST_TRUSTED = !!trusted;
+                window.BRANCH_LIST_UNTRUSTED_REASON = trusted ? '' : (reason || 'ไม่ทราบสาเหตุ');
+                console.log(`🔐 Branch list trusted = ${window.BRANCH_LIST_TRUSTED}`
+                    + (window.BRANCH_LIST_UNTRUSTED_REASON ? ` (${window.BRANCH_LIST_UNTRUSTED_REASON})` : ''));
+            }
+
+            function showStaleBranchWarning() {
+                const reason = window.BRANCH_LIST_UNTRUSTED_REASON || '';
+                const targets = ['branchStatus', 'reportBranchStatus'];
+                targets.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.textContent = `⚠️ รายชื่อสาขาอาจไม่อัปเดต${reason ? ' — ' + reason : ''} (ห้ามแก้ไข Zone)`;
+                        el.className = 'form-text text-danger';
+                    }
+                });
+            }
+
             // ฟังก์ชันดึงรายการสาขา
             // ฟังก์ชันดึงรายการสาขา (ใช้ข้อมูล Hardcode จาก branches-data.js)
             // ฟังก์ชันดึงรายการสาขา (API)
@@ -949,9 +980,14 @@
 
                     if (result.success && result.branches && result.branches.length > 0) {
                         console.log(`✅ Loaded ${result.branches.length} branches from ${result.source}`);
+                        // เชื่อถือได้เฉพาะเมื่อมาจาก database เท่านั้น
+                        // source === 'static_file' แปลว่า DB ว่าง -> เป็นข้อมูลเก่าจากไฟล์
+                        setBranchListTrusted(result.source === 'database',
+                            result.source === 'database' ? '' : 'เซิร์ฟเวอร์ใช้ไฟล์สำรอง (DB ว่าง)');
                         // Sort alphabetically before populating
                         result.branches.sort((a,b) => (a.branch_name || '').localeCompare(b.branch_name || ''));
                         populateBranchDropdown(result.branches);
+                        if (!window.BRANCH_LIST_TRUSTED) showStaleBranchWarning();
                         return;
                     }
                 } catch (error) {
@@ -960,8 +996,12 @@
 
                 // 2. Fallback: ถ้า API พัง ให้ลองใช้ตัวแปร global (ถ้ามี)
                 if (typeof BRANCHES_DATA !== 'undefined' && BRANCHES_DATA && BRANCHES_DATA.length > 0) {
-                    console.log('⚠️ Using static BRANCHES_DATA fallback');
+                    console.warn('⚠️ Using STALE static BRANCHES_DATA fallback — ห้ามใช้แก้ไข Zone');
+                    // ⛔ ข้อมูลชุดนี้เป็น snapshot เก่า ใช้ ID คนละ scheme กับ DB
+                    //    ถ้าเอาไปบันทึก Zone จะได้ ID ผิด -> sync เข้า Turso ไม่ครบ
+                    setBranchListTrusted(false, 'ข้อมูลสาขาชุดสำรอง (อาจไม่อัปเดต)');
                     populateBranchDropdown(BRANCHES_DATA);
+                    showStaleBranchWarning();
 
                     // Passive Update: ข้อมูลอาจจะเก่า ลอง trigger update แบบเงียบๆ
                     autoUpdateBranches(true);
@@ -974,7 +1014,10 @@
                     const retryResponse = await fetch('/api/branches');
                     const retryResult = await retryResponse.json();
                     if (retryResult.success && retryResult.branches && retryResult.branches.length > 0) {
+                        setBranchListTrusted(retryResult.source === 'database',
+                            retryResult.source === 'database' ? '' : 'เซิร์ฟเวอร์ใช้ไฟล์สำรอง (DB ว่าง)');
                         populateBranchDropdown(retryResult.branches);
+                        if (!window.BRANCH_LIST_TRUSTED) showStaleBranchWarning();
                         return;
                     }
 
@@ -1503,26 +1546,76 @@
                 document.getElementById('zoneModal').classList.add('show');
             }
 
+            // เปิด/ปิดปุ่มบันทึก Zone (ใช้กันการบันทึกด้วยรายชื่อสาขาที่เชื่อถือไม่ได้)
+            function setZoneSaveEnabled(enabled) {
+                const modal = document.getElementById('zoneModal');
+                if (!modal) return;
+                modal.querySelectorAll('button').forEach(btn => {
+                    const label = (btn.textContent || '').trim();
+                    if (label.includes('บันทึก')) {
+                        btn.disabled = !enabled;
+                        btn.style.opacity = enabled ? '' : '0.5';
+                        btn.style.cursor = enabled ? '' : 'not-allowed';
+                        btn.title = enabled ? '' : 'รายชื่อสาขาโหลดไม่สำเร็จ — บันทึกไม่ได้';
+                    }
+                });
+            }
+
             // สร้างรายการ checkbox สาขา (ดึงข้อมูลล่าสุดจาก API เสมอ)
+            function retryBranchCheckboxList() {
+                createBranchCheckboxList(window.__ZONE_SELECTED_BRANCH_IDS || []);
+            }
+
             async function createBranchCheckboxList(selectedBranchIds) {
+                selectedBranchIds = selectedBranchIds || [];
+                window.__ZONE_SELECTED_BRANCH_IDS = selectedBranchIds;
                 const container = document.getElementById('branchCheckboxList');
                 container.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">⏳ กำลังโหลดรายชื่อสาขา...</div>';
 
-                // ดึงข้อมูลสาขาล่าสุดจาก API เสมอ เพื่อให้ได้สาขาใหม่ๆ
-                let branches = BRANCHES_DATA;
+                // ⚠️ Zone modal ต้องใช้รายชื่อสาขาจาก DB เท่านั้น
+                // ห้าม fallback ไป BRANCHES_DATA เพราะ ID คนละ scheme
+                // (เคยทำให้ zone เก็บ ID ผิด -> ดึงข้อมูลเข้า Turso ไม่ครบ)
+                let branches = null;
+                let loadError = '';
                 try {
-                    const response = await fetch('/api/branches');
+                    const response = await fetch('/api/branches?t=' + new Date().getTime());
                     const result = await response.json();
                     if (result.success && result.branches && result.branches.length > 0) {
-                        branches = result.branches;
-                        // อัปเดต global ด้วย
-                        window.BRANCHES_DATA = branches;
-                        console.log(`🔄 Zone modal: Loaded ${branches.length} branches from API`);
+                        if (result.source !== 'database') {
+                            loadError = 'เซิร์ฟเวอร์ตอบกลับด้วยไฟล์สำรอง (DB ว่าง) — ID สาขาอาจไม่ตรงกับระบบจริง';
+                        } else {
+                            branches = result.branches;
+                            window.BRANCHES_DATA = branches;
+                            setBranchListTrusted(true);
+                            console.log(`🔄 Zone modal: Loaded ${branches.length} branches from DB`);
+                        }
+                    } else {
+                        loadError = result.error || 'API ไม่ส่งรายชื่อสาขากลับมา';
                     }
                 } catch (e) {
-                    console.warn('⚠️ Failed to fetch branches from API, using cached BRANCHES_DATA:', e);
+                    loadError = e.message || 'เชื่อมต่อ API ไม่ได้';
+                    console.error('❌ Zone modal: failed to fetch branches', e);
                 }
 
+                if (!branches) {
+                    setBranchListTrusted(false, loadError);
+                    setZoneSaveEnabled(false);
+                    container.innerHTML = `
+                        <div style="padding:20px; border:2px solid #dc3545; border-radius:8px; background:#fff5f5; color:#a71d2a;">
+                            <div style="font-weight:700; margin-bottom:8px;">❌ โหลดรายชื่อสาขาไม่สำเร็จ</div>
+                            <div style="font-size:13px; margin-bottom:12px;">${loadError}</div>
+                            <div style="font-size:13px; margin-bottom:12px;">
+                                ระบบปิดการบันทึก Zone ไว้ชั่วคราวเพื่อป้องกันการบันทึก ID สาขาผิด
+                                ซึ่งจะทำให้ยอดใน Turso ไม่ครบ กรุณากด "อัปเดตสาขา" หรือตรวจสอบการ login Eve
+                                แล้วเปิดหน้าต่างนี้ใหม่
+                            </div>
+                            <button type="button" onclick="retryBranchCheckboxList()"
+                                    style="padding:8px 16px; font-size:13px;">🔄 ลองใหม่</button>
+                        </div>`;
+                    return;
+                }
+
+                setZoneSaveEnabled(true);
                 let html = '';
 
                 // Render all branches
@@ -1587,9 +1680,25 @@
                     return;
                 }
 
+                // 🔐 กันบันทึกด้วยรายชื่อสาขาที่เชื่อถือไม่ได้
+                // ถ้าบันทึกตอน /api/branches พัง จะได้ ID คนละ scheme
+                // ทำให้ cron ดึงข้อมูลสาขานั้นเข้า Turso ไม่ได้แบบเงียบๆ ทุกวัน
+                if (!window.BRANCH_LIST_TRUSTED) {
+                    alert('⛔ บันทึก Zone ไม่ได้\n\n'
+                        + 'รายชื่อสาขาที่โหลดมาเชื่อถือไม่ได้'
+                        + (window.BRANCH_LIST_UNTRUSTED_REASON ? '\nสาเหตุ: ' + window.BRANCH_LIST_UNTRUSTED_REASON : '')
+                        + '\n\nถ้าบันทึกตอนนี้ ID สาขาจะผิด และข้อมูลจะเข้า Turso ไม่ครบ\n'
+                        + 'กรุณากด "อัปเดตสาขา" ให้สำเร็จก่อน แล้วเปิดหน้าต่างนี้ใหม่');
+                    return;
+                }
+
                 // ดึงสาขาที่เลือก
                 const checkboxes = document.querySelectorAll('#branchCheckboxList input[type="checkbox"]:checked');
-                const branchIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+                const branchIds = Array.from(checkboxes).map(cb => {
+                    // ห้ามใช้ parseInt เดี่ยวๆ เพราะถ้า id ไม่ใช่ตัวเลขจะกลายเป็น NaN
+                    const raw = String(cb.value).trim();
+                    return /^\d+$/.test(raw) ? parseInt(raw, 10) : raw;
+                }).filter(v => v !== '' && !(typeof v === 'number' && isNaN(v)));
 
                 if (branchIds.length === 0) {
                     alert('⚠️ กรุณาเลือกสาขาอย่างน้อย 1 สาขา');
@@ -1615,8 +1724,13 @@
                     });
                 }
 
-                // Sync ไปยัง Backend (บันทึกลง memory)
-                await syncZonesToBackend(zones);
+                // Sync ไปยัง Backend (บันทึกลง DB)
+                const synced = await syncZonesToBackend(zones);
+                if (!synced) {
+                    // ไม่ปิด modal เพื่อให้ผู้ใช้ลองใหม่ได้ และไม่อัปเดต local
+                    // ป้องกันสถานะ "หน้าจอบอกว่าบันทึกแล้ว แต่ DB ไม่มี"
+                    return;
+                }
 
                 // อัพเดท local memory
                 await saveZonesToStorage(zones);
@@ -1642,11 +1756,15 @@
 
                     if (result.success) {
                         console.log('✅ Sync zones to backend:', result.message);
-                    } else {
-                        console.error('❌ Failed to sync zones:', result);
+                        return true;
                     }
+                    console.error('❌ Failed to sync zones:', result);
+                    alert('❌ บันทึก Zone ลงเซิร์ฟเวอร์ไม่สำเร็จ\n' + (result.error || result.message || ''));
+                    return false;
                 } catch (error) {
                     console.error('❌ Error syncing zones:', error);
+                    alert('❌ บันทึก Zone ลงเซิร์ฟเวอร์ไม่สำเร็จ: ' + error.message);
+                    return false;
                 }
             }
 
