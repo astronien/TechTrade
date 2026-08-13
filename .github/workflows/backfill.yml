@@ -1,0 +1,98 @@
+name: TechTrade Backfill
+
+# รัน backfill ย้อนหลังให้จบ โดยวนเรียก /api/admin/backfill-continue
+# แต่ละ request ฝั่ง Vercel จะทำเท่าที่ทันใน time budget แล้วคืน cursor มา
+# GitHub runner มีเวลา 6 ชั่วโมง จึงวนจนจบได้โดยไม่ชน timeout ของ Vercel
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_start:
+        description: 'วันเริ่ม (DD/MM/YYYY)'
+        required: true
+      date_end:
+        description: 'วันสิ้นสุด (DD/MM/YYYY)'
+        required: true
+      dry_run:
+        description: 'ทดสอบอย่างเดียว ไม่ sync จริง'
+        type: boolean
+        default: false
+      base_url:
+        description: 'Base URL ของระบบ'
+        default: 'https://report-trade.vercel.app'
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      DATE_START: ${{ inputs.date_start }}
+      DATE_END: ${{ inputs.date_end }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Start backfill job
+        id: start
+        run: |
+          set -euo pipefail
+          BODY=$(printf '{"date_start":"%s","date_end":"%s","dry_run":%s}' "$DATE_START" "$DATE_END" "$DRY_RUN")
+
+          RESPONSE=$(curl -s --max-time 600 -X POST "$BASE_URL/api/admin/backfill-range" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          echo "$RESPONSE" | head -c 2000
+          echo ""
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "$RESPONSE" > /tmp/start.json
+          JOB_ID=$(python3 -c 'import json;print(json.load(open("/tmp/start.json")).get("job_id",""))')
+          COMPLETED=$(python3 -c 'import json;print(json.load(open("/tmp/start.json")).get("completed",False))')
+
+          if [ -z "$JOB_ID" ]; then
+            echo "เริ่ม job ไม่สำเร็จ"
+            exit 1
+          fi
+
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
+          echo "completed=$COMPLETED" >> "$GITHUB_OUTPUT"
+          echo "job_id = $JOB_ID"
+
+      - name: Continue until done
+        if: steps.start.outputs.skip != 'true' && steps.start.outputs.completed != 'True'
+        env:
+          JOB_ID: ${{ steps.start.outputs.job_id }}
+        run: |
+          set -uo pipefail
+
+          for i in $(seq 1 200); do
+            curl -s --max-time 600 -X POST "$BASE_URL/api/admin/backfill-continue" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"job_id\":\"$JOB_ID\"}" > /tmp/step.json
+
+            python3 -c 'import json;d=json.load(open("/tmp/step.json"));print("[progress]",d.get("days_done",0),"/",d.get("total_days",0),"วัน |",d.get("total_records",0),"records")' || cat /tmp/step.json
+
+            COMPLETED=$(python3 -c 'import json;print(json.load(open("/tmp/step.json")).get("completed",False))' 2>/dev/null || echo "False")
+
+            if [ "$COMPLETED" = "True" ]; then
+              FAILED=$(python3 -c 'import json;print(json.load(open("/tmp/step.json")).get("days_failed",0))')
+              echo "backfill เสร็จสมบูรณ์"
+              if [ "$FAILED" != "0" ]; then
+                echo "มีวันที่ล้มเหลว $FAILED วัน — ดู /api/admin/backfill-status?job_id=$JOB_ID"
+                exit 1
+              fi
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "ครบ 200 รอบแล้วยังไม่จบ — สั่ง workflow ใหม่หรือเรียก backfill-continue ด้วย job_id $JOB_ID"
+          exit 1

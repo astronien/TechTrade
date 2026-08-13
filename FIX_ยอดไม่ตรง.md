@@ -56,27 +56,68 @@ GET /api/admin/zone-audit-log?only_suspicious=1
 
 ### ขั้นที่ 3 — Backfill ย้อนหลัง
 
-ดูก่อนว่าจะรันวันไหนบ้าง (ไม่ sync จริง)
+Backfill ทำงานเป็น **job ที่มี cursor** — แต่ละ request จะรันเท่าที่ทันใน time budget
+(240 วินาทีบน Vercel) แล้วจำว่าค้างวันไหน ครั้งถัดไปทำต่อจากจุดนั้น จึงไม่ชน timeout
+ต่อให้ backfill ทั้งปี และถ้า process ถูกฆ่ากลางคันก็ไม่ต้องเริ่มใหม่
+
+เลือกวิธีใดวิธีหนึ่ง
+
+#### วิธีที่ 1 — รันจากเครื่องตัวเอง (ง่ายและเร็วที่สุด)
+
+ไม่ผ่าน HTTP จึงไม่มี timeout เลย ต้องมี `.env` ที่มี `POSTGRES_URL_NON_POOLING` และ `TURSO_*` ครบ
 
 ```bash
-curl -X POST https://report-trade.vercel.app/api/admin/backfill-range \
-  -H "Authorization: Bearer $CRON_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"date_start":"01/07/2026","date_end":"31/07/2026","dry_run":true}'
+python3 run_backfill.py --start 01/07/2026 --end 31/07/2026 --dry-run   # ดูก่อน
+python3 run_backfill.py --start 01/07/2026 --end 31/07/2026             # รันจริง
 ```
 
-รันจริง (ตัด `dry_run` ออก) — ปลอดภัยต่อการรันซ้ำ เพราะแต่ละวันจะ `delete_zone_records` ก่อน insert ใหม่
+#### วิธีที่ 2 — GitHub Actions (ไม่ต้องเฝ้า)
+
+ไปที่แท็บ Actions → **TechTrade Backfill** → Run workflow → ใส่ช่วงวันที่
+
+Runner จะวนเรียก `/backfill-continue` ให้เองจนจบ พร้อมโชว์ progress ทุกรอบ
+
+#### วิธีที่ 3 — เรียก API เอง
 
 ```bash
+# เริ่ม job
 curl -X POST https://report-trade.vercel.app/api/admin/backfill-range \
   -H "Authorization: Bearer $CRON_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"date_start":"01/07/2026","date_end":"31/07/2026"}'
 ```
 
-จำกัดครั้งละไม่เกิน 62 วัน รับทั้ง `DD/MM/YYYY` และ `YYYY-MM-DD`
+ถ้าตอบกลับมา `"completed": false` แปลว่ายังไม่จบ ให้เรียกต่อด้วย `job_id` ที่ได้มา
+ซ้ำจนกว่า `completed` เป็น `true`
 
-> ⚠️ ช่วงเวลานาน ๆ อาจชน timeout ของ Vercel — ถ้าเจอ ให้แบ่งเป็นสัปดาห์ละครั้ง หรือรัน `run_daily_export(force=True, target_dt=...)` จากเครื่องตัวเอง
+```bash
+curl -X POST https://report-trade.vercel.app/api/admin/backfill-continue \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"job_id":"BF_20260813..."}'
+```
+
+หรือให้ `run_backfill.py` วนให้
+
+```bash
+python3 run_backfill.py --mode remote --start 01/07/2026 --end 31/07/2026 \
+  --secret "$CRON_SECRET"
+```
+
+ดูสถานะ/ผลรายวันได้ที่
+
+```
+GET /api/admin/backfill-status                    # 20 job ล่าสุด
+GET /api/admin/backfill-status?job_id=BF_...      # รายละเอียดรายวัน
+```
+
+**ข้อควรรู้**
+
+- ปลอดภัยต่อการรันซ้ำ — แต่ละวันจะ `delete_zone_records` ก่อน insert ใหม่ ไม่เกิดข้อมูลซ้ำ
+- รับทั้ง `DD/MM/YYYY` และ `YYYY-MM-DD` สูงสุด 366 วันต่อ job
+- ปรับ time budget ได้ด้วย env `BACKFILL_TIME_BUDGET` (วินาที)
+- ถ้าวันไหนล้มเหลว job จะไม่หยุด แต่จะนับไว้ใน `days_failed` และบอก `last_error`
+  รัน backfill เฉพาะช่วงนั้นซ้ำได้เลย
 
 ### ขั้นที่ 4 — ตรวจซ้ำ
 
@@ -98,13 +139,18 @@ python3 audit_zones.py --refresh
 | `save_custom_zones_to_file()` | `DELETE` ทั้งตารางแล้ว insert ใหม่ | upsert เฉพาะที่เปลี่ยน + ปฏิเสธ payload ว่าง + เขียน `zone_audit_log` |
 | `auto_daily_export.py` | reconcile แค่ Eve↔Turso | เพิ่ม `verify_zone_branches()` เช็คว่า ID ทุกตัว resolve ได้ ไม่ได้ = warning + แจ้ง Telegram |
 | รายชื่อสาขา | กดอัปเดตเอง | cron `/api/admin/refresh-branches-cron` วันละครั้ง 23:30 น. + แจ้งเตือนสาขาใหม่ที่ยังไม่อยู่ใน zone |
+| Backfill | รันรวดเดียว ชน timeout แล้วไม่รู้ว่าค้างวันไหน | job ที่มี cursor ใน `backfill_jobs` ทำต่อได้ + บันทึก progress ทุกวัน |
 
 ตั้งเวลา cron รีเฟรชสาขาได้ที่ `system_settings` key = `branch_refresh_time` (รูปแบบ `HH:MM`, default `23:30`) ควรตั้งให้เร็วกว่าเวลา auto-export
 
 ## ไฟล์ที่แก้
 
 - `audit_zones.py` *(ใหม่)* — สคริปต์ตรวจ zone
-- `app.py` — `zone_audit_log`, upsert zones, `/api/admin/zone-audit-log`, `/api/admin/backfill-range`, `/api/admin/refresh-branches-cron`
+- `run_backfill.py` *(ใหม่)* — ตัวรัน backfill จนจบ (โหมด local / remote)
+- `app.py` — `zone_audit_log`, `backfill_jobs`, upsert zones, `/api/admin/zone-audit-log`,
+  `/api/admin/backfill-range`, `/api/admin/backfill-continue`, `/api/admin/backfill-status`,
+  `/api/admin/refresh-branches-cron`
 - `auto_daily_export.py` — `verify_zone_branches()`, `find_unassigned_branches()`, branch audit ใน sync loop, Telegram alert
 - `templates/index.html` — branch list trust guard
 - `.github/workflows/techtrade-cron.yml` — job `refresh-branches`
+- `.github/workflows/backfill.yml` *(ใหม่)* — workflow_dispatch วน backfill จนจบ

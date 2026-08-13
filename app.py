@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta
 import pytz
 import os
+import time
 import secrets
 import hashlib
 import atexit
@@ -124,6 +125,27 @@ def init_database():
             )
         """)
         
+        # สร้างตาราง backfill_jobs (งาน re-sync ย้อนหลังแบบทำต่อได้)
+        # เก็บ cursor_date ไว้เพื่อให้ทำต่อจากวันที่ค้างได้เมื่อชน timeout ของ Vercel
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS backfill_jobs (
+                id SERIAL PRIMARY KEY,
+                job_id VARCHAR(64) UNIQUE NOT NULL,
+                date_start DATE NOT NULL,
+                date_end DATE NOT NULL,
+                cursor_date DATE,
+                status VARCHAR(20) DEFAULT 'pending',
+                total_days INTEGER DEFAULT 0,
+                days_done INTEGER DEFAULT 0,
+                days_failed INTEGER DEFAULT 0,
+                total_records INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT '',
+                results JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # สร้างตาราง zone_audit_log (ประวัติการแก้ไข zone)
         # มีไว้เพื่อตอบคำถาม "สาขาหลุดจาก zone ตอนไหน / ใครแก้"
         cur.execute("""
@@ -4705,9 +4727,202 @@ def refresh_branches_cron():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==========================================
+# Backfill: re-sync ข้อมูลย้อนหลังแบบทำต่อได้
+# ------------------------------------------
+# Vercel จำกัดเวลาต่อ request (maxDuration 300s) การ backfill ทั้งเดือน
+# รวดเดียวจึงชน timeout และไม่รู้ว่าค้างที่วันไหน
+# แก้ด้วยการทำเป็น "job ที่มี cursor": แต่ละ request รันเท่าที่ทันใน
+# time budget แล้วบันทึกว่าค้างวันไหน ครั้งถัดไปทำต่อจากจุดนั้น
+# ==========================================
+
+def _backfill_time_budget():
+    """งบเวลาต่อ 1 request (วินาที)
+
+    Vercel maxDuration = 300s -> เผื่อไว้ 240s
+    รันเองบนเครื่อง/เซิร์ฟเวอร์อื่นไม่จำกัด -> 3000s
+    ปรับได้ด้วย env BACKFILL_TIME_BUDGET
+    """
+    override = os.environ.get('BACKFILL_TIME_BUDGET', '').strip()
+    if override.isdigit():
+        return int(override)
+    return 240 if os.environ.get('VERCEL') else 3000
+
+
+def _parse_backfill_date(s):
+    for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(str(s).strip(), fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f'รูปแบบวันที่ไม่ถูกต้อง: {s} (ใช้ DD/MM/YYYY หรือ YYYY-MM-DD)')
+
+
+def _load_backfill_job(job_id):
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM backfill_jobs WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"❌ load backfill job error: {e}")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return None
+
+
+def _save_backfill_progress(job_id, cursor_date, status, days_done,
+                            days_failed, total_records, last_error, results):
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE backfill_jobs
+            SET cursor_date = %s, status = %s, days_done = %s, days_failed = %s,
+                total_records = %s, last_error = %s, results = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = %s
+        """, (cursor_date, status, days_done, days_failed, total_records,
+              (last_error or '')[:2000], json.dumps(results, ensure_ascii=False), job_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ save backfill progress error: {e}")
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+        return False
+
+
+def _job_public(job, chunk_days=None, chunk_records=None):
+    """แปลง job เป็น response ที่อ่านง่าย"""
+    total = int(job.get('total_days') or 0)
+    done = int(job.get('days_done') or 0)
+    completed = job.get('status') == 'completed'
+    out = {
+        'job_id': job.get('job_id'),
+        'status': job.get('status'),
+        'completed': completed,
+        'date_start': str(job.get('date_start')),
+        'date_end': str(job.get('date_end')),
+        'next_date': None if completed else (str(job.get('cursor_date')) if job.get('cursor_date') else None),
+        'total_days': total,
+        'days_done': done,
+        'days_failed': int(job.get('days_failed') or 0),
+        'days_remaining': max(0, total - done),
+        'progress_pct': round(done * 100.0 / total, 1) if total else 0.0,
+        'total_records': int(job.get('total_records') or 0),
+        'last_error': job.get('last_error') or '',
+    }
+    if chunk_days is not None:
+        out['chunk_days'] = chunk_days
+    if chunk_records is not None:
+        out['chunk_records'] = chunk_records
+    return out
+
+
+def _run_backfill_chunk(job):
+    """รัน backfill ต่อจาก cursor เท่าที่ทันใน time budget
+
+    รับประกันว่าจะทำอย่างน้อย 1 วันต่อการเรียก 1 ครั้ง เพื่อไม่ให้ค้างวนลูป
+    และบันทึก progress ลง DB หลังจบแต่ละวัน (ถ้า process ถูกฆ่ากลางคัน
+    ครั้งหน้าจะทำต่อจากวันที่ค้าง ไม่ต้องเริ่มใหม่)
+    """
+    from auto_daily_export import run_daily_export
+
+    budget = _backfill_time_budget()
+    started = time.time()
+
+    job_id = job['job_id']
+    cursor = job['cursor_date'] or job['date_start']
+    date_end = job['date_end']
+    days_done = int(job.get('days_done') or 0)
+    days_failed = int(job.get('days_failed') or 0)
+    total_records = int(job.get('total_records') or 0)
+
+    results = job.get('results') or []
+    if isinstance(results, str):
+        try:
+            results = json.loads(results)
+        except Exception:
+            results = []
+
+    chunk_results = []
+    durations = []
+    last_error = ''
+
+    print(f"🔁 [Backfill {job_id}] chunk start at {cursor} (budget {budget}s)")
+
+    while cursor <= date_end:
+        elapsed = time.time() - started
+        # ประมาณเวลาของวันถัดไปจากค่าเฉลี่ยที่ผ่านมา — ถ้าคาดว่าจะเกิน budget ให้หยุด
+        avg = (sum(durations) / len(durations)) if durations else 0
+        if chunk_results and (elapsed + avg) > budget:
+            print(f"⏸️ [Backfill {job_id}] หยุดที่ {cursor} (ใช้ไป {elapsed:.0f}s/{budget}s)")
+            break
+
+        day_started = time.time()
+        day_str = cursor.strftime('%d/%m/%Y')
+        print(f"🔁 [Backfill {job_id}] {day_str} ({days_done + 1}/{job.get('total_days')})")
+
+        try:
+            res = run_daily_export(force=True, target_dt=datetime.combine(cursor, datetime.min.time()))
+            records = res.get('total_records', 0) or 0
+            ok = bool(res.get('sync_completed'))
+            total_records += records
+            if not ok:
+                days_failed += 1
+                last_error = f"{day_str}: sync ไม่สมบูรณ์"
+            entry = {
+                'date': day_str,
+                'success': ok,
+                'records': records,
+                'zones_synced': res.get('total_synced'),
+                'errors': res.get('total_errors'),
+                'warnings': res.get('total_warnings'),
+            }
+        except Exception as day_err:
+            days_failed += 1
+            last_error = f"{day_str}: {day_err}"
+            print(f"❌ [Backfill {job_id}] {day_str} failed: {day_err}")
+            entry = {'date': day_str, 'success': False, 'records': 0, 'error': str(day_err)}
+
+        days_done += 1
+        durations.append(time.time() - day_started)
+        chunk_results.append(entry)
+        results.append(entry)
+        cursor = cursor + timedelta(days=1)
+
+        # บันทึกความคืบหน้าทุกวัน เพื่อกัน process ถูกฆ่ากลางคัน
+        finished = cursor > date_end
+        _save_backfill_progress(
+            job_id,
+            None if finished else cursor,
+            'completed' if finished else 'running',
+            days_done, days_failed, total_records, last_error,
+            results[-200:],
+        )
+
+    job = _load_backfill_job(job_id) or job
+    return job, len(chunk_results), sum(e.get('records', 0) for e in chunk_results)
+
+
 @app.route('/api/admin/backfill-range', methods=['POST'])
 def backfill_range():
-    """Re-sync ข้อมูลเข้า Turso ย้อนหลังตามช่วงวันที่ที่ระบุ
+    """เริ่ม job re-sync ข้อมูลเข้า Turso ย้อนหลัง (ทำทีละก้อน ต่อได้)
 
     ใช้ซ่อมข้อมูลหลังจากแก้ branch_ids ใน zone ให้ถูกต้องแล้ว
     ปลอดภัยต่อการรันซ้ำ เพราะ run_daily_export จะ delete_zone_records
@@ -4716,7 +4931,10 @@ def backfill_range():
     Body (JSON):
         date_start: "01/07/2026" หรือ "2026-07-01"  (จำเป็น)
         date_end:   "31/07/2026" หรือ "2026-07-31"  (จำเป็น)
-        dry_run:    true = แค่แสดงว่าจะรันวันไหนบ้าง ไม่ sync จริง
+        dry_run:    true = แสดงว่าจะรันวันไหนบ้าง ไม่ sync จริง
+
+    ถ้าทำไม่จบใน request เดียว (ชน time budget) จะคืน completed=false
+    พร้อม job_id และ next_date ให้เรียก /api/admin/backfill-continue ต่อ
 
     Auth: ต้องส่ง Authorization: Bearer <CRON_SECRET> ถ้าตั้งค่า CRON_SECRET ไว้
     """
@@ -4732,99 +4950,184 @@ def backfill_range():
         dry_run = bool(data.get('dry_run', False))
 
         if not raw_start or not raw_end:
-            return jsonify({
-                'success': False,
-                'error': 'กรุณาระบุ date_start และ date_end'
-            }), 400
-
-        def parse_date(s):
-            for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
-                try:
-                    return datetime.strptime(s, fmt)
-                except ValueError:
-                    continue
-            raise ValueError(f'รูปแบบวันที่ไม่ถูกต้อง: {s} (ใช้ DD/MM/YYYY หรือ YYYY-MM-DD)')
+            return jsonify({'success': False,
+                            'error': 'กรุณาระบุ date_start และ date_end'}), 400
 
         try:
-            start_dt = parse_date(raw_start)
-            end_dt = parse_date(raw_end)
+            start_date = _parse_backfill_date(raw_start)
+            end_date = _parse_backfill_date(raw_end)
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
 
-        if start_dt > end_dt:
-            return jsonify({'success': False, 'error': 'date_start ต้องไม่เกิน date_end'}), 400
+        if start_date > end_date:
+            return jsonify({'success': False,
+                            'error': 'date_start ต้องไม่เกิน date_end'}), 400
 
-        total_days = (end_dt - start_dt).days + 1
-        MAX_DAYS = 62
+        total_days = (end_date - start_date).days + 1
+        MAX_DAYS = 366
         if total_days > MAX_DAYS:
             return jsonify({
                 'success': False,
-                'error': f'ช่วงวันที่ยาวเกินไป ({total_days} วัน) สูงสุด {MAX_DAYS} วันต่อครั้ง'
+                'error': f'ช่วงวันที่ยาวเกินไป ({total_days} วัน) สูงสุด {MAX_DAYS} วันต่อ job'
             }), 400
 
-        dates = [start_dt + timedelta(days=i) for i in range(total_days)]
-
         if dry_run:
+            dates = [(start_date + timedelta(days=i)).strftime('%d/%m/%Y')
+                     for i in range(total_days)]
             return jsonify({
                 'success': True,
                 'dry_run': True,
                 'total_days': total_days,
-                'dates': [d.strftime('%d/%m/%Y') for d in dates],
+                'dates': dates,
+                'time_budget_seconds': _backfill_time_budget(),
                 'message': f'จะ re-sync ทั้งหมด {total_days} วัน'
             })
 
-        from auto_daily_export import run_daily_export
-
-        print(f"🔁 [Backfill] Starting: {raw_start} -> {raw_end} ({total_days} days)")
-
-        results = []
-        total_records = 0
-        failed_days = 0
-
-        for idx, d in enumerate(dates):
-            day_str = d.strftime('%d/%m/%Y')
-            print(f"🔁 [Backfill] [{idx + 1}/{total_days}] {day_str}")
+        # สร้าง job
+        job_id = f"BF_{datetime.now().strftime('%Y%m%d%H%M%S')}_{total_days}d"
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO backfill_jobs
+                (job_id, date_start, date_end, cursor_date, status, total_days)
+                VALUES (%s, %s, %s, %s, 'running', %s)
+            """, (job_id, start_date, end_date, start_date, total_days))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
             try:
-                res = run_daily_export(force=True, target_dt=d)
-                records = res.get('total_records', 0) or 0
-                total_records += records
-                ok = bool(res.get('sync_completed'))
-                if not ok:
-                    failed_days += 1
-                results.append({
-                    'date': day_str,
-                    'success': ok,
-                    'records': records,
-                    'zones_synced': res.get('total_synced'),
-                    'errors': res.get('total_errors'),
-                    'warnings': res.get('total_warnings'),
-                })
-            except Exception as day_err:
-                failed_days += 1
-                print(f"❌ [Backfill] {day_str} failed: {day_err}")
-                results.append({
-                    'date': day_str,
-                    'success': False,
-                    'records': 0,
-                    'error': str(day_err),
-                })
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
+            return jsonify({'success': False, 'error': f'สร้าง job ไม่สำเร็จ: {e}'}), 500
 
-        print(f"🔁 [Backfill] Done. {total_records:,} records, {failed_days} failed days")
+        print(f"🔁 [Backfill] created job {job_id}: {start_date} -> {end_date} ({total_days} วัน)")
 
-        return jsonify({
-            'success': failed_days == 0,
-            'total_days': total_days,
-            'failed_days': failed_days,
-            'total_records': total_records,
-            'results': results,
-            'message': f'Backfill เสร็จ: {total_days} วัน, {total_records:,} records'
-                       + (f', ล้มเหลว {failed_days} วัน' if failed_days else '')
-        })
+        job = _load_backfill_job(job_id)
+        job, chunk_days, chunk_records = _run_backfill_chunk(job)
+        payload = _job_public(job, chunk_days, chunk_records)
+        payload['success'] = job.get('status') == 'completed' and not payload['days_failed']
+        payload['message'] = (
+            f"เสร็จแล้ว: {payload['days_done']} วัน, {payload['total_records']:,} records"
+            if payload['completed'] else
+            f"ทำไป {payload['days_done']}/{payload['total_days']} วัน — "
+            f"เรียก /api/admin/backfill-continue ด้วย job_id นี้เพื่อทำต่อจาก {payload['next_date']}"
+        )
+        return jsonify(payload)
 
     except Exception as e:
         print(f"❌ Backfill error: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/backfill-continue', methods=['POST'])
+def backfill_continue():
+    """ทำ backfill job ต่อจากวันที่ค้างไว้
+
+    Body: {"job_id": "BF_..."}  (ไม่ระบุ = ใช้ job ที่ยังไม่จบล่าสุด)
+    เรียกซ้ำจนกว่า completed = true
+    """
+    try:
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
+        if cron_secret and auth_header != f'Bearer {cron_secret}':
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+        data = request.get_json(silent=True) or {}
+        job_id = str(data.get('job_id', '')).strip()
+
+        if job_id:
+            job = _load_backfill_job(job_id)
+        else:
+            conn = get_db_connection()
+            if not conn:
+                return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM backfill_jobs
+                WHERE status IN ('running', 'pending')
+                ORDER BY created_at DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            job = dict(row) if row else None
+
+        if not job:
+            return jsonify({'success': False, 'error': 'ไม่พบ job ที่ค้างอยู่'}), 404
+
+        if job.get('status') == 'completed':
+            return jsonify(dict(_job_public(job), success=True,
+                                message='job นี้เสร็จแล้ว'))
+
+        job, chunk_days, chunk_records = _run_backfill_chunk(job)
+        payload = _job_public(job, chunk_days, chunk_records)
+        payload['success'] = True
+        payload['message'] = (
+            f"เสร็จแล้ว: {payload['days_done']} วัน, {payload['total_records']:,} records"
+            if payload['completed'] else
+            f"ทำไป {payload['days_done']}/{payload['total_days']} วัน — "
+            f"เหลืออีก {payload['days_remaining']} วัน (ต่อจาก {payload['next_date']})"
+        )
+        return jsonify(payload)
+
+    except Exception as e:
+        print(f"❌ Backfill continue error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/backfill-status', methods=['GET'])
+def backfill_status():
+    """ดูสถานะ backfill job
+
+    ?job_id=BF_...  ดู job เดียว (มี results รายวันด้วย)
+    ไม่ระบุ         แสดง 20 job ล่าสุด
+    """
+    try:
+        job_id = request.args.get('job_id', '').strip()
+
+        if job_id:
+            job = _load_backfill_job(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'ไม่พบ job นี้'}), 404
+            payload = _job_public(job)
+            results = job.get('results') or []
+            if isinstance(results, str):
+                try:
+                    results = json.loads(results)
+                except Exception:
+                    results = []
+            payload['results'] = results
+            payload['success'] = True
+            return jsonify(payload)
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT job_id, date_start, date_end, cursor_date, status, total_days,
+                   days_done, days_failed, total_records, last_error, created_at, updated_at
+            FROM backfill_jobs ORDER BY created_at DESC LIMIT 20
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'jobs': [_job_public(dict(r)) for r in rows]
+        })
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
