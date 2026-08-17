@@ -4669,6 +4669,132 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/turso-usage', methods=['GET'])
+def turso_usage_api():
+    """วัดขนาดฐาน Turso จริง + ประมาณการว่าถ้า backfill เพิ่มจะใช้พื้นที่เท่าไร
+
+    Turso Free: storage 5GB, rows read 500M/เดือน, rows written 10M/เดือน
+    ถ้าเกิน query จะ fail ด้วย error code BLOCKED (ไม่ใช่แค่คิดเงินเพิ่ม)
+
+    Query params:
+        days=48                  จำนวนวันที่จะ backfill
+        branches=1489            จำนวนสาขาที่จะดึง
+        rows_per_branch_day=     รายการต่อสาขาต่อวัน (ไม่ระบุ = คำนวณจากข้อมูลจริง)
+    """
+    try:
+        turso = TursoHandler()
+        if not (turso.url and turso.token):
+            return jsonify({'success': False, 'error': 'ไม่พบ Turso credential'}), 500
+
+        out = {'success': True, 'plan_free_limits': {
+            'storage_gb': 5, 'rows_read_per_month': 500_000_000,
+            'rows_written_per_month': 10_000_000,
+        }}
+
+        def one(sql, params=None):
+            res = turso._execute_sql(sql, params)
+            if res and res.rows:
+                return list(res.rows[0])
+            return None
+
+        # ---- ขนาดฐานจาก PRAGMA ----
+        db_bytes = None
+        try:
+            pc = one("PRAGMA page_count")
+            ps = one("PRAGMA page_size")
+            if pc and ps:
+                db_bytes = int(pc[0]) * int(ps[0])
+                out['page_count'] = int(pc[0])
+                out['page_size'] = int(ps[0])
+        except Exception as e:
+            out['pragma_error'] = str(e)
+
+        # ---- จำนวนแถว ----
+        counts = {}
+        for t in ('trades', 'sync_history'):
+            try:
+                r = one(f"SELECT COUNT(*) FROM {t}")
+                counts[t] = int(r[0]) if r else None
+            except Exception:
+                counts[t] = None
+        out['row_counts'] = counts
+
+        # ---- ขนาดเฉลี่ยต่อแถว (วัดจากข้อมูลจริง 2000 แถว) ----
+        avg_row_bytes = None
+        try:
+            info = turso._execute_sql("PRAGMA table_info(trades)")
+            cols = [str(r[1]) for r in info.rows] if info else []
+            if cols:
+                expr = ' + '.join(f"LENGTH(COALESCE(CAST(\"{c}\" AS TEXT),''))" for c in cols)
+                r = one(f"SELECT AVG({expr}) FROM (SELECT * FROM trades LIMIT 2000)")
+                if r and r[0] is not None:
+                    # +ค่าโสหุ้ยของ SQLite ต่อแถว (header + varint ต่อคอลัมน์) ประมาณ
+                    avg_row_bytes = float(r[0]) + len(cols) * 2 + 10
+                    out['avg_text_bytes'] = round(float(r[0]), 1)
+                    out['columns'] = len(cols)
+        except Exception as e:
+            out['avg_row_error'] = str(e)
+
+        if avg_row_bytes is None and db_bytes and counts.get('trades'):
+            avg_row_bytes = db_bytes / max(1, counts['trades'])
+            out['avg_row_source'] = 'จากขนาดฐานหารจำนวนแถว (รวม index แล้ว)'
+        else:
+            out['avg_row_source'] = 'วัดจากความยาวข้อมูลจริง 2000 แถว'
+
+        out['db_bytes'] = db_bytes
+        out['db_mb'] = round(db_bytes / 1024 / 1024, 1) if db_bytes else None
+        out['avg_row_bytes'] = round(avg_row_bytes, 1) if avg_row_bytes else None
+
+        # ---- อัตราปัจจุบัน: รายการต่อสาขาต่อวัน จากวันที่ข้อมูลครบที่สุด ----
+        rows_per_branch_day = request.args.get('rows_per_branch_day', type=float)
+        best_day = None
+        if not rows_per_branch_day:
+            try:
+                r = turso._execute_sql(
+                    "SELECT document_date, COUNT(*), COUNT(DISTINCT real_branch_id) "
+                    "FROM trades GROUP BY document_date "
+                    "ORDER BY COUNT(*) DESC LIMIT 1")
+                if r and r.rows:
+                    d, c, b = r.rows[0]
+                    best_day = {'date': str(d), 'records': int(c), 'branches': int(b)}
+                    rows_per_branch_day = int(c) / max(1, int(b))
+            except Exception as e:
+                out['best_day_error'] = str(e)
+        out['best_day'] = best_day
+        out['rows_per_branch_day'] = round(rows_per_branch_day, 2) if rows_per_branch_day else None
+
+        # ---- ประมาณการ ----
+        days = request.args.get('days', default=48, type=int)
+        branches = request.args.get('branches', default=1489, type=int)
+
+        if rows_per_branch_day and avg_row_bytes:
+            INDEX_OVERHEAD = 1.5   # trades มี 4 index -> เผื่อพื้นที่ index
+            new_rows = rows_per_branch_day * branches * days
+            new_bytes = new_rows * avg_row_bytes * INDEX_OVERHEAD
+            total_bytes = (db_bytes or 0) + new_bytes
+
+            out['projection'] = {
+                'days': days,
+                'branches': branches,
+                'rows_per_branch_day': round(rows_per_branch_day, 2),
+                'new_rows': int(new_rows),
+                'new_mb': round(new_bytes / 1024 / 1024, 1),
+                'total_mb': round(total_bytes / 1024 / 1024, 1),
+                'total_pct_of_5gb': round(total_bytes / (5 * 1024**3) * 100, 1),
+                'writes_pct_of_10m': round(new_rows / 10_000_000 * 100, 1),
+                'index_overhead_assumed': INDEX_OVERHEAD,
+            }
+
+        turso.close()
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"❌ turso-usage error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/diagnose-turso', methods=['GET'])
 def diagnose_turso_api():
     """ตรวจข้อมูลใน Turso หาว่ายอดหายตรงไหน (อ่านอย่างเดียว)
