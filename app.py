@@ -341,6 +341,11 @@ def save_branches_to_db(branches_list):
         cur.close()
         conn.close()
         print(f"✅ Saved {len(branches_list)} branches to database")
+        # ล้าง cache เพื่อให้สาขาใหม่มีผลทันที ไม่ต้องรอ TTL
+        try:
+            invalidate_branches_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"❌ Error saving branches to DB: {e}")
@@ -2468,43 +2473,87 @@ def find_branch_by_id(branch_id_input):
     
     return None
 
+# ==========================================
+# Cache รายชื่อสาขาสำหรับแปลง branch_id -> ข้อมูลสาขา
+# ------------------------------------------
+# เดิมอ่านจาก extracted_branches.json อย่างเดียว ซึ่ง freeze ไว้ที่ 1,489 สาขา
+# (branch_id สูงสุด 1504) แต่ DB ปัจจุบันมี 1,721 สาขา
+# สาขาที่เปิดใหม่หลังจากนั้นจึงแปลง ID ไม่ได้ -> fallback ไปใช้ ID ดิบเป็น
+# real_branch_id -> ค้นใน Turso ไม่เจอทั้งที่มีข้อมูลอยู่ ทำให้ยอดหาย
+#
+# แก้เป็น: ใช้ไฟล์เป็นฐาน แล้วให้ DB ทับ (DB คือ source of truth และเป็น
+# superset) พร้อม TTL เพื่อให้สาขาใหม่มีผลโดยไม่ต้องรอ restart
+# ==========================================
+
 _BRANCHES_DICT_CACHE = None
+_BRANCHES_CACHE_TS = 0.0
+_BRANCHES_CACHE_TTL = 300  # วินาที
+
+
+def invalidate_branches_cache():
+    """ล้าง cache รายชื่อสาขา (เรียกหลังอัปเดตสาขาใหม่)"""
+    global _BRANCHES_DICT_CACHE, _BRANCHES_CACHE_TS
+    _BRANCHES_DICT_CACHE = None
+    _BRANCHES_CACHE_TS = 0.0
+
+
+def _build_branches_cache():
+    """สร้าง cache จากไฟล์ + DB (DB ทับไฟล์)"""
+    global _BRANCHES_DICT_CACHE, _BRANCHES_CACHE_TS
+
+    merged = {}
+
+    # 1. ไฟล์ชุดเก่า — ใช้เป็นฐานเพื่อไม่ให้แย่ลงกว่าเดิมถ้า DB ล่ม
+    try:
+        branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+        if os.path.exists(branches_file):
+            with open(branches_file, 'r', encoding='utf-8') as f:
+                for b in json.load(f):
+                    bid = str(b.get('branch_id', '')).strip()
+                    if bid:
+                        merged[bid] = b
+    except Exception as e:
+        print(f"⚠️ [Cache Build] อ่าน extracted_branches.json ไม่ได้: {e}")
+
+    file_count = len(merged)
+
+    # 2. DB ทับ — เป็นข้อมูลปัจจุบันและมีสาขาใหม่ที่ไฟล์ไม่มี
+    db_count = 0
+    try:
+        for b in (get_branches_from_db() or []):
+            bid = str(b.get('branch_id', '')).strip()
+            if bid:
+                merged[bid] = b
+                db_count += 1
+    except Exception as e:
+        print(f"⚠️ [Cache Build] ดึงสาขาจาก DB ไม่ได้: {e}")
+
+    _BRANCHES_DICT_CACHE = merged
+    _BRANCHES_CACHE_TS = time.time()
+
+    extra = len(merged) - file_count
+    print(f"📦 [Cache Build] รายชื่อสาขา {len(merged)} รายการ "
+          f"(ไฟล์ {file_count} + DB {db_count} -> เพิ่มจากไฟล์ {extra})")
+    if not db_count:
+        print("⚠️ [Cache Build] ไม่มีข้อมูลจาก DB — ใช้ไฟล์ชุดเก่าอย่างเดียว "
+              "สาขาที่เปิดใหม่จะแปลง ID ไม่ได้")
+
+    return merged
+
 
 def find_branch_by_sequential_id(seq_id):
-    """ค้นหาสาขาจาก branch_id (sequential index) ด้วยระบบ Cache"""
+    """ค้นหาสาขาจาก branch_id (ID ที่ Eve ใช้ใน dropdown) ด้วยระบบ Cache"""
     global _BRANCHES_DICT_CACHE
-    import os
-    import json
-    
-    # 1. โหลดข้อมูลเข้า Cache ครั้งแรกครั้งเดียว
-    if _BRANCHES_DICT_CACHE is None:
-        try:
-            branches_file = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
-            if os.path.exists(branches_file):
-                with open(branches_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # สร้าง Dict สำหรับค้นหาด้วย branch_id อย่างรวดเร็ว
-                    _BRANCHES_DICT_CACHE = {str(b.get('branch_id')): b for b in data}
-                    print(f"📦 [Cache Build] Loaded {len(_BRANCHES_DICT_CACHE)} branches into memory.")
-            else:
-                _BRANCHES_DICT_CACHE = {}
-                print(f"⚠️ [Cache Build] extracted_branches.json not found.")
-        except Exception as e:
-            print(f"❌ [Cache Build] Error loading branches: {e}")
-            _BRANCHES_DICT_CACHE = {}
 
-    # 2. ค้นหาจาก Cache
+    if (_BRANCHES_DICT_CACHE is None
+            or (time.time() - _BRANCHES_CACHE_TS) > _BRANCHES_CACHE_TTL):
+        _build_branches_cache()
+
     try:
-        s_id = str(seq_id)
-        branch = _BRANCHES_DICT_CACHE.get(s_id)
-        if branch:
-            # print(f"✅ [Cache Hit] Found branch: {branch.get('branch_name')}") # ลด Log เพื่อความเร็ว
-            return branch
-        # print(f"⚠️ [Cache Miss] No branch found with ID {s_id}")
-    except:
-        pass
-        
-    return None
+        return _BRANCHES_DICT_CACHE.get(str(seq_id).strip())
+    except Exception:
+        return None
+
 
 def get_real_branch_id(branch):
     """ดึง Real ID จากข้อมูลสาขา (เช่น 249 จาก ID249)"""
