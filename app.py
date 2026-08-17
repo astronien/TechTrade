@@ -4669,6 +4669,149 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/zone-branch-audit', methods=['GET'])
+def zone_branch_audit_api():
+    """ตรวจว่า branch_id ใน zone ใช้ได้จริงไหม และมีข้อมูลใน Turso หรือเปล่า
+
+    ตอบคำถามว่า "สาขาที่ไม่มีข้อมูลเลย เป็นเพราะ ID ผิด หรือเพราะไม่เคย sync"
+
+    branch_id ใน zone อาจถูกบันทึกด้วย 2 scheme ที่ไม่ตรงกัน
+      - Eve ID จริง (จาก cached_branches ใน DB)
+      - index เรียงลำดับ (จาก extracted_branches.json ชุดเก่า)
+    endpoint นี้ลอง resolve ทั้งสองแบบแล้วบอกว่าตรงกับแบบไหน
+
+    Query params:
+        zone=Studio7        ระบุชื่อ zone (บางส่วนก็ได้) ไม่ระบุ = ทุก zone
+        only_missing=1      แสดงเฉพาะสาขาที่ไม่มีข้อมูลใน Turso
+    """
+    try:
+        import re
+
+        zone_filter = request.args.get('zone', '').strip().lower()
+        only_missing = request.args.get('only_missing', '') in ('1', 'true', 'True')
+
+        zones = load_custom_zones_from_file()
+        if zone_filter:
+            zones = [z for z in zones if zone_filter in str(z.get('zone_name', '')).lower()]
+        if not zones:
+            return jsonify({'success': False, 'error': 'ไม่พบ zone ที่ระบุ'}), 404
+
+        # ---- รายชื่อสาขา 2 ชุด ----
+        db_branches = get_branches_from_db() or []
+        db_by_id = {str(b.get('branch_id')).strip(): b for b in db_branches}
+        db_by_real = {}
+        for b in db_branches:
+            mm = re.search(r'ID(\d+)', str(b.get('branch_name', '')))
+            if mm:
+                db_by_real.setdefault(mm.group(1), b)
+
+        legacy = []
+        try:
+            fp = os.path.join(os.path.dirname(__file__), 'extracted_branches.json')
+            if os.path.exists(fp):
+                with open(fp, 'r', encoding='utf-8') as f:
+                    legacy = json.load(f)
+        except Exception:
+            legacy = []
+        legacy_by_id = {str(b.get('branch_id')).strip(): b for b in legacy}
+
+        # ---- นับข้อมูลใน Turso ----
+        turso = TursoHandler()
+        turso_stats = {}
+        if turso.url and turso.token:
+            try:
+                res = turso._execute_sql(
+                    "SELECT real_branch_id, COUNT(*), MIN(document_date), MAX(document_date) "
+                    "FROM trades GROUP BY real_branch_id")
+                if res:
+                    for rid, cnt, dmin, dmax in res.rows:
+                        turso_stats[str(rid)] = {
+                            'rows': int(cnt), 'first_date': str(dmin), 'last_date': str(dmax)}
+            except Exception as e:
+                print(f"⚠️ turso stats error: {e}")
+        turso.close()
+
+        results = []
+        for z in zones:
+            raw_ids = z.get('branch_ids') or []
+            if isinstance(raw_ids, str):
+                try:
+                    raw_ids = json.loads(raw_ids)
+                except Exception:
+                    raw_ids = [x.strip() for x in raw_ids.split(',') if x.strip()]
+
+            branches = []
+            for bid in raw_ids:
+                s = str(bid).strip()
+                entry = {'zone_branch_id': s}
+
+                hit_db = db_by_id.get(s)
+                hit_legacy = legacy_by_id.get(s)
+                hit_real = db_by_real.get(s.lstrip('0') or s)
+
+                if hit_db:
+                    entry['matched_as'] = 'eve_id'
+                    entry['branch_name'] = hit_db.get('branch_name')
+                elif hit_real:
+                    entry['matched_as'] = 'real_id'
+                    entry['branch_name'] = hit_real.get('branch_name')
+                elif hit_legacy:
+                    entry['matched_as'] = 'legacy_index_only'
+                    entry['branch_name'] = hit_legacy.get('branch_name')
+                else:
+                    entry['matched_as'] = 'not_found'
+                    entry['branch_name'] = None
+
+                name = entry.get('branch_name') or ''
+                mm = re.search(r'ID(\d+)', name) or re.search(r'FC[BP](\d+)', name)
+                real_id = mm.group(1) if mm else (s if s.isdigit() else None)
+                entry['real_id'] = real_id
+
+                st = turso_stats.get(str(real_id)) if real_id else None
+                entry['turso_rows'] = st['rows'] if st else 0
+                entry['first_date'] = st['first_date'] if st else None
+                entry['last_date'] = st['last_date'] if st else None
+
+                # วินิจฉัย
+                if entry['matched_as'] == 'not_found':
+                    entry['verdict'] = 'ID นี้ไม่มีในรายชื่อสาขาเลย — ดึงข้อมูลไม่ได้แน่นอน'
+                elif entry['matched_as'] == 'legacy_index_only':
+                    entry['verdict'] = 'เจอเฉพาะในไฟล์ชุดเก่า ไม่มีใน DB ปัจจุบัน — สาขาอาจถูกปิด หรือ ID คนละ scheme'
+                elif entry['matched_as'] == 'real_id':
+                    entry['verdict'] = 'zone เก็บเป็น real ID แทน Eve ID — คนละ scheme กับที่ระบบใช้ยิง Eve'
+                elif entry['turso_rows'] == 0:
+                    entry['verdict'] = 'ID ถูกต้อง แต่ไม่เคยมีข้อมูลใน Turso — ยังไม่เคย sync หรือสาขานี้ไม่มีเทรดจริง'
+                else:
+                    entry['verdict'] = 'ปกติ'
+
+                if only_missing and entry['turso_rows'] > 0:
+                    continue
+                branches.append(entry)
+
+            problems = [b for b in branches if b['verdict'] != 'ปกติ']
+            results.append({
+                'zone_id': z.get('zone_id'),
+                'zone_name': z.get('zone_name'),
+                'total_branches': len(raw_ids),
+                'shown': len(branches),
+                'problem_count': len(problems),
+                'branches': sorted(branches, key=lambda x: x['turso_rows']),
+            })
+
+        return jsonify({
+            'success': True,
+            'db_branch_count': len(db_branches),
+            'legacy_branch_count': len(legacy),
+            'zones': results,
+        })
+
+    except Exception as e:
+        print(f"❌ zone-branch-audit error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/turso-usage', methods=['GET'])
 def turso_usage_api():
     """วัดขนาดฐาน Turso จริง + ประมาณการว่าถ้า backfill เพิ่มจะใช้พื้นที่เท่าไร
