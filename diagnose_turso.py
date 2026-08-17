@@ -26,7 +26,48 @@ import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+def _locate_project():
+    """หาโฟลเดอร์โปรเจกต์ที่มี turso_handler.py
+
+    ลองตามลำดับ: โฟลเดอร์ของสคริปต์ -> โฟลเดอร์ปัจจุบัน -> ไล่ขึ้นไปทีละชั้น
+    เพื่อให้รันสคริปต์จากที่ไหนก็ได้
+    """
+    candidates = [os.path.dirname(os.path.abspath(__file__)), os.getcwd()]
+
+    cur = os.getcwd()
+    for _ in range(4):
+        cur = os.path.dirname(cur)
+        if cur and cur != '/':
+            candidates.append(cur)
+
+    env_dir = os.environ.get('TECHTRADE_DIR', '').strip()
+    if env_dir:
+        candidates.insert(0, os.path.abspath(os.path.expanduser(env_dir)))
+
+    seen = set()
+    for d in candidates:
+        if not d or d in seen:
+            continue
+        seen.add(d)
+        if os.path.exists(os.path.join(d, 'turso_handler.py')):
+            sys.path.insert(0, d)
+            return d
+
+    print("❌ หา turso_handler.py ไม่เจอ")
+    print("\n   สคริปต์นี้ต้องรันจากโฟลเดอร์โปรเจกต์ TechTrade")
+    print("   (โฟลเดอร์ที่มีไฟล์ app.py, turso_handler.py, .env อยู่)\n")
+    print("   วิธีแก้ — cd เข้าโฟลเดอร์โปรเจกต์ก่อนแล้วรันใหม่:")
+    print("      cd /path/to/TechTrade")
+    print("      git pull")
+    print("      python3 diagnose_turso.py\n")
+    print("   หรือระบุ path ตรงๆ:")
+    print("      TECHTRADE_DIR=/path/to/TechTrade python3 diagnose_turso.py\n")
+    print(f"   (ที่ลองหาแล้ว: {', '.join(sorted(seen))})")
+    sys.exit(1)
+
+
+PROJECT_DIR = _locate_project()
 
 
 def month_start(d):
@@ -65,9 +106,15 @@ def main():
 
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        env_path = os.path.join(PROJECT_DIR, '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+        else:
+            load_dotenv()
     except ImportError:
         pass
+
+    print(f"📂 โปรเจกต์: {PROJECT_DIR}")
 
     from turso_handler import TursoHandler
 
