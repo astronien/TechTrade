@@ -4755,17 +4755,42 @@ def branch_compare_api():
         if (d_end - d_start).days > 62:
             return jsonify({'success': False, 'error': 'ช่วงวันที่ยาวเกิน 62 วัน'}), 400
 
-        # ---- resolve สาขา: รับได้ทั้ง Eve ID และ real ID ----
-        eve_id = raw_branch
-        info = find_branch_by_sequential_id(raw_branch)
-        if not info:
-            # ลองมองเป็น real ID แล้วหา Eve ID ย้อนกลับ
-            for b in (get_branches_from_db() or []):
-                mm = _re.search(r'ID(\d+)', str(b.get('branch_name', '')))
-                if mm and mm.group(1) == raw_branch.lstrip('0'):
-                    info = b
-                    eve_id = str(b.get('branch_id'))
-                    break
+        # ---- resolve สาขา ----
+        # เลข ID ตัวเดียวกันอาจหมายถึงคนละสาขา:
+        #   Eve ID (เลขใน dropdown) vs real ID (เลขในชื่อ เช่น ID645)
+        # จึงหาให้ทั้งสองแบบแล้วรายงานกลับ ผู้ใช้เลือกได้ด้วย by=eve|real
+        by = request.args.get('by', 'auto').lower()
+        needle = raw_branch.lstrip('0') or raw_branch
+
+        as_eve = find_branch_by_sequential_id(raw_branch)
+        as_real = None
+        for b in (get_branches_from_db() or []):
+            mm = _re.search(r'ID(\d+)', str(b.get('branch_name', ''))) or \
+                 _re.search(r'FC[BP](\d+)', str(b.get('branch_name', '')))
+            if mm and mm.group(1) == needle:
+                as_real = b
+                break
+
+        candidates = {}
+        if as_eve:
+            candidates['eve_id'] = {'eve_id': raw_branch,
+                                    'branch_name': as_eve.get('branch_name')}
+        if as_real:
+            candidates['real_id'] = {'eve_id': str(as_real.get('branch_id')),
+                                     'branch_name': as_real.get('branch_name')}
+
+        if by == 'eve':
+            info, eve_id = as_eve, raw_branch
+        elif by == 'real':
+            info = as_real
+            eve_id = str(as_real.get('branch_id')) if as_real else raw_branch
+        else:
+            # auto: ถ้าตีความเป็น real ID แล้วเจอ ให้ใช้อันนั้นก่อน
+            # เพราะเลขที่คนใช้เรียกสาขากันคือเลขในชื่อ (IDxxx)
+            if as_real:
+                info, eve_id = as_real, str(as_real.get('branch_id'))
+            else:
+                info, eve_id = as_eve, raw_branch
 
         branch_name = info.get('branch_name') if info else None
         real_id = None
@@ -4778,12 +4803,17 @@ def branch_compare_api():
         out = {
             'success': True,
             'input': raw_branch,
+            'resolved_by': by,
             'eve_id': eve_id,
             'real_id': real_id,
             'branch_name': branch_name,
+            'candidates': candidates,
             'date_start': ds,
             'date_end': de,
         }
+        if len(candidates) > 1:
+            out['warning'] = ('เลขนี้ตรงกับสาขามากกว่า 1 แห่ง — '
+                              'ระบุ by=eve หรือ by=real เพื่อเลือก')
 
         # ---- ฝั่ง Turso ----
         iso_s = d_start.strftime('%Y-%m-%d')
