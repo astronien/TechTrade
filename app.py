@@ -4718,6 +4718,172 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/branch-compare', methods=['GET'])
+def branch_compare_api():
+    """เทียบยอดของสาขาเดียวระหว่าง Turso กับ Eve (techswop) แบบรายวัน
+
+    ใช้ตอบว่า "ทำไมรายงานส่งมา X แต่ใน techswop เป็น Y" — จะเห็นเลยว่า
+    ขาดวันไหนบ้าง และขาดไปกี่รายการต่อวัน
+
+    Query params:
+        branch=645              ID สาขา (ใส่ Eve ID หรือ real ID ก็ได้)
+        date_start=01/08/2026   ไม่ระบุ = วันที่ 1 ของเดือนปัจจุบัน
+        date_end=17/08/2026     ไม่ระบุ = วันนี้
+        skip_eve=1              ดูเฉพาะฝั่ง Turso ไม่ยิง Eve (เร็วกว่า)
+    """
+    try:
+        import re as _re
+        from collections import defaultdict
+
+        raw_branch = request.args.get('branch', '').strip()
+        if not raw_branch:
+            return jsonify({'success': False, 'error': 'กรุณาระบุ branch'}), 400
+
+        bkk = pytz.timezone('Asia/Bangkok')
+        now = datetime.now(bkk)
+        ds = request.args.get('date_start', '').strip() or now.replace(day=1).strftime('%d/%m/%Y')
+        de = request.args.get('date_end', '').strip() or now.strftime('%d/%m/%Y')
+        skip_eve = request.args.get('skip_eve', '') in ('1', 'true', 'True')
+
+        try:
+            d_start = _parse_backfill_date(ds)
+            d_end = _parse_backfill_date(de)
+        except ValueError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
+        if d_start > d_end:
+            return jsonify({'success': False, 'error': 'date_start ต้องไม่เกิน date_end'}), 400
+        if (d_end - d_start).days > 62:
+            return jsonify({'success': False, 'error': 'ช่วงวันที่ยาวเกิน 62 วัน'}), 400
+
+        # ---- resolve สาขา: รับได้ทั้ง Eve ID และ real ID ----
+        eve_id = raw_branch
+        info = find_branch_by_sequential_id(raw_branch)
+        if not info:
+            # ลองมองเป็น real ID แล้วหา Eve ID ย้อนกลับ
+            for b in (get_branches_from_db() or []):
+                mm = _re.search(r'ID(\d+)', str(b.get('branch_name', '')))
+                if mm and mm.group(1) == raw_branch.lstrip('0'):
+                    info = b
+                    eve_id = str(b.get('branch_id'))
+                    break
+
+        branch_name = info.get('branch_name') if info else None
+        real_id = None
+        if branch_name:
+            mm = _re.search(r'ID(\d+)', branch_name) or _re.search(r'FC[BP](\d+)', branch_name)
+            real_id = mm.group(1) if mm else None
+        if not real_id:
+            real_id = raw_branch
+
+        out = {
+            'success': True,
+            'input': raw_branch,
+            'eve_id': eve_id,
+            'real_id': real_id,
+            'branch_name': branch_name,
+            'date_start': ds,
+            'date_end': de,
+        }
+
+        # ---- ฝั่ง Turso ----
+        iso_s = d_start.strftime('%Y-%m-%d')
+        iso_e = d_end.strftime('%Y-%m-%d')
+        turso = TursoHandler()
+        turso_by_day = {}
+        turso_total = 0
+        if turso.url and turso.token:
+            try:
+                res = turso._execute_sql(
+                    "SELECT document_date, COUNT(*) FROM trades "
+                    "WHERE real_branch_id = ? AND document_date BETWEEN ? AND ? "
+                    "GROUP BY document_date ORDER BY document_date",
+                    [str(real_id), iso_s, iso_e])
+                if res:
+                    for d, c in res.rows:
+                        turso_by_day[str(d)] = int(c)
+                        turso_total += int(c)
+            except Exception as e:
+                out['turso_error'] = str(e)
+        turso.close()
+
+        out['turso_total'] = turso_total
+        out['turso_days_with_data'] = len(turso_by_day)
+
+        # ---- ฝั่ง Eve ----
+        eve_by_day = {}
+        eve_total = 0
+        if not skip_eve:
+            try:
+                items = fetch_all_for_branch({
+                    'date_start': ds, 'date_end': de,
+                    'sale_code': '', 'customer_sign': '',
+                    'branch_id': eve_id,
+                }) or []
+                eve_total = len(items)
+                for it in items:
+                    dv = it.get('document_date') or it.get('DOCUMENT_DATE') or ''
+                    day = None
+                    s = str(dv)
+                    if '/Date(' in s:
+                        m2 = _re.search(r'(\d+)', s)
+                        if m2:
+                            day = datetime.fromtimestamp(int(m2.group(1)) / 1000.0).strftime('%Y-%m-%d')
+                    elif '/' in s:
+                        pp = s.split('/')
+                        if len(pp) == 3:
+                            day = f"{pp[2][:4]}-{pp[1].zfill(2)}-{pp[0].zfill(2)}"
+                    elif len(s) >= 10:
+                        day = s[:10]
+                    if day:
+                        eve_by_day[day] = eve_by_day.get(day, 0) + 1
+            except Exception as e:
+                out['eve_error'] = str(e)
+
+            out['eve_total'] = eve_total
+            out['eve_days_with_data'] = len(eve_by_day)
+            out['diff'] = eve_total - turso_total
+
+        # ---- เทียบรายวัน ----
+        rows = []
+        d = d_start
+        while d <= d_end:
+            k = d.strftime('%Y-%m-%d')
+            t = turso_by_day.get(k, 0)
+            e = eve_by_day.get(k, 0) if not skip_eve else None
+            item = {'date': k, 'turso': t}
+            if not skip_eve:
+                item['eve'] = e
+                item['missing'] = e - t
+                if e > 0 and t == 0:
+                    item['note'] = 'Turso ไม่มีข้อมูลวันนี้เลย'
+                elif e != t:
+                    item['note'] = 'จำนวนไม่ตรง'
+            rows.append(item)
+            d += timedelta(days=1)
+        out['by_day'] = rows
+
+        if not skip_eve:
+            missing_days = [r for r in rows if r.get('eve', 0) > 0 and r['turso'] == 0]
+            partial_days = [r for r in rows if r.get('eve', 0) > 0 and 0 < r['turso'] < r['eve']]
+            out['summary'] = {
+                'eve_total': eve_total,
+                'turso_total': turso_total,
+                'missing_total': eve_total - turso_total,
+                'missing_pct': round((eve_total - turso_total) / eve_total * 100, 1) if eve_total else 0,
+                'days_missing_entirely': [r['date'] for r in missing_days],
+                'days_partial': [{'date': r['date'], 'eve': r['eve'], 'turso': r['turso']}
+                                 for r in partial_days],
+            }
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"❌ branch-compare error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/zone-branch-audit', methods=['GET'])
 def zone_branch_audit_api():
     """ตรวจว่า branch_id ใน zone ใช้ได้จริงไหม และมีข้อมูลใน Turso หรือเปล่า
