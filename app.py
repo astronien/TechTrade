@@ -1750,56 +1750,94 @@ def get_data_batch():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-def fetch_all_for_branch(filters):
-    """ดึงข้อมูลทั้งหมดของสาขาเดียว (พร้อม pagination)"""
+class BranchFetchError(Exception):
+    """ดึงข้อมูลสาขาจาก Eve ไม่สำเร็จ
+
+    ต่างจาก "สาขานี้ไม่มีรายการ" อย่างสิ้นเชิง — เดิมสองกรณีนี้คืนค่าเหมือนกัน
+    (list ว่าง) ทำให้ระบบเข้าใจว่า sync สำเร็จ แล้วลบข้อมูลเดิมของวันนั้นทิ้ง
+    ทั้งที่ยังไม่ได้ข้อมูลใหม่มาแทน = ข้อมูลหายถาวรแบบเงียบๆ
+    """
+    pass
+
+
+def fetch_all_for_branch(filters, strict=False):
+    """ดึงข้อมูลทั้งหมดของสาขาเดียว (พร้อม pagination)
+
+    Args:
+        strict: True = ถ้าดึงไม่สำเร็จหรือได้ไม่ครบ ให้ raise BranchFetchError
+                แทนการคืน list ว่าง/ไม่ครบเงียบๆ
+                ใช้ตอน sync ที่ความครบถ้วนสำคัญกว่าความต่อเนื่อง
+    """
     import time
-    
+
     # ปรับ timeout ตามสภาพแวดล้อม
     is_vercel = os.environ.get('VERCEL', False)
     max_time = 300 if is_vercel else 900  # เพิ่มเวลาเป็น 15 นาทีถ้าไม่ใช่ Vercel
     max_items = 10000 if is_vercel else 100000
-    
+
     length = 500 # เพิ่มจาก 100 เป็น 500 เพื่อให้ดึงเร็วขึ้น (ลดจำนวนครั้งที่เรียก API)
     start = 0
     all_items = []
     batch_count = 0
     start_time = time.time()
-    
-    print(f"📊 Fetching for branch {filters.get('branch_id')} (Batch size: {length})...")
-    
+    branch_id = filters.get('branch_id')
+    expected_total = None
+
+    print(f"📊 Fetching for branch {branch_id} (Batch size: {length})...")
+
     while True:
         # ตรวจสอบเวลา
         elapsed = time.time() - start_time
         if elapsed > max_time:
-            print(f"⚠️ Timeout protection: stopped at {len(all_items)} items after {elapsed:.1f}s (Max: {max_time}s)")
+            msg = (f"Branch {branch_id}: หมดเวลาที่ {len(all_items)} รายการ "
+                   f"หลัง {elapsed:.1f}s (สูงสุด {max_time}s)")
+            print(f"⚠️ Timeout protection: {msg}")
+            if strict:
+                raise BranchFetchError(msg)
             break
-            
+
         batch_count += 1
-        
+
         data = fetch_data_with_retry(start=start, length=length, **filters)
-        
+
         if 'error' in data:
-            print(f"❌ API Error: {data['error']}")
-            return [] # Return empty list on error to allow other branches to continue
-        
+            msg = f"Branch {branch_id}: {data['error']}"
+            print(f"❌ API Error: {msg}")
+            if strict:
+                raise BranchFetchError(msg)
+            return []  # Return empty list on error to allow other branches to continue
+
         batch_data = data.get('data', [])
         if not batch_data:
             break
-        
+
         all_items.extend(batch_data)
-        
+
         # ตรวจสอบว่าดึงครบหรือยัง
         total = data.get('recordsFiltered', 0)
+        if expected_total is None:
+            expected_total = total
         if len(all_items) >= total or len(batch_data) < length:
             break
-        
+
         start += length
-        
+
         # ป้องกัน infinite loop
         if len(all_items) >= max_items:
+            msg = (f"Branch {branch_id}: ชนเพดาน {max_items} รายการ "
+                   f"(Eve บอกว่ามี {total}) — ข้อมูลไม่ครบ")
+            print(f"⚠️ {msg}")
+            if strict:
+                raise BranchFetchError(msg)
             break
-            
+
+    # ได้มาไม่ครบตามที่ Eve บอก = ถือว่าล้มเหลวในโหมด strict
+    if strict and expected_total and len(all_items) < expected_total:
+        raise BranchFetchError(
+            f"Branch {branch_id}: ดึงได้ {len(all_items)}/{expected_total} รายการ ไม่ครบ")
+
     return all_items
+
 
 def fetch_and_process_report(filters):
     """ดึงและประมวลผลข้อมูลรายงาน"""

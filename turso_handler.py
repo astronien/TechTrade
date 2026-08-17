@@ -302,6 +302,76 @@ class TursoHandler:
                 'error': str(e),
             }
 
+    def reconcile_branches(self, trades_data, zone_name, target_date):
+        """เทียบจำนวนรายการ **รายสาขา** ระหว่างที่ดึงจาก Eve กับที่อยู่ใน Turso
+
+        reconcile_snapshot() รวมทั้ง zone จับไม่ได้ว่าสาขาไหนหายไป
+        เพราะสาขาที่ดึงไม่สำเร็จจะไม่อยู่ทั้งสองฝั่ง เลยดูเหมือนตรงกัน
+        ฟังก์ชันนี้เทียบทีละสาขาเพื่อให้เห็นว่าสาขาไหนเขียนไม่ครบ
+
+        Returns:
+            {'mismatches': [{'branch_id', 'eve', 'turso'}], 'branches_checked': n}
+        """
+        try:
+            date_only = self._normalize_date_only(target_date)
+
+            # ---- ฝั่ง Eve: นับตาม real_branch_id ที่แกะจากชื่อสาขา ----
+            eve_counts = {}
+            for item in trades_data or []:
+                if not self._extract_trade_id(item):
+                    continue
+                raw_name = self._clean_val(
+                    item.get('branch_name') or item.get('BRANCH_NAME'), "")
+                m = re.search(r'ID(\d+)', str(raw_name)) or \
+                    re.search(r'FC[BP](\d+)', str(raw_name))
+                if m:
+                    rid = m.group(1)
+                else:
+                    rid = str(self._clean_val(
+                        item.get('branch_id') or item.get('BRANCH_ID'), ""))
+                if rid:
+                    eve_counts[rid] = eve_counts.get(rid, 0) + 1
+
+            if not eve_counts:
+                return {'mismatches': [], 'branches_checked': 0}
+
+            # ---- ฝั่ง Turso ----
+            res = self._execute_sql(
+                """
+                SELECT real_branch_id, COUNT(*)
+                FROM trades
+                WHERE zone_name = ? AND document_date = ?
+                GROUP BY real_branch_id
+                """,
+                [zone_name, date_only]
+            )
+            turso_counts = {}
+            if res:
+                for rid, cnt in res.rows:
+                    turso_counts[str(rid)] = int(cnt)
+
+            mismatches = []
+            for rid, n in eve_counts.items():
+                got = turso_counts.get(str(rid), 0)
+                if got != n:
+                    mismatches.append({'branch_id': str(rid), 'eve': n, 'turso': got})
+
+            mismatches.sort(key=lambda x: x['turso'] - x['eve'])
+
+            if mismatches:
+                print(f"   ⚠️ [Reconcile รายสาขา] ไม่ตรง {len(mismatches)}/{len(eve_counts)} สาขา"
+                      f" เช่น {mismatches[:5]}")
+
+            return {
+                'mismatches': mismatches,
+                'branches_checked': len(eve_counts),
+                'date': date_only,
+                'zone_name': zone_name,
+            }
+        except Exception as e:
+            print(f"⚠️ [reconcile_branches Error] {e}")
+            return {'mismatches': [], 'branches_checked': 0, 'error': str(e)}
+
     def _hash_strings(self, values):
         import hashlib
         payload = "\n".join(sorted(str(v) for v in values if v is not None))

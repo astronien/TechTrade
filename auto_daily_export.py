@@ -287,17 +287,25 @@ def find_unassigned_branches(zones, reference_branches=None):
 
 
 def fetch_zone_daily_data(zone, target_date):
-    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve (แบบ Parallel)"""
+    """ดึงข้อมูลของโซนเฉพาะวันที่ระบุจาก API ของ Eve (แบบ Parallel)
+
+    Returns:
+        (all_items, all_success, failed_branches)
+
+        failed_branches: [{'branch_id', 'error'}] — สาขาที่ดึงไม่สำเร็จ
+        ต้องรู้ให้ได้ว่าสาขาไหนพลาด เพราะถ้าเหมารวมว่า "สำเร็จ" ระบบจะลบ
+        ข้อมูลเดิมของวันนั้นทิ้งแล้วไม่มีอะไรมาแทน = ข้อมูลหายถาวร
+    """
     from app import fetch_all_for_branch
-    
+
     date_str = target_date.strftime("%d/%m/%Y")
     branch_ids = zone.get('branch_ids', [])
     all_items = []
-    
+
     print(f"📊 Fetching data for Zone '{zone['zone_name']}' on {date_str} (Parallel)")
-    
-    all_success = True
-    
+
+    failed_branches = []
+
     def fetch_single_branch(branch_id):
         try:
             filters = {
@@ -307,25 +315,46 @@ def fetch_zone_daily_data(zone, target_date):
                 'customer_sign': '',
                 'branch_id': branch_id
             }
-            items = fetch_all_for_branch(filters)
+            # strict=True: ถ้าดึงไม่สำเร็จให้ระเบิดออกมา ไม่ใช่คืน list ว่าง
+            items = fetch_all_for_branch(filters, strict=True)
             for item in items:
                 item['_branch_id'] = branch_id
-            return items, True
+            return branch_id, items, True, ''
         except Exception as e:
             print(f"   ❌ Branch {branch_id} error: {e}")
-            return [], False
+            return branch_id, [], False, str(e)
 
-    # ใช้ ThreadPoolExecutor ดึงข้อมูลสาขาพร้อมกัน (Max 15 workers)
-    max_workers = min(15, len(branch_ids)) if branch_ids else 1
+    # ใช้ ThreadPoolExecutor ดึงข้อมูลสาขาพร้อมกัน
+    # ลดจาก 15 เหลือ 8 เพราะยิงถี่เกินไปทำให้ Eve ตอบ error แล้วสาขาหลุด
+    max_workers = min(int(os.getenv('SYNC_MAX_WORKERS', '8')), len(branch_ids)) if branch_ids else 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_branch = {executor.submit(fetch_single_branch, bid): bid for bid in branch_ids}
         for future in as_completed(future_to_branch):
-            items, success = future.result()
+            bid, items, success, err = future.result()
             if not success:
-                all_success = False
+                failed_branches.append({'branch_id': str(bid), 'error': err[:300]})
             all_items.extend(items)
-    
-    return all_items, all_success
+
+    # ลองใหม่อีกรอบเฉพาะสาขาที่พลาด (ทีละตัว ไม่ขนาน) — ส่วนใหญ่เป็นอาการชั่วคราว
+    if failed_branches:
+        retry_ids = [f['branch_id'] for f in failed_branches]
+        print(f"   🔄 ลองใหม่ {len(retry_ids)} สาขาที่ดึงไม่สำเร็จ (ทีละสาขา)")
+        still_failed = []
+        for bid in retry_ids:
+            _, items, success, err = fetch_single_branch(bid)
+            if success:
+                all_items.extend(items)
+                print(f"   ✅ Branch {bid} สำเร็จในรอบที่ 2 ({len(items)} รายการ)")
+            else:
+                still_failed.append({'branch_id': str(bid), 'error': err[:300]})
+        failed_branches = still_failed
+
+    all_success = not failed_branches
+    if failed_branches:
+        print(f"   ⚠️ ยังมี {len(failed_branches)} สาขาที่ดึงไม่สำเร็จ: "
+              f"{[f['branch_id'] for f in failed_branches][:20]}")
+
+    return all_items, all_success, failed_branches
 
 
 def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True):
@@ -516,7 +545,7 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
                     print(f"   ⚠️ [Branch Audit] ตรวจ zone '{zone_name}' ไม่สำเร็จ: {ze}")
 
             # 1. ดึงข้อมูลวันนี้จาก Eve
-            trade_data, all_success = fetch_zone_daily_data(zone, target_date_dt)
+            trade_data, all_success, failed_branches = fetch_zone_daily_data(zone, target_date_dt)
             
             # 2. บันทึกลง Turso
             eve_count = len(trade_data)
@@ -552,8 +581,23 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
             # 3. Reconcile: Eve snapshot vs Turso snapshot after write
             reconcile = turso.reconcile_snapshot(trade_data, zone_name, target_date.strftime("%Y-%m-%d"))
             unresolved_branches = zone_branch_check.get('unresolved', [])
+
+            # เทียบรายสาขา: Eve ได้เท่าไร Turso มีเท่าไร
+            # reconcile รวมทั้ง zone มองไม่เห็นสาขาที่ไม่เคยถูกดึงมาตั้งแต่แรก
+            branch_recon = {}
+            try:
+                branch_recon = turso.reconcile_branches(
+                    trade_data, zone_name, target_date.strftime("%Y-%m-%d"))
+            except Exception as bre:
+                print(f"   ⚠️ reconcile รายสาขาไม่สำเร็จ: {bre}")
+
+            branch_mismatches = branch_recon.get('mismatches', [])
+
+            # ⚠️ all_success สำคัญที่สุด — ถ้ามีสาขาดึงไม่สำเร็จ ห้ามถือว่าครบ
             is_consistent = (bool(reconcile.get('success'))
                              and inserted == eve_count
+                             and all_success
+                             and not branch_mismatches
                              and not unresolved_branches
                              and not wiped_guard)
             if is_consistent:
@@ -568,6 +612,13 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
                     f"Turso={reconcile.get('turso_count')}, "
                     f"missing={reconcile.get('missing_count')}, extra={reconcile.get('extra_count')}"
                 )
+                if failed_branches:
+                    ids = [f['branch_id'] for f in failed_branches]
+                    error_message += (f" | ดึงไม่สำเร็จ {len(ids)} สาขา: {ids[:20]}"
+                                      f" (ตัวอย่าง error: {failed_branches[0]['error'][:120]})")
+                if branch_mismatches:
+                    error_message += (f" | จำนวนไม่ตรงราย��าขา {len(branch_mismatches)} สาขา: "
+                                      f"{[m['branch_id'] for m in branch_mismatches][:20]}")
                 if wiped_guard:
                     error_message += " | ข้ามการเขียนทับเพราะ Eve คืน 0 รายการ (ข้อมูลเดิมยังอยู่)"
                 if unresolved_branches:
@@ -587,6 +638,8 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
                     'missing_ids_sample': reconcile.get('missing_ids_sample', []),
                     'extra_ids_sample': reconcile.get('extra_ids_sample', []),
                     'checksum_match': reconcile.get('checksum_match'),
+                    'failed_branches': failed_branches,
+                    'branch_mismatches': branch_mismatches[:20],
                     'unresolved_branch_ids': [u['branch_id'] for u in unresolved_branches],
                     'branches_total': zone_branch_check.get('total', 0),
                     'branches_resolved': zone_branch_check.get('resolved', 0),
@@ -597,10 +650,21 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
             zone_durations.append(zone_duration)
 
             # บันทึกความคืบหน้าราย zone — จุดสำคัญที่ทำให้ resume ได้
-            # 'warning' ก็ถือว่าทำแล้ว ไม่งั้นจะวนทำ zone เดิมซ้ำไม่จบ
+            # ถ้ามีสาขาดึงไม่สำเร็จ ให้เป็น 'failed' เพื่อให้รอบถัดไปลองใหม่
+            # (ครบ MAX_ZONE_ATTEMPTS แล้วจะเป็น failed_final แล้วปล่อยผ่าน)
+            # ส่วน warning อื่นๆ ถือว่าทำแล้ว ไม่งั้นจะวนซ้ำไม่จบ
+            if failed_branches:
+                prev_att = int((progress_map.get(str(zone_id), {}) or {}).get('attempts') or 0)
+                zone_status = ('failed_final' if prev_att + 1 >= MAX_ZONE_ATTEMPTS
+                               else 'failed')
+                if zone_status == 'failed_final':
+                    print(f"   ⛔ Zone '{zone_name}' ยังมีสาขาดึงไม่สำเร็จหลังลอง "
+                          f"{MAX_ZONE_ATTEMPTS} ครั้ง — ปล่อยผ่านเพื่อไม่ให้บล็อกทั้งวัน")
+            else:
+                zone_status = 'done' if status == 'success' else 'done_warning'
+
             save_sync_progress(
-                target_date, zone_id, zone_name,
-                'done' if status == 'success' else 'done_warning',
+                target_date, zone_id, zone_name, zone_status,
                 inserted, 1, error_message,
             )
 
@@ -624,6 +688,8 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
                 'eve_records': eve_count,
                 'turso_records': reconcile.get('turso_count'),
                 'status': status,
+                'failed_branches': failed_branches,
+                'branch_mismatches': branch_mismatches[:20],
                 'reconcile': reconcile,
                 'duration': f"{zone_duration:.1f}s"
             })
@@ -716,6 +782,29 @@ def run_daily_export(force=False, target_dt=None, time_budget=None, resume=True)
                         msg += f"\n⚠️ {r['zone_name']}: Eve {r.get('eve_records', 0):,} / Turso {rec.get('turso_count', 0):,}"
                     else:
                         msg += f"\n❌ {r['zone_name']}: {r.get('error', 'error')}"
+
+                # แจ้งเตือนสาขาที่ดึงข้อมูลไม่สำเร็จ (ข้อมูลวันนั้นจะขาด)
+                fb_all = []
+                for r in results:
+                    for f in (r.get('failed_branches') or []):
+                        fb_all.append((r['zone_name'], f['branch_id']))
+                if fb_all:
+                    msg += f"\n\n🚨 <b>สาขาที่ดึงข้อมูลไม่สำเร็จ: {len(fb_all)} สาขา</b>"
+                    for zn, bid in fb_all[:15]:
+                        msg += f"\n• {zn} / สาขา {bid}"
+                    if len(fb_all) > 15:
+                        msg += f"\n<i>... อีก {len(fb_all) - 15} สาขา</i>"
+                    msg += "\n<i>ข้อมูลของสาขาเหล่านี้ในวันนี้จะขาด</i>"
+
+                mm_all = []
+                for r in results:
+                    for m in (r.get('branch_mismatches') or []):
+                        mm_all.append((r['zone_name'], m))
+                if mm_all:
+                    msg += f"\n\n⚠️ <b>จำนวนไม่ตรงรายสาขา: {len(mm_all)} สาขา</b>"
+                    for zn, m in mm_all[:10]:
+                        msg += (f"\n• {zn} / สาขา {m['branch_id']}: "
+                                f"Eve {m['eve']} / Turso {m['turso']}")
 
                 # แจ้งเตือนปัญหาสาขาหลุด (สาเหตุที่ยอดไม่ตรงแบบเงียบๆ)
                 bad_zones = {

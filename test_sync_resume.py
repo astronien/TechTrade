@@ -44,6 +44,8 @@ class FakeTurso:
         n = len({str(i.get('trade_in_id')) for i in data})
         return {'success': True, 'turso_count': n, 'missing_count': 0,
                 'extra_count': 0, 'checksum_match': True}
+    def reconcile_branches(s, data, zone, d):
+        return {'mismatches': [], 'branches_checked': len(data)}
     def close(s): pass
 
 
@@ -54,7 +56,7 @@ def make_fetch(records_per_zone=3, slow_zones=(), seconds=1.0, clock=None):
         elif clock:
             clock[0] += 1.0
         return ([{'trade_in_id': f"{zone['zone_id']}-{i}", 'document_no': str(i),
-                  'net_price': 100} for i in range(records_per_zone)], True)
+                  'net_price': 100} for i in range(records_per_zone)], True, [])
     return fetch
 
 
@@ -107,7 +109,7 @@ calls = []
 def counting_fetch(zone, td):
     calls.append(zone['zone_name'])
     clock[0] += 1.0
-    return ([{'trade_in_id': f"{zone['zone_id']}-x", 'document_no': '1', 'net_price': 1}], True)
+    return ([{'trade_in_id': f"{zone['zone_id']}-x", 'document_no': '1', 'net_price': 1}], True, [])
 
 rounds = 0
 while not r['completed']:
@@ -123,7 +125,7 @@ ok(f"อีก {rounds} รอบทำต่อเฉพาะ {len(calls)} zon
 print("\n[4] เรียกอีกครั้งหลังครบ -> ข้ามทันที ไม่แตะ Eve")
 called = []
 with patch.object(AE, 'fetch_zone_daily_data',
-                  lambda z, t: called.append(z) or ([], True)):
+                  lambda z, t: called.append(z) or ([], True, [])):
     r2 = run(clock=clock)
 assert r2['completed'] is True and not called, (r2, called)
 assert r2['zones_skipped_done'] == 4, r2
@@ -144,7 +146,7 @@ PROGRESS.clear()
 clock = [1000.0]
 def unresolved_fetch(zone, td):
     clock[0] += 1.0
-    return ([{'trade_in_id': f"{zone['zone_id']}-1", 'document_no': '1', 'net_price': 1}], True)
+    return ([{'trade_in_id': f"{zone['zone_id']}-1", 'document_no': '1', 'net_price': 1}], True, [])
 with patch.object(AE, 'fetch_zone_daily_data', unresolved_fetch), \
      patch.object(AE, 'verify_zone_branches',
                   lambda z, ref: {'total': 1, 'resolved': 0,
@@ -170,7 +172,7 @@ class GuardTurso(FakeTurso):
         # จำลองว่า Turso มีข้อมูลเดิม 500 รายการอยู่แล้ว
         return {'success': not data, 'turso_count': 500, 'missing_count': 0,
                 'extra_count': 0, 'checksum_match': False}
-with patch.object(AE, 'fetch_zone_daily_data', lambda z, t: ([], True)):
+with patch.object(AE, 'fetch_zone_daily_data', lambda z, t: ([], True, [])):
     r = run(clock=clock, time_budget=10000, turso_cls=GuardTurso)
 assert deleted == [], f"ไม่ควรลบข้อมูลเดิม แต่ลบไป: {deleted}"
 assert r['total_warnings'] == 4, r
@@ -188,7 +190,7 @@ class EmptyTurso(FakeTurso):
     def reconcile_snapshot(s, data, zone, d):
         return {'success': True, 'turso_count': 0, 'missing_count': 0,
                 'extra_count': 0, 'checksum_match': True}
-with patch.object(AE, 'fetch_zone_daily_data', lambda z, t: ([], True)):
+with patch.object(AE, 'fetch_zone_daily_data', lambda z, t: ([], True, [])):
     r = run(clock=clock, time_budget=10000, turso_cls=EmptyTurso)
 assert len(deleted) == 4, deleted
 assert r['completed'] is True and r['total_warnings'] == 0, r
