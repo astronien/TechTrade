@@ -70,6 +70,33 @@ def _locate_project():
 PROJECT_DIR = _locate_project()
 
 
+def _load_env_file(path):
+    """อ่านไฟล์ .env เอง — ไม่พึ่ง python-dotenv เพราะเครื่องอาจไม่ได้ติดตั้ง
+
+    ค่าที่ตั้งไว้ใน environment อยู่แล้วจะไม่ถูกเขียนทับ
+    """
+    if not os.path.exists(path):
+        return []
+    keys = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                if line.lower().startswith('export '):
+                    line = line[7:].strip()
+                key, _, val = line.partition('=')
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    keys.append(key)
+                    os.environ.setdefault(key, val)
+    except Exception as e:
+        print(f"⚠️ อ่าน .env ไม่สำเร็จ: {e}")
+    return keys
+
+
 def month_start(d):
     return d.replace(day=1)
 
@@ -104,23 +131,30 @@ def main():
                     help='ต่ำกว่ากี่เท่าของค่ากลางถือว่าน่าสงสัย (default 0.5)')
     args = ap.parse_args()
 
-    try:
-        from dotenv import load_dotenv
-        env_path = os.path.join(PROJECT_DIR, '.env')
-        if os.path.exists(env_path):
-            load_dotenv(env_path)
-        else:
-            load_dotenv()
-    except ImportError:
-        pass
-
     print(f"📂 โปรเจกต์: {PROJECT_DIR}")
+    env_path = os.path.join(PROJECT_DIR, '.env')
+    loaded_keys = _load_env_file(env_path)
+    if loaded_keys:
+        print(f"🔑 อ่าน .env แล้ว ({len(loaded_keys)} ค่า)")
 
     from turso_handler import TursoHandler
 
     turso = TursoHandler()
     if not (turso.url and turso.token):
-        print("❌ ไม่พบ TURSO_DATABASE_URL / TURSO_AUTH_TOKEN ใน environment")
+        print("\n❌ ไม่พบ TURSO_DATABASE_URL / TURSO_AUTH_TOKEN")
+        if not os.path.exists(env_path):
+            print(f"\n   ไม่มีไฟล์ .env ในโฟลเดอร์นี้: {env_path}")
+            print("   ถ้าเก็บ credential ไว้ที่อื่น ส่งค่าตอนรันได้เลย:")
+        else:
+            missing = [k for k in ('TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN')
+                       if not os.environ.get(k)]
+            print(f"\n   มีไฟล์ .env อยู่ แต่ไม่มีค่าเหล่านี้: {', '.join(missing)}")
+            print(f"   ค่าที่เจอใน .env: {', '.join(loaded_keys) or '(ไม่มีเลย)'}")
+            print("\n   เพิ่มลงใน .env หรือส่งค่าตอนรัน:")
+        print("\n      TURSO_DATABASE_URL='libsql://xxx.turso.io' \\")
+        print("      TURSO_AUTH_TOKEN='xxx' \\")
+        print("      python3 diagnose_turso.py --months 6 --json diag.json\n")
+        print("   ดูค่าได้จาก Vercel -> Project -> Settings -> Environment Variables")
         return 1
 
     today = date.today()
