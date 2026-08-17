@@ -12,6 +12,7 @@
         "includeFiles": [
           "excel_report_generator.py",
           "auto_daily_export.py",
+          "diagnose_turso.py",
           "google_drive_uploader.py",
           "templates/**",
           "static/**"

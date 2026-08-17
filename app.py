@@ -4669,6 +4669,56 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/diagnose-turso', methods=['GET'])
+def diagnose_turso_api():
+    """ตรวจข้อมูลใน Turso หาว่ายอดหายตรงไหน (อ่านอย่างเดียว)
+
+    รันฝั่งเซิร์ฟเวอร์ที่มี Turso credential อยู่แล้ว จะได้ไม่ต้องเอา
+    credential ออกไปไว้ที่อื่น
+
+    Query params:
+        months=6      ย้อนหลังกี่เดือน (1-24)
+        format=text   ตอบเป็นข้อความอ่านง่ายแทน JSON
+        full=1        ใส่ข้อมูลดิบรายวัน/รายสาขามาด้วย (JSON ใหญ่ขึ้นมาก)
+    """
+    try:
+        months = max(1, min(int(request.args.get('months', 6)), 24))
+        fmt = request.args.get('format', 'json').lower()
+        full = request.args.get('full', '') in ('1', 'true', 'True')
+
+        turso = TursoHandler()
+        if not (turso.url and turso.token):
+            return jsonify({'success': False,
+                            'error': 'ไม่พบ TURSO_DATABASE_URL / TURSO_AUTH_TOKEN'}), 500
+
+        from diagnose_turso import collect_report, print_report
+        rep = collect_report(turso, months=months)
+        turso.close()
+
+        if fmt == 'text':
+            import io
+            import contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                print_report(rep)
+            return app.response_class(buf.getvalue(),
+                                      mimetype='text/plain; charset=utf-8')
+
+        if not full:
+            # ตัดข้อมูลดิบก้อนใหญ่ออก เหลือเฉพาะสิ่งที่ใช้ตัดสินใจ
+            for k in ('per_day', 'day_of_month', 'branches_in_turso'):
+                rep.pop(k, None)
+
+        rep['success'] = True
+        return jsonify(rep)
+
+    except Exception as e:
+        print(f"❌ diagnose-turso error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/sync-progress', methods=['GET'])
 def get_sync_progress_api():
     """ดูสถานะ sync ราย zone ของวันที่ระบุ
