@@ -4756,6 +4756,145 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/eve-fields', methods=['GET'])
+def eve_fields_api():
+    """ส่องดูว่า Eve API ส่งฟิลด์อะไรกลับมาบ้าง และมีสถานะอะไรบ้าง
+
+    ใช้ตรวจว่า API รองรับข้อมูลแบบใหม่ (เช่น pretrade) หรือยัง
+    โดยดูจาก response จริง ไม่ใช่เดาจากโค้ดที่เขียนไว้
+
+    เรียก Eve ตรงๆ ไม่ผ่าน Turso cache เพื่อให้เห็นข้อมูลดิบ
+
+    Query params:
+        branch=231              Eve ID ของสาขา (default 231 = Westgate)
+        date_start / date_end   default = วันนี้
+        length=200              จำนวนรายการที่ดึงมาสำรวจ
+    """
+    try:
+        bkk = pytz.timezone('Asia/Bangkok')
+        today = datetime.now(bkk).strftime('%d/%m/%Y')
+        branch = request.args.get('branch', '231').strip()
+        ds = request.args.get('date_start', '').strip() or today
+        de = request.args.get('date_end', '').strip() or today
+        length = min(int(request.args.get('length', 200)), 500)
+
+        session_id = get_eve_session()
+        if not session_id:
+            return jsonify({'success': False, 'error': 'Auto-Login Eve ล้มเหลว'}), 500
+
+        payload = get_datatables_payload(
+            start=0, length=length, date_start=ds, date_end=de,
+            branch_id=branch, sale_code='', customer_sign='')
+
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cookie': f'ASP.NET_SessionId={session_id}',
+            'X-Requested-With': 'XMLHttpRequest',
+            'User-Agent': 'Mozilla/5.0',
+        }
+
+        resp = requests.post(API_URL, headers=headers, json=payload, timeout=45)
+        out = {
+            'success': True,
+            'endpoint': API_URL,
+            'http_status': resp.status_code,
+            'branch': branch,
+            'date_start': ds,
+            'date_end': de,
+        }
+
+        if resp.status_code != 200:
+            out['success'] = False
+            out['body_preview'] = resp.text[:500]
+            return jsonify(out), 200
+
+        try:
+            result = resp.json()
+        except Exception:
+            out['success'] = False
+            out['body_preview'] = resp.text[:500]
+            return jsonify(out), 200
+
+        data_obj = result.get('d', result)
+        if isinstance(data_obj, str):
+            try:
+                data_obj = json.loads(data_obj)
+            except Exception:
+                pass
+
+        items = data_obj.get('data', []) if isinstance(data_obj, dict) else []
+        out['response_keys'] = sorted(data_obj.keys()) if isinstance(data_obj, dict) else None
+        out['records_total'] = data_obj.get('recordsTotal') if isinstance(data_obj, dict) else None
+        out['records_filtered'] = data_obj.get('recordsFiltered') if isinstance(data_obj, dict) else None
+        out['items_returned'] = len(items)
+
+        if not items:
+            out['note'] = 'ไม่มีรายการในช่วงวันที่นี้ ลองเปลี่ยนวันที่หรือสาขา'
+            return jsonify(out)
+
+        # ---- ฟิลด์ทั้งหมดที่ Eve ส่งมา ----
+        all_keys = set()
+        for it in items:
+            if isinstance(it, dict):
+                all_keys |= set(it.keys())
+        out['all_fields'] = sorted(all_keys)
+
+        # ฟิลด์ที่โค้ดเรายังไม่ได้เก็บลง Turso
+        stored = {
+            'trade_in_id', 'branch_id', 'branch_name', 'document_no', 'document_date',
+            'IS_SIGNED', 'SIGN_DATE', 'series', 'brand_name', 'category_name',
+            'part_number', 'amount', 'net_price', 'COUPON_TRADE_IN_CODE', 'invoice_no',
+            'campaign_name', 'CAMPAIGN_ON_TOP_NAME', 'COUPON_ON_TOP_BRAND_CODE',
+            'COUPON_ON_TOP_BRAND_PRICE', 'COUPON_ON_TOP_COMPANY_CODE',
+            'COUPON_ON_TOP_COMPANY_PRICE', 'SALE_NAME', 'SALE_CODE', 'employee_name',
+            'customer_name', 'customer_phone_number', 'customer_email',
+            'customer_tax_no', 'buyer_name', 'BIDDING_STATUS_NAME', 'DOCUMENT_REF_1',
+            'CHANGE_REQUEST_COUNT', 'status', 'grade', 'cosmetic', 'ontop_amount',
+        }
+        out['fields_not_stored'] = sorted(all_keys - stored)
+
+        # ---- ค่าที่เป็นไปได้ของฟิลด์สถานะ ----
+        from collections import Counter
+        status_fields = [k for k in all_keys
+                         if 'status' in k.lower() or 'type' in k.lower()
+                         or 'flag' in k.lower() or 'stage' in k.lower()]
+        out['status_like_fields'] = {}
+        for k in sorted(status_fields):
+            c = Counter(str(it.get(k)) for it in items if isinstance(it, dict))
+            out['status_like_fields'][k] = dict(c.most_common(15))
+
+        # ---- คำที่เกี่ยวกับ pretrade ในข้อมูล ----
+        blob = json.dumps(items[:50], ensure_ascii=False).lower()
+        out['keyword_scan'] = {
+            kw: (kw in blob) for kw in
+            ['pretrade', 'pre-trade', 'pre_trade', 'pre trade',
+             'ประเมินล่วงหน้า', 'จองราคา', 'reserve', 'booking', 'quotation']
+        }
+
+        # ---- ตัวอย่าง 1 รายการ (ปิดบังข้อมูลส่วนบุคคล) ----
+        PII = {'customer_name', 'customer_phone_number', 'customer_email',
+               'customer_tax_no', 'buyer_name', 'CUSTOMER_NAME',
+               'CUSTOMER_PHONE_NUMBER', 'CUSTOMER_EMAIL'}
+        sample = {}
+        for k, v in (items[0] or {}).items():
+            sample[k] = '***ปิดบัง***' if k in PII and v else v
+        out['sample_record'] = sample
+
+        # ---- dynamic params ที่ auto-healing เคยค้นพบ ----
+        try:
+            out['dynamic_param_keys'] = sorted((get_dynamic_params() or {}).keys())
+        except Exception:
+            pass
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"❌ eve-fields error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/branch-compare', methods=['GET'])
 def branch_compare_api():
     """เทียบยอดของสาขาเดียวระหว่าง Turso กับ Eve (techswop) แบบรายวัน
