@@ -4756,6 +4756,139 @@ def vercel_cron_auto_export():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/eve-pretrade-scan', methods=['GET'])
+def eve_pretrade_scan_api():
+    """ยิงหา Eve ตรงๆ เพื่อหารายการ pretrade จริง
+
+    ไล่หลายสาขา/หลายวัน แล้วนับว่ามีรายการที่ IS_PRE_TRADE = true ไหม
+    ถ้าเจอจะส่งตัวอย่างข้อมูลจริงกลับมา (ปิดบังข้อมูลส่วนบุคคล)
+
+    Query params:
+        zone=Studio7        สแกนสาขาใน zone นี้ (default)
+        branches=231,232    หรือระบุ Eve ID เอง (คั่นด้วย ,)
+        date_start/date_end default = ย้อนหลัง 30 วัน
+        max_branches=25     จำนวนสาขาสูงสุดที่จะสแกน
+    """
+    try:
+        import time as _t
+        bkk = pytz.timezone('Asia/Bangkok')
+        now = datetime.now(bkk)
+
+        de = request.args.get('date_end', '').strip() or now.strftime('%d/%m/%Y')
+        ds = request.args.get('date_start', '').strip() or (now - timedelta(days=30)).strftime('%d/%m/%Y')
+        max_branches = min(int(request.args.get('max_branches', 25)), 60)
+
+        raw_branches = request.args.get('branches', '').strip()
+        if raw_branches:
+            branch_ids = [b.strip() for b in raw_branches.split(',') if b.strip()]
+        else:
+            zone_name = request.args.get('zone', 'Studio7').strip().lower()
+            zones = load_custom_zones_from_file() or []
+            target = next((z for z in zones
+                           if zone_name in str(z.get('zone_name', '')).lower()), None)
+            if not target:
+                return jsonify({'success': False, 'error': f'ไม่พบ zone: {zone_name}'}), 404
+            branch_ids = [str(b) for b in (target.get('branch_ids') or [])]
+
+        branch_ids = branch_ids[:max_branches]
+        if not branch_ids:
+            return jsonify({'success': False, 'error': 'ไม่มีสาขาให้สแกน'}), 400
+
+        session_id = get_eve_session()
+        if not session_id:
+            return jsonify({'success': False, 'error': 'Auto-Login Eve ล้มเหลว'}), 500
+
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cookie': f'ASP.NET_SessionId={session_id}',
+            'X-Requested-With': 'XMLHttpRequest',
+            'User-Agent': 'Mozilla/5.0',
+        }
+
+        PII = {'customer_name', 'customer_phone_number', 'customer_email',
+               'customer_tax_no', 'buyer_name', 'SALE_TEL', 'CUSTOMER_ADDRESS'}
+
+        def mask(rec):
+            return {k: ('***ปิดบัง***' if k in PII and v else v) for k, v in rec.items()}
+
+        started = _t.time()
+        budget = 200
+        per_branch = []
+        pretrade_samples = []
+        total_records = 0
+        total_pretrade = 0
+        scanned = 0
+        summary_qty_total = 0
+
+        for bid in branch_ids:
+            if _t.time() - started > budget:
+                break
+            try:
+                payload = get_datatables_payload(
+                    start=0, length=500, date_start=ds, date_end=de,
+                    branch_id=bid, sale_code='', customer_sign='')
+                resp = requests.post(API_URL, headers=headers, json=payload, timeout=40)
+                if resp.status_code != 200:
+                    per_branch.append({'branch': bid, 'error': f'HTTP {resp.status_code}'})
+                    continue
+                obj = resp.json().get('d', {})
+                if isinstance(obj, str):
+                    obj = json.loads(obj)
+                items = obj.get('data', []) or []
+                scanned += 1
+                total_records += len(items)
+                try:
+                    summary_qty_total += int(obj.get('summaryQty') or 0)
+                except Exception:
+                    pass
+
+                pt = [it for it in items if it.get('IS_PRE_TRADE') is True]
+                booking = [it for it in items if it.get('BOOKING_REFERENCE_DOCUMENT_NO')]
+                total_pretrade += len(pt)
+
+                per_branch.append({
+                    'branch': bid,
+                    'branch_name': (items[0].get('BRANCH_NAME') if items else None),
+                    'records': len(items),
+                    'summary_qty': obj.get('summaryQty'),
+                    'summary_amount': obj.get('summaryAmount'),
+                    'pretrade': len(pt),
+                    'with_booking_ref': len(booking),
+                })
+
+                for it in (pt + booking)[:2]:
+                    if len(pretrade_samples) < 5:
+                        pretrade_samples.append(mask(it))
+            except Exception as e:
+                per_branch.append({'branch': bid, 'error': str(e)[:200]})
+
+        out = {
+            'success': True,
+            'date_start': ds,
+            'date_end': de,
+            'branches_requested': len(branch_ids),
+            'branches_scanned': scanned,
+            'elapsed_seconds': round(_t.time() - started, 1),
+            'total_records': total_records,
+            'total_summary_qty': summary_qty_total,
+            'total_pretrade': total_pretrade,
+            'per_branch': per_branch,
+            'pretrade_samples': pretrade_samples,
+        }
+        if total_pretrade == 0:
+            out['conclusion'] = ('ยังไม่พบรายการ pretrade จริงในช่วงที่สแกน — '
+                                 'ฟิลด์ IS_PRE_TRADE มีอยู่ใน API แต่ยังเป็น false ทั้งหมด')
+        else:
+            out['conclusion'] = f'พบรายการ pretrade จริง {total_pretrade} รายการ'
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"❌ eve-pretrade-scan error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/eve-fields', methods=['GET'])
 def eve_fields_api():
     """ส่องดูว่า Eve API ส่งฟิลด์อะไรกลับมาบ้าง และมีสถานะอะไรบ้าง
