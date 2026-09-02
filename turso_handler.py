@@ -4,7 +4,7 @@ import requests
 import re
 from datetime import datetime
 
-from constants import CONFIRMED_STATUSES
+from constants import CONFIRMED_STATUSES, pick_campaign_name, is_pretrade
 
 # ใช้สร้างเงื่อนไข SQL IN (...) จากค่าคงที่ชุดเดียวกับที่รายงานอื่นใช้ (ไม่ใช่ user input ไม่มีความเสี่ยง SQL injection)
 CONFIRMED_STATUSES_SQL = ', '.join(f"'{s}'" for s in CONFIRMED_STATUSES)
@@ -115,7 +115,23 @@ class TursoHandler:
                 )
             """)
 
+            # คอลัมน์สำหรับ pre trade (เพิ่มทีหลัง ต้อง ALTER สำหรับฐานที่มีอยู่แล้ว)
+            for ddl in (
+                "ALTER TABLE trades ADD COLUMN campaign_on_top_id INTEGER",
+                "ALTER TABLE trades ADD COLUMN is_pre_trade INTEGER DEFAULT 0",
+                "ALTER TABLE trades ADD COLUMN booking_reference_no TEXT",
+            ):
+                try:
+                    self._execute_sql(ddl)
+                except Exception:
+                    pass  # มีคอลัมน์อยู่แล้ว
+
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_zone_date ON trades(zone_name, document_date)")
+            try:
+                self._execute_sql(
+                    "CREATE INDEX IF NOT EXISTS idx_pretrade ON trades(is_pre_trade, document_date)")
+            except Exception:
+                pass
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_branch ON trades(branch_id)")
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_real_branch ON trades(real_branch_id)")
             self._execute_sql("CREATE INDEX IF NOT EXISTS idx_doc_date ON trades(document_date)")
@@ -815,7 +831,17 @@ class TursoHandler:
                 # Campaign & Coupons
                 coupon_code = self._clean_val(item.get('COUPON_TRADE_IN_CODE') or item.get('coupon_trade_in_code'), "")
                 inv_no = self._clean_val(item.get('invoice_no') or item.get('INVOICE_NO'), "")
-                camp_name = self._clean_val(item.get('campaign_name') or item.get('CAMPAIGN_NAME') or item.get('CAMPAIGN_ON_TOP_NAME'), "")
+                # ⚠️ ห้ามใช้ `a or b or c` ตรงนี้
+                # Eve ส่ง campaign_name = "-" มาเกือบทุกแถว ซึ่งเป็น truthy
+                # ทำให้หยุดที่ "-" แล้วชื่อแคมเปญจริง (CAMPAIGN_ON_TOP_NAME)
+                # หายไปทั้งหมด — เป็นเหตุให้แยก pre trade ไม่ได้
+                camp_name = pick_campaign_name(item)
+                camp_on_top_id = int(self._clean_val(
+                    item.get('CAMPAIGN_ON_TOP_ID') or item.get('campaign_on_top_id') or 0, 0, True))
+                pretrade_flag = 1 if is_pretrade(item) else 0
+                booking_ref = self._clean_val(
+                    item.get('BOOKING_REFERENCE_DOCUMENT_NO')
+                    or item.get('booking_reference_no'), "")
                 b_cp_code = self._clean_val(item.get('COUPON_ON_TOP_BRAND_CODE') or item.get('coupon_on_top_brand_code'), "")
                 b_cp_price = float(self._clean_val(item.get('COUPON_ON_TOP_BRAND_PRICE') or 0, 0, True))
                 c_cp_code = self._clean_val(item.get('COUPON_ON_TOP_COMPANY_CODE') or item.get('coupon_on_top_company_code'), "")
@@ -851,8 +877,9 @@ class TursoHandler:
                      COUPON_ON_TOP_COMPANY_CODE, COUPON_ON_TOP_COMPANY_PRICE,
                      SALE_NAME, SALE_CODE, employee_name, customer_name, customer_phone_number, customer_email,
                      customer_tax_no, buyer_name, BIDDING_STATUS_NAME, DOCUMENT_REF_1, CHANGE_REQUEST_COUNT,
-                     status, grade, cosmetic, ontop_amount, campaign_name, zone_name, exported_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, grade, cosmetic, ontop_amount, campaign_name, zone_name,
+                     campaign_on_top_id, is_pre_trade, booking_reference_no, exported_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(trade_in_id), branch_id, real_branch_id, branch_name, doc_no, doc_date,
@@ -862,6 +889,7 @@ class TursoHandler:
                         sale_name, sale_code, emp_name, cust_name, cust_phone, cust_email,
                         cust_tax, buyer, bid_status, ref1, chg_count,
                         status, grade, cosmetic, ot_amount, camp_name, zone_name,
+                        camp_on_top_id, pretrade_flag, booking_ref,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ]

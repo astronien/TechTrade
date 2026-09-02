@@ -1,5 +1,5 @@
 # LINE Bot Message Handler
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 import json
 import os
@@ -10,7 +10,7 @@ import hashlib
 import base64
 import requests
 
-from constants import CONFIRMED_STATUSES
+from constants import CONFIRMED_STATUSES, is_pretrade, pick_campaign_name
 
 BKK_TZ = pytz.timezone('Asia/Bangkok')
 
@@ -170,6 +170,16 @@ def handle_line_message(user_message, fetch_data_func, load_zones_func, find_zon
     # แยกคำสั่ง
     parts = command.split()
     
+    # ---- คำสั่ง pre trade ----
+    if parts and parts[0].lower() in ('pretrade', 'pre-trade', 'pre_trade'):
+        return handle_pretrade_command(
+            parts[1:], find_zone_func, find_branch_func, fetch_data_func,
+            parse_month_func, get_date_range_func, fetch_batch_func)
+    if len(parts) >= 2 and parts[0].lower() == 'pre' and parts[1].lower() == 'trade':
+        return handle_pretrade_command(
+            parts[2:], find_zone_func, find_branch_func, fetch_data_func,
+            parse_month_func, get_date_range_func, fetch_batch_func)
+
     # ตรวจสอบคำสั่ง Excel รายปี
     if 'excel' in parts and 'รายปี' in parts:
         # รายงาน excel รายปี [ปี] [branch_id]
@@ -665,6 +675,274 @@ def generate_branch_monthly_report(branch_id, month_name, find_branch_func, fetc
     return message
 
 
+# ==========================================
+# รายงาน Pre Trade
+# ------------------------------------------
+# pre trade ถูกบันทึกเป็นแคมเปญ on-top (เช่น "4.Pre Trade iPhone Lock Price")
+# ไม่ใช่ฟิลด์ IS_PRE_TRADE ของ Eve ซึ่งเป็น false เสมอ
+# ==========================================
+
+PRETRADE_HELP = """❌ คำสั่งไม่ถูกต้อง
+
+รูปแบบคำสั่ง Pre Trade:
+
+🗺️ ทั้ง Zone
+• รายงาน pretrade zone Studio7
+• รายงาน pretrade zone Studio7 กันยายน
+• รายงาน pretrade zone Studio7 วันนี้
+
+🏪 รายสาขา
+• รายงาน pretrade 645
+• รายงาน pretrade 645 กันยายน
+• รายงาน pretrade 645 วันนี้
+
+ไม่ระบุเดือน = เดือนปัจจุบัน"""
+
+def _resolve_pretrade_period(tokens, parse_month_func, get_date_range_func):
+    """แปลงคำท้ายคำสั่งเป็นช่วงวันที่
+
+    Returns: (date_start, date_end, label, is_daily) หรือ (None, None, error, None)
+    """
+    text = ' '.join(tokens).strip()
+    today = now_bkk()
+
+    if not text:
+        ds, de = get_date_range_func(today.month)
+        return ds, de, f"{thai_month_name(today.month)} {today.year + 543}", False
+
+    low = text.lower()
+    if low in ('วันนี้', 'วันนี', 'today'):
+        d = today.strftime('%d/%m/%Y')
+        return d, d, f"วันนี้ ({d})", True
+    if low in ('เมื่อวาน', 'เมื่อวานนี้', 'yesterday'):
+        d = (today - timedelta(days=1)).strftime('%d/%m/%Y')
+        return d, d, f"เมื่อวาน ({d})", True
+
+    # วันที่ระบุเอง dd/mm/yyyy
+    if '/' in text and len(text.split('/')) == 3:
+        try:
+            datetime.strptime(text, '%d/%m/%Y')
+            return text, text, text, True
+        except ValueError:
+            pass
+
+    month_number = parse_month_func(text)
+    if month_number:
+        ds, de = get_date_range_func(month_number)
+        year = int(ds.split('/')[-1]) + 543
+        return ds, de, f"{text} {year}", False
+
+    return None, None, f"❌ ไม่รู้จักช่วงเวลา: {text}", None
+
+
+def thai_month_name(m):
+    names = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+             'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
+    return names[m - 1] if 1 <= m <= 12 else str(m)
+
+
+def _pretrade_stats(items):
+    """นับ pre trade จากรายการดิบ"""
+    pre = [it for it in items if is_pretrade(it)]
+    total_amount = 0.0
+    campaigns = defaultdict(int)
+    confirmed = 0
+    for it in pre:
+        try:
+            total_amount += float(it.get('amount') or it.get('AMOUNT') or 0)
+        except (TypeError, ValueError):
+            pass
+        campaigns[pick_campaign_name(it) or '(ไม่ระบุแคมเปญ)'] += 1
+        if str(it.get('BIDDING_STATUS_NAME', '')) in CONFIRMED_STATUSES:
+            confirmed += 1
+    return {
+        'count': len(pre),
+        'total': len(items),
+        'amount': total_amount,
+        'confirmed': confirmed,
+        'campaigns': dict(campaigns),
+    }
+
+
+def handle_pretrade_command(tokens, find_zone_func, find_branch_func, fetch_data_func,
+                            parse_month_func, get_date_range_func, fetch_batch_func=None):
+    """รายงาน pre trade — รองรับ zone/สาขา x เดือน/วัน"""
+    if not tokens:
+        return PRETRADE_HELP
+
+    if tokens[0].lower() == 'zone':
+        if len(tokens) < 2:
+            return PRETRADE_HELP
+        # หา zone จากคำที่ยาวที่สุดที่ match ได้ ที่เหลือคือช่วงเวลา
+        for split in range(len(tokens), 1, -1):
+            zone_name = ' '.join(tokens[1:split])
+            zone = find_zone_func(zone_name)
+            if zone:
+                return generate_pretrade_zone_report(
+                    zone, tokens[split:], fetch_data_func, parse_month_func,
+                    get_date_range_func, fetch_batch_func)
+        return f"❌ ไม่พบ Zone: {' '.join(tokens[1:])}"
+
+    return generate_pretrade_branch_report(
+        tokens[0], tokens[1:], find_branch_func, fetch_data_func,
+        parse_month_func, get_date_range_func)
+
+
+def generate_pretrade_zone_report(zone, period_tokens, fetch_data_func,
+                                  parse_month_func, get_date_range_func,
+                                  fetch_batch_func=None):
+    """รายงาน pre trade ทั้ง Zone แยกตามสาขา"""
+    ds, de, label, is_daily = _resolve_pretrade_period(
+        period_tokens, parse_month_func, get_date_range_func)
+    if ds is None:
+        return label
+
+    branch_ids = zone['branch_ids']
+    branches_map = load_branches_map()
+
+    batch_data = None
+    if fetch_batch_func:
+        batch_data = fetch_batch_func(branch_ids, ds, de)
+
+    per_branch = []
+    grand = {'count': 0, 'total': 0, 'amount': 0.0, 'confirmed': 0}
+    campaigns = defaultdict(int)
+    last_source = 'unknown'
+
+    for branch_id in branch_ids:
+        data = None
+        if batch_data and str(branch_id) in batch_data:
+            data = batch_data[str(branch_id)]
+        if not data:
+            data = fetch_all_pages(fetch_data_func, {
+                'date_start': ds, 'date_end': de, 'sale_code': '',
+                'customer_sign': '', 'session_id': '', 'branch_id': str(branch_id),
+            }, page_size=5000)
+        if not data or 'error' in data:
+            continue
+
+        last_source = data.get('source', last_source)
+        st = _pretrade_stats(data.get('data', []))
+        grand['count'] += st['count']
+        grand['total'] += st['total']
+        grand['amount'] += st['amount']
+        grand['confirmed'] += st['confirmed']
+        for k, v in st['campaigns'].items():
+            campaigns[k] += v
+
+        if st['count'] > 0:
+            name = branches_map.get(str(branch_id), f"สาขา {branch_id}")
+            if ' : ' in name:
+                name = name.split(' : ', 2)[-1]
+            per_branch.append((name, st['count'], st['amount']))
+
+    msg = "🎯 รายงาน Pre Trade\n"
+    msg += f"📅 {label}\n"
+    msg += f"🗺️ Zone: {zone['zone_name']}\n"
+    msg += f"🏢 จำนวนสาขา: {len(branch_ids)} สาขา\n"
+    msg += "━━━━━━━━━━━━\n\n"
+
+    if grand['count'] == 0:
+        msg += "ไม่มีรายการ Pre Trade ในช่วงนี้\n"
+        msg += f"\n(ตรวจแล้ว {grand['total']:,} รายการทั้งหมด)"
+        return msg
+
+    per_branch.sort(key=lambda x: x[1], reverse=True)
+    for name, cnt, amt in per_branch[:25]:
+        msg += f"🏪 {name}\n"
+        msg += f"  • {cnt} รายการ · {amt:,.0f} บาท\n\n"
+    if len(per_branch) > 25:
+        msg += f"... และอีก {len(per_branch) - 25} สาขา\n\n"
+
+    pct = grand['count'] / grand['total'] * 100 if grand['total'] else 0
+    cpct = grand['confirmed'] / grand['count'] * 100 if grand['count'] else 0
+    msg += "━━━━━━━━━━━━\n"
+    msg += "📈 สรุปรวมทั้ง Zone\n"
+    msg += f"• Pre Trade: {grand['count']:,} รายการ ({pct:.0f}% ของทั้งหมด)\n"
+    msg += f"• ยอดประเมิน: {grand['amount']:,.0f} บาท\n"
+    msg += f"• ลูกค้าตกลง: {grand['confirmed']:,} ({cpct:.0f}%)\n"
+    msg += f"• สาขาที่มี Pre Trade: {len(per_branch)}/{len(branch_ids)}"
+
+    if len(campaigns) > 1:
+        msg += "\n\n🏷️ แยกตามแคมเปญ"
+        for cname, ccount in sorted(campaigns.items(), key=lambda x: -x[1])[:5]:
+            msg += f"\n• {cname}: {ccount:,}"
+
+    source_display = "📦 Turso" if last_source == 'turso' else "🌐 Real-time"
+    msg += f"\n\n(Source: {source_display})"
+    return msg
+
+
+def generate_pretrade_branch_report(branch_id, period_tokens, find_branch_func,
+                                    fetch_data_func, parse_month_func, get_date_range_func):
+    """รายงาน pre trade รายสาขา แยกตามพนักงาน"""
+    ds, de, label, is_daily = _resolve_pretrade_period(
+        period_tokens, parse_month_func, get_date_range_func)
+    if ds is None:
+        return label
+
+    branch = find_branch_func(branch_id)
+    if not branch:
+        return f"❌ ไม่พบสาขา: {branch_id}"
+
+    branch_name = branch.get('branch_name', str(branch_id))
+    display_name = branch_name.split(' : ', 2)[-1] if ' : ' in branch_name else branch_name
+    api_branch_id = branch.get('branch_id', branch_id)
+
+    data = fetch_all_pages(fetch_data_func, {
+        'date_start': ds, 'date_end': de, 'sale_code': '',
+        'customer_sign': '', 'session_id': '', 'branch_id': str(api_branch_id),
+    }, page_size=5000)
+
+    if not data or 'error' in data:
+        return f"❌ ดึงข้อมูลไม่สำเร็จ: {(data or {}).get('error', 'ไม่ทราบสาเหตุ')}"
+
+    items = data.get('data', [])
+    st = _pretrade_stats(items)
+
+    msg = "🎯 รายงาน Pre Trade\n"
+    msg += f"📅 {label}\n"
+    msg += f"🏪 {display_name}\n"
+    msg += "━━━━━━━━━━━━\n\n"
+
+    if st['count'] == 0:
+        msg += "ไม่มีรายการ Pre Trade ในช่วงนี้\n"
+        msg += f"\n(ตรวจแล้ว {st['total']:,} รายการทั้งหมด)"
+        return msg
+
+    pre_items = [it for it in items if is_pretrade(it)]
+
+    by_sale = defaultdict(lambda: {'count': 0, 'amount': 0.0})
+    for it in pre_items:
+        key = str(it.get('SALE_NAME') or it.get('SALE_CODE') or 'ไม่ระบุ')
+        by_sale[key]['count'] += 1
+        try:
+            by_sale[key]['amount'] += float(it.get('amount') or 0)
+        except (TypeError, ValueError):
+            pass
+
+    for sale, v in sorted(by_sale.items(), key=lambda x: -x[1]['count'])[:20]:
+        msg += f"👤 {sale}\n"
+        msg += f"  • {v['count']} รายการ · {v['amount']:,.0f} บาท\n\n"
+
+    pct = st['count'] / st['total'] * 100 if st['total'] else 0
+    cpct = st['confirmed'] / st['count'] * 100 if st['count'] else 0
+    msg += "━━━━━━━━━━━━\n"
+    msg += "📈 สรุป\n"
+    msg += f"• Pre Trade: {st['count']:,} รายการ ({pct:.0f}% ของ {st['total']:,})\n"
+    msg += f"• ยอดประเมิน: {st['amount']:,.0f} บาท\n"
+    msg += f"• ลูกค้าตกลง: {st['confirmed']:,} ({cpct:.0f}%)"
+
+    if st['campaigns']:
+        msg += "\n\n🏷️ แคมเปญ"
+        for cname, ccount in sorted(st['campaigns'].items(), key=lambda x: -x[1])[:5]:
+            msg += f"\n• {cname}: {ccount:,}"
+
+    source_display = "📦 Turso" if data.get('source') == 'turso' else "🌐 Real-time"
+    msg += f"\n\n(Source: {source_display})"
+    return msg
+
+
 def load_branches_map():
     """โหลด mapping ของ branch_id กับ branch_name (ดึงจาก DB ก่อน)"""
     branches_map = {}
@@ -742,6 +1020,13 @@ def get_help_message():
     message += "   รายงาน [ID] รายวัน\n"
     message += "   ตัวอย่าง: รายงาน 9 รายวัน\n\n"
     
+    message += "🎯 รายงาน Pre Trade:\n"
+    message += "   รายงาน pretrade zone [ชื่อโซน]\n"
+    message += "   รายงาน pretrade zone [ชื่อโซน] [เดือน]\n"
+    message += "   รายงาน pretrade zone [ชื่อโซน] วันนี้\n"
+    message += "   รายงาน pretrade [ID]\n"
+    message += "   รายงาน pretrade [ID] [เดือน]\n"
+    message += "   รายงาน pretrade [ID] วันนี้\n\n"
     message += "4️⃣ รายงานรายเดือน (แยกพนักงาน):\n"
     message += "   รายงาน [ID] [เดือน]\n"
     message += "   ตัวอย่าง: รายงาน 9 พฤศจิกายน\n\n"
