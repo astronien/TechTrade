@@ -4702,16 +4702,39 @@ def vercel_cron_auto_export():
         print(f"✅ Time to run! sync {sync_date} — เหลือ {len(pending)}/{zones_total} zone")
         log_debug(f"✅ Running chunk for {sync_date}, pending={len(pending)}")
 
+        # Vercel cron ยิงได้วันละครั้งเท่านั้น (Hobby plan) จึงต้องทำให้จบ
+        # ภายในคำขอเดียว — วนทำ chunk ต่อเนื่องจนครบ หรือจนใกล้หมดเวลา
+        # ของ serverless function (maxDuration 300s) แล้วค่อยคืนค่า
+        request_budget = int(os.environ.get('CRON_REQUEST_BUDGET', '250'))
+        loop_started = time.time()
+        rounds = 0
+        result = None
+
         try:
-            result = run_daily_export(
-                force=True,
-                target_dt=datetime.combine(sync_date, datetime.min.time()),
-            )
+            while True:
+                rounds += 1
+                result = run_daily_export(
+                    force=True,
+                    target_dt=datetime.combine(sync_date, datetime.min.time()),
+                )
+                if result.get('completed'):
+                    break
+                elapsed = time.time() - loop_started
+                if elapsed > request_budget:
+                    print(f"⏸️ [Cron] หยุดที่รอบ {rounds} (ใช้ไป {elapsed:.0f}s/"
+                          f"{request_budget}s) — เหลือ {result.get('zones_remaining')} zone")
+                    break
+                if rounds >= 50:
+                    print("⚠️ [Cron] วนครบ 50 รอบแล้วยังไม่ครบ — หยุดไว้ก่อน")
+                    break
         except Exception as e:
             log_debug(f"❌ Export execution error: {str(e)}")
             import traceback
             traceback.print_exc()
             return jsonify({'success': False, 'error': str(e)}), 500
+
+        result = result or {}
+        result['cron_rounds'] = rounds
 
         log_debug(f"📤 Export chunk: completed={result.get('completed')}, "
                   f"remaining={result.get('zones_remaining')}, "
@@ -5538,6 +5561,167 @@ def diagnose_turso_api():
 
     except Exception as e:
         print(f"❌ diagnose-turso error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/sync-watchdog', methods=['GET', 'POST'])
+def sync_watchdog_api():
+    """เฝ้าดูว่า auto-sync ยังทำงานอยู่ไหม ถ้าเงียบนานเกินกำหนดให้แจ้งเตือน
+
+    ทำไมต้องมี: 1 พ.ย. 2026 GitHub ปิด scheduled workflow อัตโนมัติ
+    (disabled_inactivity — repo ไม่มี commit ครบ 60 วัน) sync หยุดไป 6 วัน
+    โดยไม่มีใครรู้ เพราะตัวที่คอยแจ้งเตือนอยู่ใน workflow ที่ถูกปิดไปด้วย
+
+    ตัวนี้จึงต้องถูกยิงจาก **Vercel cron** ซึ่งไม่มีกลไกปิดตัวเอง
+    = ไม่ขึ้นกับ GitHub Actions เลย
+
+    Query params:
+        hours=36     เงียบเกินกี่ชั่วโมงถือว่าผิดปกติ
+        days=7       ตรวจย้อนหลังกี่วันว่า sync ครบไหม
+        notify=0     ไม่ส่ง Telegram (ดูสถานะเฉยๆ)
+
+    ไม่ส่ง CRON_SECRET มา = โหมดอ่านเท่านั้น ไม่แจ้งเตือน
+    """
+    try:
+        threshold_hours = max(1, min(int(request.args.get('hours', 36)), 24 * 30))
+        lookback_days = max(1, min(int(request.args.get('days', 7)), 60))
+
+        cron_secret = os.environ.get("CRON_SECRET", "")
+        auth_header = request.headers.get('Authorization', '')
+        authorized = (not cron_secret) or auth_header == f'Bearer {cron_secret}'
+        notify = authorized and request.args.get('notify', '1') not in ('0', 'false', 'False')
+
+        bkk = pytz.timezone('Asia/Bangkok')
+        now = datetime.now(bkk)
+
+        out = {
+            'success': True,
+            'checked_at': now.strftime('%Y-%m-%d %H:%M'),
+            'threshold_hours': threshold_hours,
+            'authorized': authorized,
+            'will_notify': notify,
+        }
+
+        # ---- หาเวลาที่ sync สำเร็จครั้งล่าสุด ----
+        last_at = None
+        last_source = None
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'DB connection failed'}), 500
+        def _one(cur):
+            row = cur.fetchone()
+            if not row:
+                return None
+            return dict(row).get('v') if not isinstance(row, (list, tuple)) else row[0]
+
+        try:
+            cur = conn.cursor()
+
+            cur.execute("SELECT MAX(updated_at) AS v FROM sync_progress "
+                        "WHERE status IN ('done', 'done_warning')")
+            v = _one(cur)
+            if v:
+                last_at, last_source = v, 'sync_progress'
+
+            cur.execute("SELECT MAX(run_at) AS v FROM auto_export_log WHERE status = 'success'")
+            v2 = _one(cur)
+            if v2 and (last_at is None or v2 > last_at):
+                last_at, last_source = v2, 'auto_export_log'
+
+            # ---- วันไหนย้อนหลังที่ยังไม่ครบ ----
+            cur.execute("""
+                SELECT sync_date,
+                       SUM(CASE WHEN status IN ('done','done_warning') THEN 1 ELSE 0 END) AS done,
+                       COUNT(*) AS total
+                FROM sync_progress
+                WHERE sync_date >= %s
+                GROUP BY sync_date ORDER BY sync_date DESC
+            """, (now.date() - timedelta(days=lookback_days),))
+
+            have = {}
+            for row in cur.fetchall():
+                d = dict(row) if not isinstance(row, (list, tuple)) else {
+                    'sync_date': row[0], 'done': row[1], 'total': row[2]}
+                have[str(d['sync_date'])] = (int(d['done'] or 0), int(d['total'] or 0))
+            cur.close()
+        finally:
+            conn.close()
+
+        if last_at is not None:
+            if getattr(last_at, 'tzinfo', None) is None:
+                last_at = pytz.UTC.localize(last_at)
+            last_bkk = last_at.astimezone(bkk)
+            hours_since = (now - last_bkk).total_seconds() / 3600
+            out['last_sync_at'] = last_bkk.strftime('%Y-%m-%d %H:%M')
+            out['last_sync_source'] = last_source
+            out['hours_since'] = round(hours_since, 1)
+        else:
+            hours_since = None
+            out['last_sync_at'] = None
+            out['hours_since'] = None
+
+        # ---- วันที่ควรมีข้อมูลแต่ยังไม่ครบ (ไม่นับวันนี้) ----
+        missing = []
+        for i in range(1, lookback_days + 1):
+            d = (now.date() - timedelta(days=i))
+            key = str(d)
+            if key not in have:
+                missing.append({'date': key, 'done': 0, 'total': None,
+                                'note': 'ไม่เคยเริ่ม sync'})
+            else:
+                done, total = have[key]
+                if total and done < total:
+                    missing.append({'date': key, 'done': done, 'total': total,
+                                    'note': 'sync ไม่ครบทุก zone'})
+        out['incomplete_days'] = missing
+
+        stale = hours_since is None or hours_since > threshold_hours
+        out['stale'] = stale
+        out['status'] = 'ALERT' if (stale or missing) else 'OK'
+
+        # ---- แจ้งเตือน ----
+        if notify and (stale or missing):
+            try:
+                cfg = get_auto_cancel_config() or {}
+                bt, cid = cfg.get('telegram_bot_token', ''), cfg.get('telegram_chat_id', '')
+                if bt and cid:
+                    msg = "🚨 <b>Auto Sync ผิดปกติ</b>\n"
+                    msg += f"⏰ ตรวจเมื่อ {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+                    if hours_since is None:
+                        msg += "❌ ไม่พบประวัติ sync สำเร็จเลย\n"
+                    elif stale:
+                        msg += (f"❌ sync ครั้งล่าสุด {out['last_sync_at']}\n"
+                                f"   เงียบมาแล้ว <b>{hours_since:.0f} ชั่วโมง</b> "
+                                f"(เกิน {threshold_hours} ชม.)\n")
+                    if missing:
+                        msg += f"\n📅 <b>วันที่ข้อมูลไม่ครบ {len(missing)} วัน</b>"
+                        for m in missing[:10]:
+                            if m['total']:
+                                msg += f"\n• {m['date']}: {m['done']}/{m['total']} zone"
+                            else:
+                                msg += f"\n• {m['date']}: {m['note']}"
+                        if len(missing) > 10:
+                            msg += f"\n<i>... อีก {len(missing) - 10} วัน</i>"
+                    msg += ("\n\n<b>ตรวจก่อน:</b>\n"
+                            "1. GitHub Actions ปิด workflow เองหรือเปล่า "
+                            "(disabled_inactivity)\n"
+                            "2. Eve credentials ยังใช้ได้ไหม\n"
+                            "3. แก้แล้ว backfill วันที่ขาดด้วย")
+                    send_telegram_notification(bt, cid, msg)
+                    out['notified'] = True
+                else:
+                    out['notified'] = False
+                    out['notify_error'] = 'ยังไม่ได้ตั้งค่า Telegram bot token / chat id'
+            except Exception as e:
+                out['notified'] = False
+                out['notify_error'] = str(e)
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"❌ sync-watchdog error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -240,3 +240,67 @@ python3 audit_zones.py --refresh
 | 9 ส.ค. 2026 | ล้มเหลว 25 ครั้ง |
 | 8 ส.ค. 2026 | ล้มเหลว 5 ครั้ง |
 | 6 ส.ค. 2026 | ล้มเหลว 3 ครั้ง |
+
+---
+
+# ภาคผนวก — auto-sync หยุดเอง (พ.ย. 2026)
+
+## อาการ
+
+ข้อมูลหยุดที่ 3 พ.ย. ทั้งที่ประวัติ Auto Export ขึ้น `success` ทุกแถว
+
+## สาเหตุ
+
+GitHub ปิด scheduled workflow ให้เอง
+
+```
+TechTrade Scheduled Tasks  → state = disabled_inactivity
+commit ล่าสุด              : 2 ก.ย. 2026
+cron รันครั้งสุดท้าย        : 1 พ.ย. 2026   ← ครบ 60 วัน
+```
+
+GitHub ปิด workflow ที่ตั้งเวลาไว้อัตโนมัติเมื่อ repo ไม่มีความเคลื่อนไหวครบ 60 วัน
+และไม่แจ้งเตือนชัดเจน ตัวที่คอยแจ้งเตือนก็อยู่ใน workflow ที่ถูกปิดไปด้วย
+
+`TechTrade Backfill` ไม่โดนปิดเพราะเป็น `workflow_dispatch` ไม่ใช่ `schedule`
+
+## แก้แล้ว 2 ชั้น
+
+### 1. ย้าย cron หลักไป Vercel
+
+`vercel.json`
+
+| path | เวลา (UTC) | เวลาไทย |
+|---|---|---|
+| `/api/admin/auto-export-cron` | `20 17 * * *` | 00:20 |
+| `/api/admin/sync-watchdog` | `0 4 * * *` | 11:00 |
+
+Vercel cron ไม่มีกลไกปิดตัวเองแบบ GitHub
+
+**ข้อจำกัดที่ต้องรู้** — Hobby plan รันได้วันละครั้ง และคลาดเคลื่อนได้ถึง 59 นาที
+จึงทำให้ `auto-export-cron` วน chunk ต่อเนื่องในคำขอเดียวจนครบ (budget 250s
+ปรับด้วย env `CRON_REQUEST_BUDGET`) แทนที่จะพึ่งการถูกยิงซ้ำทุก 15 นาที
+
+Vercel ใส่ `Authorization: Bearer $CRON_SECRET` ให้อัตโนมัติถ้าตั้ง env ไว้
+ตัวตรวจ auth เดิมจึงใช้ได้ไม่ต้องแก้
+
+GitHub Actions ยังเปิดทิ้งไว้ได้เป็นตัวสำรอง — ยิงซ้ำไม่เกิดผลเสียเพราะ
+`sync_progress` กันการทำซ้ำอยู่แล้ว
+
+### 2. Watchdog แจ้งเตือนเมื่อเงียบ
+
+`GET /api/admin/sync-watchdog`
+
+- เงียบเกิน 36 ชม. (ปรับด้วย `?hours=`) → แจ้ง Telegram
+- ไล่ย้อน 7 วัน (`?days=`) หาวันที่ sync ไม่ครบทุก zone
+- ข้อความบอกวิธีตรวจ: GitHub ปิด workflow / Eve credentials / backfill วันที่ขาด
+- ไม่ส่ง `CRON_SECRET` = โหมดอ่านเท่านั้น ไม่แจ้งเตือน (ใช้เช็คด้วยมือได้)
+- `?notify=0` ปิดการแจ้งเตือนชั่วคราว
+
+สำคัญ: watchdog ถูกยิงจาก Vercel ไม่ใช่ GitHub จึงไม่ตายไปพร้อมกับสิ่งที่มันเฝ้าดู
+
+## ถ้าเกิดอีก
+
+1. https://github.com/astronien/TechTrade/actions → TechTrade Scheduled Tasks → Enable workflow
+2. Backfill วันที่ขาดผ่าน Actions → TechTrade Backfill
+3. ตรวจผล `GET /api/admin/sync-watchdog`

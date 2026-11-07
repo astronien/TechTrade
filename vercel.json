@@ -28,8 +28,12 @@
   ],
   "crons": [
     {
-      "path": "/api/admin/run-bot",
-      "schedule": "0 0 * * *"
+      "path": "/api/admin/auto-export-cron",
+      "schedule": "20 17 * * *"
+    },
+    {
+      "path": "/api/admin/sync-watchdog",
+      "schedule": "0 4 * * *"
     }
   ]
 }
